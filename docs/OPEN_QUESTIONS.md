@@ -118,6 +118,9 @@ built instead?
 
 ### DECISION #2 — Is an ad a frozen bundle or a recipe over components [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option B** (recipe + materialised `config_generations`). Ratified as
+> written in the D2/D5/D7–D14 batch. See `docs/DECISIONS.md`. Retained below for the record.
+
 **Blocking:** D3, D4, D14, and the shape of every stored fact.
 
 **Context**
@@ -277,6 +280,10 @@ primary?
 
 ### DECISION #5 — Where the fold starts [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option C, amended.** `create_ad` + `launch`; draft edits outside the
+> log. `archived` is **kept in the type** as a state reachable by no lever and named in the
+> README, rather than dropped from the enum. See `docs/DECISIONS.md`.
+
 **Blocking:** D6, D7, D14, and whether the log is self-contained.
 
 **Context**
@@ -328,6 +335,11 @@ Add `create_ad` + `launch` as decisions, with draft edits explicitly outside the
 ---
 
 ### DECISION #6 — How far to extend the lever set [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 by D26 — option A.** The lever set is `create_ad`, `launch`, `pause`,
+> `resume`, `set_budget`, `swap_component`. `archive` (cut #3), `clone_ad` (cut #5) and the
+> `Recommendation` / approval flow (cut #6) are on `docs/SCOPE.md` §4's cut line with reasons.
+> Retained below as presented, for the record.
 
 **Blocking:** the Decision loop build, D19, and whether the loop actually closes.
 
@@ -386,6 +398,9 @@ slot?
 
 ### DECISION #7 — Store the fold, the log, or both [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option C.** Log authoritative; `ads` and `config_generations` are
+> rebuildable projections; the UI reads projections. See `docs/DECISIONS.md`.
+
 **Blocking:** D8, D14, every read path.
 
 **Context**
@@ -428,6 +443,11 @@ Log authoritative + rebuildable projections, UI reads projections — approved?
 ---
 
 ### DECISION #8 — Persistence boundary and store [LOAD-BEARING]
+
+> **ANSWERED 2026-09-03 — option A, driver `node:sqlite`.** Server owns every fact; client owns
+> nothing durable. Constitutes the `CLAUDE.md` §5 sign-off — of *no new dependency*. Verified on
+> the machine: Node v24.14.0, loads unflagged, WAL and manual transactions confirmed. Flip
+> condition to `better-sqlite3` recorded in `docs/DECISIONS.md`.
 
 **Blocking:** D9, D10, D17, and the "survives a restart" hard requirement.
 
@@ -485,6 +505,9 @@ SQLite on the server, client stateless — approved, and which driver (`node:sql
 
 ### DECISION #9 — Aggregation granularity [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option C.** Raw retained, minute-bucket rollups as a rebuildable
+> projection, hours derived from minutes. See `docs/DECISIONS.md`.
+
 **Blocking:** D10, D11, chart read paths.
 
 **Context**
@@ -532,6 +555,9 @@ Raw + minute rollups as a rebuildable projection — approved? Minute the right 
 
 ### DECISION #10 — Where CTR, CPA and ROAS are computed [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option B.** Rollups store only additive counts; every ratio is derived
+> at read time. See `docs/DECISIONS.md`.
+
 **Blocking:** D11, chart read paths.
 
 **Context**
@@ -572,6 +598,10 @@ Additive counts stored, ratios always derived — approved?
 ---
 
 ### DECISION #11 — Compaction, and what it forecloses [LOAD-BEARING]
+
+> **ANSWERED 2026-09-03 — option A, with C specified.** No compaction is built; C is written up
+> in the README as the policy we would adopt and what it would foreclose. **The recommendation
+> below changed** — it was C, and D26's cut #8 moved it to A. See `docs/DECISIONS.md`.
 
 **Blocking:** the README's honest-limits section; retention behaviour under long runs.
 
@@ -626,6 +656,10 @@ you prefer no compaction with the reasoning written up instead?
 
 ### DECISION #12 — Extend the event envelope with `received_at` and `ingest_seq` [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option C.** Both fields, server-assigned at the ingest boundary, never
+> emitter-assigned. Contract extension — gets a `BRIEF_GAPS.md` entry and a README callout per
+> L40. See `docs/DECISIONS.md`.
+
 **Blocking:** D13, D14, D15, D16, D18, D19, D21, and the flagship late-conversion requirement.
 
 **Context**
@@ -678,6 +712,11 @@ assigned) — approved?
 
 ### DECISION #13 — Lateness horizon and restatement policy [LOAD-BEARING]
 
+> **ANSWERED 2026-09-03 — option A, amended.** Fixed 72h horizon, configurable and displayed,
+> ratified **on settlement grounds** (the scoring justification lost its consumer when D26 cut
+> #1 removed scoring). Demo-mode horizon shortening is **not optional** and is recorded as P16 in
+> `docs/SCOPE.md` §2. See `docs/DECISIONS.md`.
+
 **Blocking:** D14, D19, D11, and every "is this number final" affordance in the UI.
 
 **Context**
@@ -720,6 +759,9 @@ approved?
 ---
 
 ### DECISION #14 — Which config generation credits a late conversion [LOAD-BEARING]
+
+> **ANSWERED 2026-09-03 — option B.** Conversions are credited to the config generation live at
+> the time of the **attributed click**. See `docs/DECISIONS.md`.
 
 **Blocking:** component-level metrics; the honesty of every post-swap number.
 
@@ -1084,6 +1126,11 @@ Follows D1 — extend to four slots, or keep two and call it out?
 
 ### DECISION #24 — How we demonstrate traceability [needs a decision]
 
+> **RESOLVED 2026-09-03 by D26 — option D, in full.** Drill-down (P12), `trace <event_id>`
+> endpoint (P13) and the rollup-vs-raw agreement test (P14) all ship. The trace endpoint was
+> explicitly protected when pacing needed funding, on the ground that it *is* the "life of one
+> event" deliverable (L155). Retained below as presented, for the record.
+
 **Blocking:** nothing structurally, but it is the deliverable most directly tied to the grading
 criteria and it shapes what the read model must expose.
 
@@ -1116,6 +1163,81 @@ identical numbers assembled from stored facts.
 **What I need from you**
 Is the full B+C+D worth the build slot, or should traceability stop at the click-through
 drill-down?
+
+---
+
+### DECISION #26 — Which slice ships (Phase 1 scope depth) [LOAD-BEARING]
+
+> **ANSWERED 2026-09-03 — option A, amended.** Pacing reinstated and funded from the data-health
+> panel; trace endpoint kept; the approval flow does **not** displace click-time attribution.
+> Recorded in `docs/DECISIONS.md`. Also resolves the residue of D6 and fixes D24 at level D.
+> Retained below as presented, for the record.
+
+**Blocking:** `docs/SCOPE.md`.
+
+**Context**
+D1 fixed *which surfaces*; it did not fix *depth*. TRIAGE #1 costed the mandatory event work at 8
+plan items (P1–P8). Roughly 55% of the build budget is a spine common to every candidate — server
++ SQLite + separate simulator process + SSE (~15%), P1/P2 ingest boundary (~10%), P3/P4 fold and
+`ads` projection (~10%), P6 minute rollups (~8%), Signal screen + action console + decision log +
+persistence across refresh and restart (~12%). The slices differ in how the remaining ~45% is
+spent, and in which graded criterion goes thin if time runs out.
+
+**Options**
+
+**A) Integrity-first** — the 45% goes to event correctness and traceability: P5 generations (8%),
+P7 restatement (10%), P8 click-time attribution + orphans (10%), drill-down (8%), trace endpoint
++ agreement test (5%), settlement states + data-health (4%).
+- Proves: the brief's hardest ask — *"the stream will misbehave"* — as mechanism, not prose;
+  traceability executable rather than claimed.
+- Leaves unproven: that the loop compounds. No scoring; `set_budget` changes a number without
+  changing the world; human-in-the-loop is prose only.
+- Forecloses: scoring, approval flow, variant comparison as demoed capability.
+- Reversal cost: **low** — everything cut is additive on this spine.
+- Biggest risk: reads as a data pipeline with a chart, which is the criterion (L151, *"feel like
+  a product"*) it is thinnest on. Second: P7+P8 is the highest defect-density code in the project
+  and also the thing being claimed loudest.
+
+**B) Loop-first** — the 45% goes to the Decision loop as a product: P7 restatement (10%), budget
+pacing (6%), scoring withheld until settled (8%), `system:fatigue_rule` proposing with evidence +
+`Recommendation` entity + approval UI (14%), drill-down only (7%). Drops P5 and P8.
+- Proves: the premise's strongest reading — a portfolio operator with a human in the loop exactly
+  as Background L28 defines it; two levers visibly move the world.
+- Leaves unproven: which creative earned a late conversion; rollup-vs-raw agreement as a runnable
+  check; orphan re-attribution.
+- Forecloses: contradicts D1 consequence 3 — generations no longer get built, so component-level
+  metrics are not "one join away"; retrofitting means re-resolving ingested events.
+- Reversal cost: medium-high for generations.
+- Biggest risk: scope creep — the approval flow is a second entity plus a UI plus a rule engine,
+  and its 14% is the least reliable number on the page. Not cheaper than A; the same budget spent
+  on UI instead of correctness.
+
+**C) Component-truth** — re-opens D1 toward its option B: P5 (8%), P7 (8%), component library +
+live reverse join + component-level performance across swaps (15%), `variant_group_id` +
+comparison view (8%), drill-down (6%). Decision loop thin.
+- Proves: *"one video in twelve ads"* in product rather than prose, including across swaps.
+- Leaves unproven: the loop — the deliverable's one non-negotiable would be the thinnest part.
+- Forecloses: requires rewriting D1, TRIAGE #1 and the P1–P8 costing before `SCOPE.md` can be
+  written; that rewrite is real cost.
+- Reversal cost: **high** — largest UI surface of the three.
+- Biggest risk: the most expensive slice, not an equal-cost reallocation; highest chance of
+  arriving unfinished, and what arrives unfinished is the stated minimum.
+
+**Recommendation**
+A, with budget pacing reinstated. A's 45% is back-end work that is deterministic, seedable and
+assertable — it can be finished and *proved* finished — where B's 45% is UI and a second entity,
+the category that overruns invisibly. So the comparison is not substance versus finishability: A
+carries the most engineering substance and has the more reliable estimate. What A costs is demo
+charisma, and pacing buys most of that back, because it gives a second lever where the world
+visibly responds instead of resting the whole claim on `pause`. Stated plainly: this largely
+re-affirms D1 rather than changing course; its value over D1 is fixing depth, putting scoring,
+pacing, clone/variant and the approval flow on the cut list explicitly and with reasons.
+
+**What I need from you**
+A (with pacing reinstated), B, or C — and if A, is giving up the human-in-the-loop approval demo
+acceptable, or should it displace click-time attribution?
+
+**Answer:** A, amended. See `docs/DECISIONS.md` § DECISION #26.
 
 ---
 

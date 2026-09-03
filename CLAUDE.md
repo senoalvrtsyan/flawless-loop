@@ -18,8 +18,14 @@ Three surfaces exist in the brief:
 - **Signal** — live event stream, metrics, visual interpretation. **Cannot be cut.**
 - **Decision loop** — action console + decision log.
 
-Stack: **Node.js + TypeScript (strict) + React**. Everything else is an open
-decision until it appears in `docs/DECISIONS.md` as ACCEPTED.
+Stack: **Node.js + TypeScript (strict) + React**, with **SQLite on the server via
+the built-in `node:sqlite`** — settled by D8, which is a §5 sign-off of *no new
+dependency*. **Node 24+ is the floor** (`node:sqlite` is unflagged there); pin it
+in `engines` and `.nvmrc`. `better-sqlite3` is not used; the condition under which
+we would switch is written into D8 so it is not a later judgement call.
+
+Everything else is an open decision until it appears in `docs/DECISIONS.md` as
+ACCEPTED.
 
 ---
 
@@ -83,6 +89,12 @@ question, the options as presented, what was chosen, the rationale in the
 human's words, consequences, **what it forecloses**, and a one-line
 "how I'd defend this in review".
 
+The options may be compressed to a line each **only if** the full analysis is
+preserved in `docs/OPEN_QUESTIONS.md` and the entry points at it. The rationale
+may not be compressed: it is quoted verbatim, never paraphrased. Where one
+sentence from the human ratifies several decisions, record the mapping
+explicitly rather than restating it in each entry's prose.
+
 Rationale: the brief requires that every choice be explainable. A decision the
 human cannot defend is worth less than a worse decision they can.
 
@@ -123,6 +135,11 @@ fine and encouraged; files on disk outside `docs/` are not.
 - **No drive-by refactors.** No renaming, reformatting, or "while I was in
   there" changes. Propose them as separate chunks.
 - **No new dependencies without a decision.** Same protocol as §3.
+- **Nothing writes a projection except the replay/apply function.** Per D7 the
+  decision log is authoritative and `ads` / `config_generations` / rollups are
+  rebuildable projections. A chunk that mutates a projection directly breaks the
+  one property the design is built to demonstrate, and it will not show up as a
+  test failure — so it is a rule, not a preference.
 - Every chunk must leave the app runnable. No broken intermediate states.
 - If a chunk reveals the design was wrong, **stop coding and reopen the design
   doc**. Do not silently patch around it.
@@ -209,5 +226,7 @@ The docs are the memory; the conversation is scratch space.
 - Any number it puts on screen is traceable to events.
 - Survives a refresh if it touches state.
 - Verifiable by hand in the browser or terminal, with steps given.
-- `docs/BUILD_PLAN.md` item ticked; `docs/DECISIONS.md` and
-  `docs/BRIEF_GAPS.md` updated if the chunk touched either.
+- `docs/BUILD_PLAN.md` item ticked; `docs/DECISIONS.md`, `docs/BRIEF_GAPS.md`
+  and `docs/SCOPE.md` updated if the chunk touched any of them. `SCOPE.md`
+  §2–§4 is copied into the README verbatim, so a scope change is a README
+  change and must land in that block.

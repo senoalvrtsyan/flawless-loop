@@ -1,0 +1,119 @@
+# SCOPE.md
+
+Phase 1 output. **Status:** the scope of record, per `docs/DECISIONS.md` § D1, § T1, § D26.
+**Date:** 2026-09-03. Plan items P1–P8 are T1's costing of the FIX bucket; P9–P15 pre-stage
+`docs/BUILD_PLAN.md` (Phase 4) and are not that document.
+
+**This re-affirms D1 rather than changing course.** D1 chose the surfaces; D26 chose the depth.
+Nothing about which surfaces are real has moved. What D26 adds is an explicit, ordered cut line.
+
+---
+
+## 1. The slice in one sentence
+
+A strategist's cockpit over ~8–12 seeded live ads, where every performance number on screen is
+derived from a persisted event stream, late-arriving conversions are credited to the creative
+that earned them and visibly restate the numbers they land in, and two levers — `pause` and
+`set_budget` — change what the world does next.
+
+---
+
+<!-- README-VERBATIM-BEGIN — sections 2, 3 and 4 go into the README unchanged -->
+
+## 2. What's real
+
+**Surfaces:** Signal, built deep. Decision loop, working but plain.
+
+| # | Item | Closes |
+|---|---|---|
+| P1 | Ingest boundary: `received_at` + `ingest_seq` envelope extension, dedupe on `event_id`, all deliveries persisted, non-negative-integer validation | G16 |
+| P2 | Signal types + simulator emitter: `click_id` distinct from `event_id`, spend as fixed-interval deltas | G17, G19 |
+| P3 | `create_ad` + `launch` decision variants, with compare-and-swap validation | G33 |
+| P4 | Config fold + rebuildable `ads` projection from the decision log | G33 |
+| P5 | `config_generations`, maintained on every config-changing decision | G01 |
+| P6 | Minute-bucket rollups + settlement state from the lateness horizon, incl. the account-timezone constant | G42, G04 |
+| P7 | Restatement path: a late arrival recomputes affected buckets and marks them restated | G42 |
+| P8 | Click-time attribution for conversions + orphan parking / provisional counting | G01, G42 |
+| P9 | SSE transport with `Last-Event-ID` resume; live Signal screen; ratios derived at read from additive counts | — |
+| P10 | Action console (`pause`, `set_budget`, `swap_component`) + decision log | — |
+| P11 | Budget as a pacing parameter on the simulator's diurnal rate curve | G04, G47 |
+| P12 | Traceability drill-down: any number opens the exact contributing raw events, re-summed client-side and asserted against the displayed figure | — |
+| P13 | `trace <event_id>` endpoint — the "life of one event" made executable: emission → stored fact → buckets updated → metrics changed → screen elements affected | — |
+| P14 | Rollup-vs-raw agreement test across every bucket, runnable on demand | — |
+| P15 | Read-only component screen: the reverse join over live data (D1's specified sketch) | — |
+| P16 | Demo-mode lateness horizon: shortening the horizon re-evaluates which buckets are settled | D13 |
+
+**P16 is not optional.** With a 72h horizon and 7d of backfill, backfilled data is settled and
+live data is not, so shortening the horizon is the only way a restatement happens on camera. Its
+cost is not the control but the recompute — it is a settlement re-evaluation path, not a config
+toggle.
+
+**All eight FIX items ship in full.** Nothing in the mandatory bucket was traded to fund P11.
+Traceability ships at D24 level D — drill-down, trace endpoint, and agreement test — because
+hard requirement #5 and the "life of one event" deliverable are the same thing, and that line was
+protected in preference to presentation of data-health.
+
+**Guaranteed by construction:** state survives a page refresh and an app restart, including the
+simulator process being killed and restarted mid-demo; every performance number is derived from
+the signal stream and every config value from the decision log folded over its origin; configs,
+signals and levers are three distinct types in distinct stores.
+
+## 3. What's sketched, and in what form
+
+| Sketched | Form |
+|---|---|
+| Workbench — component library, ad builder, variant model | Annotated mockup, **plus** P15: one read-only component screen showing "used in N live ads" as a working reverse join over live data. Current-state only — "used in N ads at time T" and "ever" are not answerable. |
+| Component versioning (mutate / copy-on-write / immutable once live) | README prose: copy-on-write with `lineage_id` / `version` / `parent_id`, picked and defended, per L111. No editor ships, so nothing exercises it at runtime. |
+| Component-level performance across swaps | README section showing the **real query** against real data — `config_generations` exists (P5), so this is one join from working rather than hypothetical. |
+| The five remaining SPECIFY findings (G10, G18, G28, G34, G50) | README design notes, per T1. |
+| `Ad.status: "archived"` | Kept in the type, named in the README as a state **reachable by no lever**, because that is a scope cut (cut #3) rather than a claim about the domain. The fold carries one branch for it that can never fire, written to say so. Per D5. |
+| Tolerated stream misbehaviours (G43 retractions, G15 audience overlap, G21 gap detection, G46 transient funnel violations, G05 USD-only, G29 no portfolio entity) | README's named-limits section, per L123 — which we tolerate, which would break us. |
+
+## 4. What's cut
+
+Ordered **cheapest to reinstate first**. If budget frees up, take from the top.
+
+| # | Cut | Why — one sentence |
+|---|---|---|
+| 1 | Decision scoring (before/after windows, withheld until settled) | It reads rollups that already exist, so it is the cheapest thing to add back and the least costly to defer. |
+| 2 | Data-health panel as a designed surface | Its counters are still computed and rendered plainly; only the designed panel is cut, and it is what funds budget pacing. |
+| 3 | `archive` lever | One decision variant reaching a terminal state that nothing in the graded criteria exercises. |
+| 4 | `variant_group_id` + sibling comparison view | The field is free but the view is not, and with the Workbench sketched there is no surface for it to live on. |
+| 5 | `clone_ad` | It needs the variant grouping above plus a builder flow that the sketched Workbench does not have. |
+| 6 | Human-in-the-loop approval flow (`Recommendation` entity, `system:fatigue_rule`, approval UI) | It is the most product-like moment in the brief, and it proves nothing about the event path that Signal is graded on. |
+| 7 | Component versioning as a built flow | Copy-on-write is a decision to defend in prose, not a decision that needs an editor to be right. |
+| 8 | Compaction of raw events | Nothing needs compacting inside a seven-day demo horizon, so the policy and what it would foreclose are stated instead of implemented. |
+| 9 | Multi-currency, campaign/portfolio entity, conversion kinds, retraction/void event | Each buys realism at the cost of a graded criterion elsewhere, and each is named as a deliberate omission rather than left silent. |
+
+<!-- README-VERBATIM-END -->
+
+---
+
+## 5. What this changes in the register
+
+- **G04's budget-pacing residue moves SPECIFY → FIX** (P11), reversing trim #2 of T1 — the item
+  T1 itself named as "reinstate first". `set_budget` now visibly changes the event rate, so
+  *"the world responds"* no longer rests entirely on `pause`.
+- **G47** (spend ≤ budget enforced nowhere) is answered by P11 as pacing, not as a hard cap; no
+  fifth ad state is invented, and overspend tolerance becomes a stated simulator parameter.
+- Buckets are now **FIX 7 · SPECIFY 5 · NAME 0**.
+- **G50** (`Ad.status` has dead states) is now half-answered in build and half in prose: `draft →
+  live` is reachable via P3's `launch`; `archived` stays in the type, unreachable and named. Per
+  D5, chosen over dropping the enum member so that reinstating cut #3 stays a one-variant change
+  rather than a type change through the fold, the projection and persisted rows.
+- **P16** was added after `SCOPE.md` was first written, on D13's ratification. It is the only item
+  added since; nothing was removed.
+
+## 6. Cost note
+
+P11 was priced at 6% standalone in D26's option A. Its marginal cost is ~4%, because the
+simulator needs a diurnal rate curve regardless and budget-as-pacing is a multiplier on that
+curve rather than new machinery. It is funded from cut #2, which is ~4%. The arithmetic balances;
+traceability was not touched.
+
+## 7. What this scope cannot absorb
+
+The slice can **grow** — every cut in §4 is additive on top of this spine. It cannot **shrink**
+without giving up a graded criterion: dropping P7 or P8 would leave late conversions detected but
+not handled, which is the gap between hard requirement #4 and a paragraph about it. The lever for
+further reduction is D1's sketch boundary, not the P1–P8 list.

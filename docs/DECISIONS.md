@@ -13,7 +13,21 @@ Ids match `docs/OPEN_QUESTIONS.md` §B. `G##` references point into `docs/BRIEF_
 |---|---|---|---|
 | D1 | Which surfaces are built for real | **ACCEPTED — A** | 2026-09-03 |
 | T1 | Triage of the blocking findings | **ACCEPTED** | 2026-09-03 |
-| D2–D25 | — | open | — |
+| D26 | Which slice ships (Phase 1 scope depth) | **ACCEPTED — A, amended** | 2026-09-03 |
+| D2 | Ad: frozen bundle or recipe | **ACCEPTED — B** | 2026-09-03 |
+| D5 | Where the fold starts | **ACCEPTED — C, amended** | 2026-09-03 |
+| D7 | Store the fold, the log, or both | **ACCEPTED — C** | 2026-09-03 |
+| D8 | Persistence boundary and store | **ACCEPTED — A, `node:sqlite`** | 2026-09-03 |
+| D9 | Aggregation granularity | **ACCEPTED — C** | 2026-09-03 |
+| D10 | Where ratios are computed | **ACCEPTED — B** | 2026-09-03 |
+| D11 | Compaction | **ACCEPTED — A, C specified** | 2026-09-03 |
+| D12 | `received_at` + `ingest_seq` | **ACCEPTED — C** | 2026-09-03 |
+| D13 | Lateness horizon and restatement | **ACCEPTED — A, amended** | 2026-09-03 |
+| D14 | Which generation credits a late conversion | **ACCEPTED — B** | 2026-09-03 |
+| F1 | Disposition of `Ad.status: "archived"` | **DECIDED — keep in the type** | 2026-09-03 |
+| F2 | Demo-mode horizon shortening is a build item | **ACCEPTED** | 2026-09-03 |
+| D6, D24 | — | resolved by D26 | 2026-09-03 |
+| D3, D4, D15–D23, D25 | — | open | — |
 
 ---
 
@@ -203,3 +217,522 @@ on events). Three trims brought it to 6:
 Every blocking finding got a disposition rather than a promise, the FIX bucket was costed at 8
 reviewable chunks before any of it was built, and the three things cut are each cut for a stated
 reason with the loss named — including the one I'd take back first if time allowed.
+
+---
+
+## DECISION #26 — Which slice ships (Phase 1 scope depth)
+
+**Status:** ACCEPTED — option A, amended · **Date:** 2026-09-03 · **Tag:** [LOAD-BEARING]
+**Depends on:** D1, T1 · **Resolves:** the residue of D6; fixes D24 at level D
+
+### Question
+
+D1 fixed which surfaces are real. It did not fix **depth** — how much of the event-correctness
+and decision-loop machinery actually ships. About 55% of the build budget is a spine common to
+every candidate; the question is how the remaining ~45% is spent, and which graded criterion is
+left thin if time runs out.
+
+### Options as presented
+
+**A) Integrity-first.** The 45% goes to P5 generations, P7 restatement, P8 click-time attribution
++ orphans, and traceability at D24 level D. Strongest on Data & events; thinnest on "feels like a
+product".
+
+**B) Loop-first.** The 45% goes to budget pacing, decision scoring, and a `Recommendation` /
+human-in-the-loop approval flow. Drops P5 and P8, so a late conversion is credited to the ad, not
+to the generation live at its click. Same cost as A, spent on UI and a second entity.
+
+**C) Component-truth.** Re-opens D1 toward its option B: a real Workbench read surface with the
+temporal reverse join, Decision loop thin. Most expensive; requires rewriting D1, T1 and the
+P1–P8 costing first.
+
+Full option analysis, with pros/cons/forecloses/reversal cost and the effort split per line item,
+is retained in `docs/OPEN_QUESTIONS.md` § DECISION #26.
+
+### Chosen
+
+**A, amended three ways:**
+
+1. **Budget pacing reinstated**, funded from the data-health panel — not from traceability.
+2. **The `trace <event_id>` endpoint is kept**, because it *is* the "life of one event"
+   deliverable (L155), not a nice-to-have. Traceability therefore ships at **D24 level D** in
+   full: drill-down + trace endpoint + rollup-vs-raw agreement test.
+3. **No swap.** The human-in-the-loop approval flow does **not** displace click-time attribution;
+   it is cut.
+
+### Rationale — Seno's words
+
+> "A with pacing, funded from the data-health polish, keep the trace endpoint (it's the 'life of
+> one event' deliverable).
+>
+> No swap. Click-time attribution is req #4; the approval flow proves nothing about the event
+> path. Cut list with the reason stated.
+>
+> Say plainly it re-affirms D1."
+
+### Consequences
+
+1. **It re-affirms D1 rather than changing course.** Stated plainly here and in `SCOPE.md`. The
+   value D26 adds over D1 is depth: scoring, pacing, clone/variant and the approval flow are now
+   on an explicit, ordered cut list with reasons, instead of being ambient.
+2. **All eight FIX plan items ship.** P1–P8 are in scope in full; nothing in the FIX bucket was
+   traded away to fund the amendment.
+3. **G04's budget-pacing residue moves SPECIFY → FIX**, reversing trim #2 of TRIAGE #1 — which
+   is exactly the item T1 named as "reinstate first if budget frees up". `set_budget` now visibly
+   changes the world, so *"the world responds"* (L151) no longer rests entirely on `pause`.
+4. **The pacing arithmetic balances at ~4%, not 6%.** Pacing was priced standalone; the simulator
+   needs a diurnal rate curve regardless, so budget-as-pacing is a multiplier on an existing curve
+   rather than new machinery. What is actually spent is the data-health **panel** as a designed
+   surface; the counters are still computed and rendered plainly.
+5. **Traceability is the protected line.** Funding pacing out of the panel rather than the trace
+   endpoint records a priority: the two hard requirements #5 (traceability, demonstrable) and the
+   "life of one event" deliverable outrank presentation of data-health.
+6. **Nine cuts, ordered cheapest-to-reinstate-first**, in `docs/SCOPE.md` §4. Decision scoring
+   sits at the top because it reads rollups that already exist.
+
+### What it forecloses
+
+- **Decision scoring in-product.** The log records what was tried and why, not whether it worked.
+  Cheapest add-back; sits first on the cut line.
+- **The human-in-the-loop demo** — system proposes with evidence, human approves. This is the most
+  product-like moment available in the brief and the slice does not have it. Cut on the stated
+  ground that it proves nothing about the event path, which is what Signal is graded on.
+- **`clone_ad`, `archive`, relaunch, variant comparison** — the *"compounding what each ad teaches
+  into the next one"* premise (L34) stays described rather than mechanised.
+- **Component versioning as a built flow** and component-level performance as a demoed capability
+  — already accepted under D1, unchanged here.
+- Reversal is **cheap in one direction only**: everything cut is additive on top of this spine, so
+  the slice can grow. It cannot shrink without giving up a graded criterion (see T1).
+
+### How I'd defend this in review
+
+The 45% of budget that was mine to allocate went to the two things the brief says it looks
+hardest at — late-arriving conversions handled end to end, and every number on screen walkable
+back to the raw events that produced it — plus the one lever that makes the world visibly respond;
+everything else is on a written cut list ordered by what I'd reinstate first, with the reason for
+each cut stated rather than implied.
+
+---
+
+# RATIFICATION PASS — D2, D5, D7–D14
+
+**Date:** 2026-09-03. Ten decisions ratified in one batch, before `DESIGN.md`, because
+`docs/SCOPE.md` was costed against these recommendations rather than against decisions. Each
+entry below carries its own chosen option, consequences, what it forecloses, and a defence line;
+the **full option analysis for every one of them is retained in `docs/OPEN_QUESTIONS.md` §B** and
+is not duplicated here.
+
+**Rationale — Seno's words (covering the batch):**
+
+> "All ten ratified. D5 with archived — decide: leave it in the type as an unreachable state and
+> name it in the README, or drop it and note the divergence. Your call, but pick one explicitly.
+> D11 as 'no compaction, policy written up' — agreed, and better than C. D13 on settlement
+> grounds, and put demo-mode horizon shortening in BUILD_PLAN as an item; with 72h and 7d
+> backfill it's the only way a restatement happens on camera, so it's not optional. D8
+> node:sqlite — approved, and the pragma check was the right way to answer that."
+
+Three of the ten were flagged as moved before ratification (D5 qualified, D11 changed, D13
+qualified); the other seven were ratified as written.
+
+### Wording of record
+
+Which of Seno's words ratified which decision. Verbatim; no sentence is paraphrased into an
+entry's prose without appearing here first.
+
+| # | Seno's words |
+|---|---|
+| D2 | *"All ten ratified."* |
+| D5 | *"D5 with archived — decide: leave it in the type as an unreachable state and name it in the README, or drop it and note the divergence. Your call, but pick one explicitly."* |
+| D7 | *"All ten ratified."* |
+| D8 | *"D8 node:sqlite — approved, and the pragma check was the right way to answer that."* |
+| D9 | *"All ten ratified."* |
+| D10 | *"All ten ratified."* |
+| D11 | *"D11 as 'no compaction, policy written up' — agreed, and better than C."* |
+| D12 | *"All ten ratified."* |
+| D13 | *"D13 on settlement grounds, and put demo-mode horizon shortening in BUILD_PLAN as an item; with 72h and 7d backfill it's the only way a restatement happens on camera, so it's not optional."* |
+| D14 | *"All ten ratified."* |
+
+Also recorded from earlier in the same pass, on the driver question:
+
+> "Also note D8 needs the §5 dependency sign-off; tell me node:sqlite vs better-sqlite3 and why."
+
+and, on this pass's scope:
+
+> "Run the ratification pass now, before DESIGN.md — one message, the six presumed decisions with
+> their recommendations restated in one line each, and flag any where the recommendation has
+> changed since you wrote it. I'll ratify or amend in a batch."
+
+**Count correction, for the record.** That instruction said *six*; `STATUS.md` had said nine in
+prose while its own table spanned ten. The true set presumed by `SCOPE.md` was **ten** — D2, D5,
+D7, D8, D9, D10, D11, D12, D13, D14 — and ten is what was presented and ratified. The
+discrepancy was mine, in `STATUS.md`, and is fixed there.
+
+---
+
+## DECISION #2 — Is an ad a frozen bundle or a recipe over components
+
+**Status:** ACCEPTED — option B · **Tag:** [LOAD-BEARING]
+
+**Question.** L111 asks it directly. Options: A pure recipe (fold on every read) · **B recipe +
+materialised `config_generations`** · C frozen bundle (snapshot payloads at launch).
+
+**Chosen.** B. The authoring model is a recipe — that is what makes reuse and "used in twelve
+ads" possible — and the historical model must be frozen, which is what makes a Tuesday conversion
+attributable to Tuesday's creative. Generations give both.
+
+**Consequences.** `config_generations` (P5) is a projection of the decision log, so it is
+rebuildable and cheap to be wrong about — drop and re-fold. "Config as of T" becomes an indexed
+lookup rather than a fold, which is what D14's click-time attribution needs.
+
+**Forecloses.** Nothing significant; it is derived. C is the option rejected firmly — it looks
+safest and quietly kills the component-reuse premise.
+
+**Defence.** The brief poses this as a binary and the binary is false: generations give a live
+recipe plus an immutable, addressable record of every recipe the ad has ever had.
+
+---
+
+## DECISION #5 — Where the fold starts
+
+**Status:** ACCEPTED — option C, amended · **Tag:** [LOAD-BEARING]
+
+**Question.** L125 claims current config is derivable by folding the log, but nothing creates an
+ad, so the fold has no origin (G33) and half the lifecycle is unreachable (G50). Options: A seed
+ads out-of-band · B add `create_ad` · **C add `create_ad` + `launch`**.
+
+**Chosen.** C. Config is free while `draft` — nothing references it and no events exist — and
+**once live, only levers touch it**. That is a sharper and more defensible rule than the brief's
+own L42, and it makes "the initial state" a real, dated, attributable event.
+
+**Amendment — the `archived` state.** D26 cut the `archive` lever (cut #3), so `archived` is
+reachable by no lever. Seno delegated the call:
+
+> "D5 with archived — decide: leave it in the type as an unreachable state and name it in the
+> README, or drop it and note the divergence. Your call, but pick one explicitly."
+
+I chose to **keep it in the type and name it in the README** rather than drop it from the enum.
+Full disposition in § FOLLOW-UP F1. Reasoning: it is unreachable in our *lever set*,
+not in the *domain* — a scope cut, which belongs on the cut line and in the notes, not encoded
+into the domain type. Narrowing a declared enum is a change to the given contract requiring a
+defence for no gain, and it would turn reinstating cut #3 from one decision variant into a type
+change rippling through the fold, the `ads` projection and persisted rows.
+
+**Consequences.** Draft edits are **not** in the log — acceptable because nothing references them,
+and stated rather than implied. The fold's transition table carries one branch for `archived` that
+can never fire; it is written as self-documenting ("no lever produces this state — see SCOPE §4
+cut #3"), not as a thrown error. `launched_at` becomes a projection with exactly one writer (G02).
+
+**Forecloses.** Nothing, in the keep-it direction — which is the point of choosing it.
+
+**Defence.** Every config write on a live ad is a lever, every state that carries events is
+reachable, and the one state that isn't is a scope cut named in the notes rather than a hole in
+the model.
+
+---
+
+## DECISION #7 — Store the fold, the log, or both
+
+**Status:** ACCEPTED — option C · **Tag:** [LOAD-BEARING]
+
+**Question.** L125 asks it directly. Options: A log only, fold on read · B fold only, log
+decorative · **C both, log authoritative, projections rebuildable**.
+
+**Chosen.** C. The decision log is the source of truth; `ads` and `config_generations` are
+projections rebuilt by replaying it; the UI reads projections.
+
+**Consequences.** Nothing may write a projection except the replay/apply function — this is the
+one discipline the design depends on. The rebuild path doubles as recovery if a projection bug
+ships, and P14's agreement test makes "drop the projections, replay, watch identical numbers come
+back" a runnable check rather than a claim.
+
+**Forecloses.** Nothing — projections are disposable by construction.
+
+**Defence.** It is the only arrangement where the brief's most interesting stated property, that
+config is derivable, is exercised rather than merely asserted.
+
+---
+
+## DECISION #8 — Persistence boundary and store
+
+**Status:** ACCEPTED — option A, driver `node:sqlite` · **Tag:** [LOAD-BEARING]
+**Also constitutes:** the `CLAUDE.md` §5 dependency sign-off — of **no new dependency**.
+
+**Question.** Where does the persistence boundary sit, and on what. Options: **A SQLite on the
+server** · B JSON/NDJSON file · C IndexedDB in the browser · D Postgres via Docker. Then:
+`node:sqlite` vs `better-sqlite3`.
+
+**Chosen.** A with `node:sqlite`. **The boundary: the server owns every fact** — event log,
+decision log, projections. **The client owns nothing durable** — it holds a live view built from
+a snapshot plus a stream, and a refresh rebuilds it from the server.
+
+**Rationale — Seno's words:**
+
+> "D8 node:sqlite — approved, and the pragma check was the right way to answer that."
+
+**Evidence for the driver.** Verified on this machine rather than recalled: Node v24.14.0;
+`node:sqlite` loads unflagged, exporting `DatabaseSync, StatementSync, Session, constants,
+backup`; `PRAGMA journal_mode = WAL` returns `wal`; `busy_timeout` sets; manual
+`BEGIN`/`COMMIT`/`ROLLBACK` behave correctly. It prints one `ExperimentalWarning` on boot.
+`better-sqlite3` adds a `.transaction()` helper and pragma sugar at the cost of a native addon
+whose install can fail on a reviewer's machine when no prebuild matches their Node ABI.
+
+**Consequences.** Prerequisite becomes "Node 24+", pinned in `engines` and `.nvmrc` and stated in
+the README. The transaction wrapper is ~10 lines we write. **Flip condition, fixed now so it is
+not a later judgement call:** if a `node:sqlite` sharp edge costs more than half a chunk, swap to
+`better-sqlite3` — both APIs are synchronous `prepare`/`get`/`all`/`run` behind one store module,
+so the port is mechanical.
+
+**Forecloses.** C is the option rejected on principle: it passes the refresh test and fails the
+premise, because the world becomes an artifact of the viewer's browser profile and the simulator
+would have to run in the client.
+
+**Defence.** The one install failure we cannot debug is on the reviewer's machine, and a built-in
+removes it entirely; what the native addon buys over it is a transaction wrapper we can write in
+ten lines, which is not worth a dependency when "run it in one command" is a stated deliverable.
+
+---
+
+## DECISION #9 — Aggregation granularity
+
+**Status:** ACCEPTED — option C · **Tag:** [LOAD-BEARING]
+
+**Question.** L121: raw forever, or rolled into buckets? Options: A raw only · B rollups only,
+raw discarded · **C hybrid: raw retained, rollups as a rebuildable projection**.
+
+**Chosen.** C, minute as the base bucket, hours derived from minutes.
+
+**Consequences.** "Drill into this bucket" is a query over raw events that must agree with the
+bucket — which is exactly the check the brief asks for, and now a test we run (P14) rather than a
+claim we make. Late arrivals correct rollups through P7's restatement path.
+
+**Forecloses.** Nothing. B was rejected outright: discarding raw events destroys the traceability
+criterion (L143) and makes restatement lossy.
+
+**Defence.** The rollup-versus-raw agreement check is not overhead on top of the deliverable — it
+*is* the deliverable, so building both representations and comparing them is the feature.
+
+---
+
+## DECISION #10 — Where CTR, CPA and ROAS are computed
+
+**Status:** ACCEPTED — option B · **Tag:** [LOAD-BEARING]
+
+**Question.** L121: write time, read time, or cached between? Options: A write time · **B read
+time from stored counts** · C cached read-through.
+
+**Chosen.** B, as a flat rule: **rollups store only additive counts** — impressions, clicks,
+`spend_cents`, conversions, `value_cents` — **and every ratio is derived at read time.**
+
+**Consequences.** Correct at every granularity by construction, because ratios do not aggregate
+but their numerators and denominators do. The restatement path only ever has to fix integers.
+
+**Forecloses.** Nothing. A was effectively disqualified: re-aggregating stored ratios across
+buckets is arithmetically wrong, which is a correctness bug wearing a performance costume.
+
+**Defence.** Store counts, derive ratios — one rule, and it makes "CTR over any window" right
+without a special case anywhere.
+
+---
+
+## DECISION #11 — Compaction, and what it forecloses
+
+**Status:** ACCEPTED — option A, with C specified · **Tag:** [LOAD-BEARING]
+
+**Question.** L121 asks what we compact away and what becomes unanswerable. Options: **A no
+compaction** · B compact raw past the horizon · C compact impressions, retain clicks and
+conversions forever.
+
+**Chosen.** A — no compaction is built. C is written up in the README as the policy we would
+adopt, with what it forecloses stated precisely.
+
+**Changed since first recommended.** The original recommendation was C. D26's cut #8 removed
+compaction from the build, and Seno ratified the change with *"agreed, and better than C."*
+
+**Consequences.** Inside a seven-day horizon there is nothing to compact, so implementing C would
+have meant building a mechanism that never fires during the demo. The brief asks what you compact
+away **and what becomes unanswerable** — a question answerable in full in prose. Retention is
+therefore unbounded in principle, which is stated rather than hidden.
+
+**Forecloses.** Nothing, in the sense that no information is destroyed — which is itself the
+answer to the question the brief asks.
+
+**Defence.** The honest answer for a days-long demo is that nothing needed compacting, paired
+with the exact policy we would adopt and the exact questions it would cost us — rather than
+shipping a code path that never executes in front of the reviewer.
+
+---
+
+## DECISION #12 — Extend the event envelope with `received_at` and `ingest_seq`
+
+**Status:** ACCEPTED — option C · **Tag:** [LOAD-BEARING] · **Contract extension**
+
+**Question.** `ts` is defined as event time, not arrival time (L73), and no arrival field exists
+(G16). Options: A `received_at` only · B `ingest_seq` only · **C both** · D approximate
+client-side.
+
+**Chosen.** C. Both are **server-assigned at our ingest boundary, never emitter-assigned.**
+`received_at` is what the UI shows and what lateness (`received_at − ts`) is computed from;
+`ingest_seq` is the total order for replay, the SSE reconnect cursor via `Last-Event-ID`, and the
+tie-break for colliding timestamps (G22).
+
+**Consequences.** This is the highest-priority extension in the project and gets its own entry in
+the README's extensions section per L40. The asymmetry that makes it urgent: adding the fields
+costs two columns; omitting them costs the data **permanently**, since events already ingested
+cannot be given an arrival time afterwards.
+
+**Forecloses.** Nothing. D was a trap — it makes the mandatory mid-demo refresh (L157) destroy the
+evidence.
+
+**Defence.** Everything the brief says it cares most about in Signal is a statement about arrival
+time, and the given contract has no way to express arrival, so we added the two fields that do
+and kept the emitter out of assigning them.
+
+---
+
+## DECISION #13 — Lateness horizon and restatement policy
+
+**Status:** ACCEPTED — option A, amended · **Tag:** [LOAD-BEARING]
+
+**Question.** Nothing in the brief defines when a period is closed (G42). Options: **A fixed
+horizon** · B dynamic watermark · C never close.
+
+**Chosen.** A at **72h**, configurable and displayed, plus C's as-of stamp on every displayed
+number. Arrivals past the horizon are stored and counted separately, never dropped.
+
+**Qualified since first recommended.** The horizon was justified on two grounds: UI settlement
+states, and guarding decision scoring against lateness bias. D26 cut scoring (cut #1), so only the
+first ground remains — and it carries the horizon alone, since P6/P7 need a settlement boundary to
+mark buckets restated. Separately, "past-horizon arrivals counted but excluded" was a data-health
+display and D26 cut the panel (cut #2); per D26 consequence 4 the counters still compute and
+render plainly. Ratified by Seno explicitly *"on settlement grounds"*.
+
+**Amendment — demo mode is not optional.** Seno's words:
+
+> "put demo-mode horizon shortening in BUILD_PLAN as an item; with 72h and 7d backfill it's the
+> only way a restatement happens on camera, so it's not optional."
+
+Recorded as **P16** in `docs/SCOPE.md` §2. Its real cost is not the control but the recompute:
+shortening the horizon must re-evaluate which buckets are settled, so P16 is a settlement
+re-evaluation path, not a config toggle.
+
+**Consequences.** The UI gains three honest states — live, settled, restated. With 7d backfill and
+a 72h horizon, backfilled data is settled and live data is not, which is why P16 exists.
+
+**Forecloses.** Genuinely-late events past the horizon are excluded from headline numbers —
+mitigated by counting and displaying them, because an honest exclusion is a feature and a silent
+one is the bug the brief warns about.
+
+**Defence.** A fixed, stated, adjustable horizon is exactly the *"well-chosen heuristic, honestly
+presented with its limits"* the brief prefers, and shortening it live is how the reviewer watches
+a number restate rather than being told that it would.
+
+---
+
+## DECISION #14 — Which config generation credits a late conversion
+
+**Status:** ACCEPTED — option B · **Tag:** [LOAD-BEARING]
+
+**Question.** A conversion arrives Thursday for a Tuesday click on an ad whose video was swapped
+Wednesday. Options: A credit the generation live at the conversion's `ts` · **B credit the
+generation live at the attributed click's `ts`** · C credit at `received_at`.
+
+**Chosen.** B, stated once and applied everywhere: **conversions are credited to the config
+generation that was live at the time of the attributed click.**
+
+**Consequences.** Requires resolving the click, hence orphan parking and provisional counting
+(P8, D16). A conversion can land in a settled bucket, forcing restatement — which is the
+machinery P7 builds anyway, so the marginal cost is low and the design is coherent rather than
+incremental.
+
+**Forecloses.** A was the tempting shortcut that silently rewards the wrong creative — a post-swap
+creative collecting a windfall from its predecessor, which is precisely backwards for evaluating
+the swap. C makes attribution a function of our own server's latency.
+
+**Defence.** It is the only rule under which "did the swap help?" is answerable, and D26 protected
+it explicitly on the ground that click-time attribution is hard requirement #4 and the approval
+flow proves nothing about the event path.
+
+---
+
+# FOLLOW-UPS — F1, F2
+
+Two items from the ratification pass that were instructions rather than ratifications. Recorded
+as their own entries because each has a disposition that outlives the pass.
+
+---
+
+## FOLLOW-UP F1 — Disposition of `Ad.status: "archived"`
+
+**Status:** DECIDED — keep in the type · **Date:** 2026-09-03 · **Decided by:** me, delegated
+**Relates to:** D5, D26 cut #3, G50
+
+**The instruction — Seno's words:**
+
+> "D5 with archived — decide: leave it in the type as an unreachable state and name it in the
+> README, or drop it and note the divergence. Your call, but pick one explicitly."
+
+**Options.** A) keep `archived` in the enum, unreachable, named in the README ·
+B) drop it from the enum and record the narrowing as a divergence from the given contract.
+
+**Chosen. A — keep it, name it.**
+
+**Why.** `archived` is unreachable in *our lever set*, not in the *domain*. That distinction is
+the whole argument: an unreachable state here is the visible shadow of a scope cut, and scope cuts
+belong on the cut line and in the notes, not encoded into a domain type where a later reader
+cannot tell a deliberate omission from a modelling claim. Three supporting reasons:
+
+1. **Narrowing the given contract needs a defence and buys nothing.** `Ad.status` is quoted from
+   the brief (L49). Dropping a declared member is a *change* to the contract, which §8 obliges us
+   to call out — the same README line either way, for strictly less fidelity.
+2. **It keeps cut #3 cheap.** `archive` sits at #3 on the cut line, i.e. expected to be
+   reinstated. With the member present, reinstatement is one decision variant plus one transition.
+   With it dropped, it is a type change rippling through the fold, the `ads` projection, and rows
+   already persisted in SQLite.
+3. **Enum narrowing is worse after persistence exists.** `status` is written into the projection
+   and stored; a narrowed enum makes old rows unrepresentable in the type that reads them.
+
+**Cost, stated plainly.** The fold's transition table carries one branch that can never fire.
+Under TypeScript strict an exhaustive `switch` must handle it. It is written to explain itself —
+*"no lever produces this state; see `SCOPE.md` §4 cut #3"* — rather than as a thrown error, because
+an unreachable branch that throws reads as a bug guard and this is not a bug.
+
+**What it forecloses.** Nothing. Both directions stay open: reinstating `archive` is one variant,
+and dropping the member later is the same edit it is today.
+
+**How I'd defend this in review.** The type still matches the brief's, and the one state we can't
+reach is named as a scope cut with the lever that would reach it sitting third on a written cut
+line — which is a more honest artifact than a quietly shortened enum.
+
+---
+
+## FOLLOW-UP F2 — Demo-mode horizon shortening is a build item, not a toggle
+
+**Status:** ACCEPTED · **Date:** 2026-09-03 · **Relates to:** D13, P16
+
+**The instruction — Seno's words:**
+
+> "D13 on settlement grounds, and put demo-mode horizon shortening in BUILD_PLAN as an item; with
+> 72h and 7d backfill it's the only way a restatement happens on camera, so it's not optional."
+
+**Recorded as.** **P16** in `docs/SCOPE.md` §2, marked not-optional, with the reason stated inline
+so it cannot be mistaken for polish. It will carry into `docs/BUILD_PLAN.md` as its own item when
+Phase 4 writes that file; `SCOPE.md`'s P-list is the pre-staging vehicle for it, as it is for
+P1–P8 per T1.
+
+**Consequences.** The arithmetic behind "not optional" is worth keeping written down: with a 72h
+horizon and 7d of accelerated backfill, backfilled buckets are already settled and live buckets
+never reach settlement inside a demo, so **no restatement is observable at the default horizon**.
+P7 would be built, correct, and invisible.
+
+The cost is the recompute, not the control. Shortening the horizon must re-evaluate which buckets
+are settled — buckets that were live become settled, and a late arrival into one of those must
+then mark it restated. So P16 is a settlement re-evaluation path with a control on it, and it is
+sized as such rather than as a config field.
+
+**What it forecloses.** Nothing. It also incidentally makes the horizon's effect *testable* —
+sweep the horizon, assert which buckets change state — which is a cheap addition to P14's
+agreement test.
+
+**How I'd defend this in review.** The lateness horizon is only an honest heuristic if a reviewer
+can watch it bite, so the control that makes a restatement happen on camera is part of the
+feature rather than a demo affordance bolted on afterwards.
