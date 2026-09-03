@@ -2253,3 +2253,294 @@ a recommendation** — `system:fatigue_rule` and the approval flow are D26 cut #
   demand"*, and P16 exists only because restatement is otherwise invisible — which is the same
   argument. If it becomes a plan item it lands in `SCOPE.md` §2, and that block is README-verbatim.
   Flagged as a scope question with its cost, not slipped in.
+
+---
+
+## Wave 7 — Phase 5 toolchain (D41–D45)
+
+**Raised at the Phase 4 close, 2026-09-03.** These are the choices `docs/BUILD_PLAN.md` chunk **B01**
+runs into on its first line, and every one of them has a defensible alternative — so per
+`CLAUDE.md` §3 they are Seno's, not mine. **No code exists and none will until D41–D43 are answered.**
+
+**Two tiers, deliberately.** **D41, D42 and D43 block the first commit.** **D44 and D45 block
+nothing before stage 4** (chunks B36/B37) and can be answered later without holding the build —
+they are batched here only so the whole toolchain is decided in one pass if that is convenient.
+
+**The standing precedent.** **D8** settled persistence on `node:sqlite` and its rationale was a §5
+sign-off of *no new dependency*. That precedent shapes three of the five recommendations below, and
+where I depart from it (D41, D44) the departure is argued rather than assumed.
+
+---
+
+### DECISION #41 — Repo layout and build toolchain
+
+**Blocking:** B01, and therefore everything. Nothing can be written to disk until this is answered.
+
+**Context**
+`CLAUDE.md` §1 fixes the stack — Node + TypeScript strict + React, `node:sqlite`, Node 24 floor. It
+does not say how React reaches a browser. `DESIGN.md` §11 and **D32** require three runnable things:
+a server, a **separate-process** simulator, and a client bundle. The brief's deliverables ask for a
+one-command run (`BUILD_PLAN.md` B57). Nothing in any ratified decision constrains the bundler or the
+package layout.
+
+**Options**
+
+**A) Single `package.json`, three entry points (`src/server`, `src/sim`, `src/web`), Vite for the client only**
+- *How it works:* one dependency tree; server and simulator run from `tsc`-emitted or
+  `node --experimental-strip-types` output; Vite builds and dev-serves `src/web` only, proxying
+  `/api` to the server. `src/shared` is imported by all three by relative path.
+- *Pros:* one `npm i`; shared types are a plain import with no build orchestration; the one-command
+  run is a 30-line `scripts/start.mjs` spawning two processes and serving a built bundle. Vite's HMR
+  is real time saved across ten UI chunks in stage 4.
+- *Cons:* one new dev dependency (Vite, and its transitive tree). Client and server dev deps share a
+  tree, so `npm ls` is noisier than the D8 aesthetic.
+- *Forecloses:* nothing. Vite is a dev-time tool; it produces static files and does not appear in the
+  runtime.
+- *Reversal cost:* **low.** Swapping the bundler touches `scripts/`, `index.html` and one config file.
+
+**B) No bundler — `tsc` to ESM, native `<script type="module">`, import maps for React**
+- *How it works:* `tsc` emits ESM to `dist/web`; `index.html` loads it directly; React comes from an
+  import map pointing at a vendored copy.
+- *Pros:* zero dev dependencies beyond TypeScript — the purest reading of D8. The build is one
+  command anyone can read. Nothing between the source and the browser.
+- *Cons:* no JSX transform without configuring `tsc`'s (fine), but also no HMR, no dev server, and a
+  manual `/api` proxy or CORS setup. Every UI chunk in stage 4 costs a full reload. Vendoring React
+  by hand is a step that will be got wrong once.
+- *Forecloses:* nothing technically; it costs iteration speed exactly where `BUILD_PLAN.md` §13 says
+  the cut line will bite hardest.
+- *Reversal cost:* **low**, and it is the same reversal as A.
+
+**C) npm workspaces — three packages, `shared` as a fourth**
+- *How it works:* `packages/{server,sim,web,shared}` with workspace protocol links.
+- *Pros:* the process boundary D32 cares about is visible in the directory structure; each package
+  declares only what it uses.
+- *Cons:* real overhead for a solo build under time pressure — build ordering, four `package.json`
+  files, and a `shared` package that must be built before anything imports it. It buys module
+  hygiene that a single `src/shared` directory already provides at this size.
+- *Forecloses:* nothing.
+- *Reversal cost:* **medium** — moving to or from workspaces is a whole-repo file move.
+
+**Recommendation — A.** The honest form of D8's argument is *no new **runtime** dependency*, and
+Vite is not one: it emits static files and is absent from the running system, so the property D8
+protects (the app is Node + SQLite and nothing else) is untouched. What B actually costs is ten
+chunks of stage-4 UI work without hot reload, on the one part of the build where `DESIGN.md`
+specifies behaviour precisely and appearance not at all — meaning iteration count is the dominant
+cost there. C is the right structure for a team and the wrong one for a slice this size: it adds
+build ordering to a repo whose hardest problem is a restatement path, not a module graph. A is also
+the only option under which the one-command run stays a script rather than a build system.
+
+**What I need from you**
+Single package with Vite for the client only (A), or do you want the zero-dev-dependency build (B)
+so the repo can claim a completely unbundled toolchain?
+
+---
+
+### DECISION #42 — HTTP server: `node:http` or a framework
+
+**Blocking:** B04. Everything from B05 onward is endpoints.
+
+**Context**
+The full surface is small and known: `POST /api/ingest`, `GET /api/snapshot`, `GET /api/stream`
+(SSE), `POST|GET /api/decisions`, `GET /api/verify`, `POST /api/trace`, `GET /api/sim/world`,
+`POST /api/sim/scenario`, `GET /api/health`, plus static files in production. Ten routes, no auth, no
+sessions, no middleware chain, one client. `DESIGN.md` §11 requires the ingest and decision paths to
+be **synchronous end to end** in one SQLite transaction.
+
+**Options**
+
+**A) `node:http` with a ~40-line router**
+- *How it works:* one `switch` on method and pathname, a JSON body reader, an SSE helper.
+- *Pros:* no dependency; the D8 argument holds without qualification. SSE is easier without a
+  framework's response wrapper in the way — `res.write` on the raw socket, flush control, and
+  backpressure (`DESIGN.md` §11's point 2) are all directly visible. Nothing hides the fact that
+  `node:sqlite` is synchronous.
+- *Cons:* we write and debug body parsing, 404s and error handling ourselves. Roughly 60–80 lines
+  that a framework would give us.
+- *Forecloses:* nothing.
+- *Reversal cost:* **low** — handlers are `(req, res)` either way.
+
+**B) Express**
+- *Pros:* familiar; body parsing and static serving are one line each; the reviewer recognises it.
+- *Cons:* a dependency and its tree, for ten routes with no middleware needs. Express's SSE story
+  needs care around compression and buffering, and getting that subtly wrong makes the live path
+  look laggy for reasons unrelated to our design.
+- *Forecloses:* nothing.
+- *Reversal cost:* **low.**
+
+**C) Fastify**
+- *Pros:* schema validation at the boundary, which `BUILD_PLAN.md` B05 needs anyway (U6's
+  non-negative-integer rules).
+- *Cons:* a larger dependency, an async-first design in a synchronous store, and its validation is
+  not the validation we need — ours writes rejects to `signal_deliveries` with the raw body retained
+  (`DESIGN.md` §5.1), which a framework's 400-and-discard actively fights.
+- *Forecloses:* nothing, but C's main selling point is one we cannot use.
+- *Reversal cost:* **low.**
+
+**Recommendation — A.** Ten routes, one client, no auth: the framework is doing almost nothing here,
+and the two places it would do something — SSE flush control and validation-with-retention — are
+both places where it gets in the way rather than helps. C's validation is the clearest case: our
+ingest boundary must *keep* what it rejects, which is the opposite of what schema validation is for.
+And under A, "no new dependency" stays a claim about the whole server rather than one about
+persistence with an asterisk.
+
+**What I need from you**
+`node:http` with a hand-rolled router (A), or do you want Express (B) for reviewer familiarity?
+
+---
+
+### DECISION #43 — Test runner, and what gets an automated test at all
+
+**Blocking:** B12 (the fold) — the first chunk whose verification step is not something you can see
+in a browser or a `sqlite3` prompt.
+
+**Context**
+`CLAUDE.md` §10 defines done as *"verifiable by hand in the browser or terminal, with steps given"*,
+and every chunk in `BUILD_PLAN.md` carries such a step. The brief asks for none. But four things
+are pure functions with arithmetic that is wrong in ways a screen does not reveal: `fold()`,
+attribution, the restatement decrement/credit, and the lag mixture. `GET /api/verify` and the P14
+sweep are in-product checks over real data — they are not unit tests and do not replace them.
+
+**Options**
+
+**A) `node:test` + `node:assert`, tests only on the four pure functions**
+- *Pros:* built in, zero dependency, `node --test` is the whole runner. Test files sit next to the
+  code. It covers exactly the code where a bug is silent.
+- *Cons:* thinner ergonomics than Vitest (no watch-by-default, no snapshotting, plain assertions).
+  No component testing, so the UI is hand-verified — which is what `CLAUDE.md` §10 asks for anyway.
+- *Forecloses:* nothing. Adding Vitest later is additive.
+- *Reversal cost:* **low.**
+
+**B) Vitest, and test the client too**
+- *Pros:* one runner for both sides; shares Vite's config under D41-A; jsdom makes the gate ladder
+  and the EWMA testable without a browser.
+- *Cons:* a dependency and a config file, and it invites testing UI that `CLAUDE.md` §7 explicitly
+  deprioritises. Budget spent on component tests is budget not spent on the cut line.
+- *Forecloses:* nothing.
+- *Reversal cost:* **low.**
+
+**C) No automated tests — everything by hand, plus `/api/verify` and the P14 sweep**
+- *Pros:* fastest per chunk; the in-product checks are stronger evidence to a reviewer than unit
+  tests, because they run over 1.6M real events in front of them.
+- *Cons:* the four pure functions get no coverage until the sweep runs at B24, and a fold bug found
+  then is a bug found after twelve chunks were built on it. The sweep tells you *that* the numbers
+  disagree, not *which* branch is wrong.
+- *Forecloses:* nothing, but it removes the only cheap way to bisect an arithmetic bug.
+- *Reversal cost:* **low.**
+
+**Recommendation — A.** The argument is not coverage, it is bisection. `BUILD_PLAN.md` §13 names
+B20 (restatement) as the hardest chunk and notes its bugs are invisible until B24's sweep; a fixture
+test that folds five decisions or promotes one orphan turns "some bucket disagrees somewhere in
+1.6M events" into a named failing branch. Confining tests to those four functions keeps the cost
+near zero and keeps the UI on the hand-verification path `CLAUDE.md` §10 already specifies. C's
+in-product checks stay — they are the reviewer-facing evidence; unit tests are the developer-facing
+bisection tool, and they are not substitutes.
+
+**What I need from you**
+`node:test` on the fold, attribution, restatement and the lag math only (A) — or would you rather
+ship no automated tests at all (C) and lean entirely on `/api/verify` plus the P14 sweep?
+
+---
+
+### DECISION #44 — Chart rendering
+
+**Blocking:** B37, in stage 4. **Blocks nothing before that** — stages 0–3 need no chart.
+
+**Context**
+`DESIGN.md` §11 and **D34** constrain this more than the visuals do: every performance number
+renders through a component that requires a signed, server-issued `TraceDescriptor`, and **D31**
+requires clicking a point to open its drill-down. **D20**'s ladder means the *granularity* of a
+series changes at render time and the chart must sometimes refuse to draw a ratio and show counts
+instead. Twelve series, ~10k minute buckets per ad over 7 days, live updates on a 250–500 ms tick.
+`CLAUDE.md` §7: *"Do not gold-plate CSS"*, and visual polish is an explicit non-goal.
+
+**Options**
+
+**A) uPlot**
+- *How it works:* a small canvas time-series library; data goes in as typed column arrays, which is
+  the shape `rollup_minute` rows already have.
+- *Pros:* built for exactly this — many series, many points, live updates, ~45 KB. Click-to-point
+  hit testing is a documented hook, so B53's drill-down is a callback. Fast enough that the 7-day
+  window needs no downsampling of its own beyond D20's ladder.
+- *Cons:* a dependency; imperative API that needs a small React wrapper (~40 lines); its styling
+  hooks are thin, though that is aligned with §7.
+- *Forecloses:* nothing. The descriptor plumbing lives in our wrapper, not in the library.
+- *Reversal cost:* **low-medium** — one component and its wrapper.
+
+**B) Recharts (or any React-declarative chart library)**
+- *Pros:* declarative and idiomatic React; annotations (generation boundaries, restatement markers)
+  are just child elements, which suits B42/B43/B48.
+- *Cons:* SVG per point. Twelve series over a 7-day minute window is well past where it stays
+  responsive, so it forces aggressive downsampling — and downsampling on the client is uncomfortably
+  close to client-side aggregation, which **D30** rejected. The library also wants to own the tooltip,
+  which is where the descriptor has to live.
+- *Forecloses:* nothing formally, but it puts pressure on D30's boundary in the one place it matters.
+- *Reversal cost:* **medium** — annotations written as children do not port to a canvas library.
+
+**C) Hand-rolled SVG**
+- *Pros:* no dependency; total control over the descriptor path and the "refuse to draw, show counts"
+  branch; every pixel traceable to our own code.
+- *Cons:* axes, ticks, time formatting, hit testing, zoom and the live update path are all ours —
+  several chunks of work with no domain content, on the surface `CLAUDE.md` §7 says not to spend on.
+- *Forecloses:* nothing.
+- *Reversal cost:* **low**, but the cost is already sunk by then.
+
+**Recommendation — A.** The volume settles it: 12 series × ~10k minute buckets is canvas territory,
+and B is only workable if we downsample on the client, which is the one thing D30 was ratified to
+prevent. C spends stage-4 budget on axis ticks — the exact trade `CLAUDE.md` §7 warns against, and
+the cut line in `BUILD_PLAN.md` §12 already shows stage 4 is where budget gets tight. uPlot's
+imperative API is a genuine cost, but it is one wrapper component, and that wrapper is where D34's
+descriptor requirement wants to live anyway.
+
+**What I need from you**
+uPlot behind a descriptor-bearing wrapper (A), or hand-rolled SVG (C) to keep the client
+dependency-free?
+
+---
+
+### DECISION #45 — Styling
+
+**Blocking:** B36, in stage 4. **Blocks nothing before that.**
+
+**Context**
+`CLAUDE.md` §7 quotes the brief: visual polish is explicitly not what is graded. But the surface has
+two real requirements that are about *legibility, not taste*: `DESIGN.md` §5.4's three settlement
+states (live / settled / restated) must be visually distinct and **persistent**, and §11's stream
+telemetry must render in a treatment that can never be mistaken for a performance metric.
+
+**Options**
+
+**A) One plain CSS file, CSS custom properties for the ~8 semantic colours**
+- *Pros:* no dependency, no build step beyond Vite's default. The settlement states and the telemetry
+  treatment become four named variables, which is self-documenting where it matters.
+- *Cons:* no scoping — class names are a manual discipline. At ~15 components that is manageable.
+- *Forecloses:* nothing.
+- *Reversal cost:* **low.**
+
+**B) CSS Modules** — Vite supports them with no config.
+- *Pros:* scoping for free; still no runtime dependency.
+- *Cons:* one file per component and a slightly noisier import; the semantic colours still want a
+  shared file, so it is A plus scoping.
+- *Forecloses:* nothing. *Reversal cost:* **low.**
+
+**C) Tailwind**
+- *Pros:* fast to write; consistent spacing without thinking.
+- *Cons:* a dependency and a build step, and the two things that actually matter here (settlement
+  states, telemetry quarantine) become long utility strings rather than named semantics — the
+  opposite of what those two rules need.
+- *Forecloses:* nothing. *Reversal cost:* **low-medium.**
+
+**Recommendation — A.** The only styling decisions that carry meaning are the settlement states and
+the telemetry quarantine, and both are better as named custom properties than as either utility
+strings or scoped modules. Everything else is legibility, which one stylesheet handles at this size.
+B is a reasonable upgrade if component count grows past ~20; C spends a dependency on the axis
+`CLAUDE.md` §7 tells us not to.
+
+**What I need from you**
+One plain stylesheet with semantic custom properties (A) — or do you want CSS Modules (B) for
+scoping from the start?
+
+---
+
+**Batch note.** Answer D41–D43 to unblock B01. D44 and D45 can wait until stage 4 without stalling
+anything; if you would rather decide them later, say so and `BUILD_PLAN.md` §2 gets a note that they
+are deferred rather than open.

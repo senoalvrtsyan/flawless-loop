@@ -52,7 +52,7 @@ quietly become 52 build tasks. Exactly one bucket per blocking finding:
 | SPECIFY | design it fully in the README; do not build it | **G10** component versioning — nothing *edits* components while the Workbench is sketched, so there is no editing and therefore no versioning at runtime. L111 asks us to "pick one and defend it", which prose satisfies |
 | NAME | state it as a known limit we tolerate | **G05** money is USD-only while `Audience.geo` varies — we say so rather than building currency, and name what it costs |
 
-`T1` is that pass over the 12 blocking findings: **FIX 6 · SPECIFY 6 · NAME 0**, FIX costed at 8
+`T1` is that pass over the 12 blocking findings. As tagged today the register stands at **FIX 7 · SPECIFY 5 · NAME 0** — T1 was decided as FIX 6 · SPECIFY 6, and **D26 consequence 3 moved G04 (budget pacing) from SPECIFY to FIX**, reversing T1's own trim #2. FIX was costed at 8
 build chunks before any of it was built. NAME is empty there by construction — a blocking finding is
 by definition one we cannot merely tolerate — so the NAME set is drawn from the non-blocking
 register instead.

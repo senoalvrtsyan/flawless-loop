@@ -1,5 +1,5 @@
 # CHEATSHEET.md — one page, revise-from. Updated at every phase close.
-**As of:** 2026-09-03 · Phase 3 CLOSED · design complete · full entries: `DECISIONS.md`, `BRIEF_GAPS.md`, `SCOPE.md` §4, `DESIGN.md`, `SIMULATOR.md`
+**As of:** 2026-09-03 · Phase 4 CLOSED · design complete, build ordered (`BUILD_PLAN.md`, 62 chunks) · **D41–D45 open, D41–D43 block B01** · full entries: `DECISIONS.md`, `BRIEF_GAPS.md`, `SCOPE.md` §4, `DESIGN.md`, `SIMULATOR.md`
 
 ## 1 — Ratified decisions
 
@@ -48,7 +48,8 @@
 | **G01/G18** no config generation, no component link on events | Nothing names "the config of `a_12` on Sunday", so a late conversion can't be credited to the creative that earned it | D2, D14 · P5, P8 |
 | **G37** fatigue is named, inspected and in no contract | The brief's central domain concept has no field, so it must be *generated* as decayed CTR and *inferred* from events | D35 · `SIMULATOR.md` §7 |
 
-## 3 — Cut line, cheapest to reinstate first
+## 3 — Scope cut line, cheapest to reinstate first
+*(Chunk-level cut line under time pressure is `BUILD_PLAN.md` §12 — different granularity, do not merge.)*
 
 | # | Cut | Reason |
 |---|---|---|
