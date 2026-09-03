@@ -9,115 +9,97 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 
 ## Where we are
 
-**Phase 1 (Scope) — CLOSED.** Closed on Seno's instruction to close it out, not on a separate
-"approved, continue". `docs/SCOPE.md` is the scope of record.
+**Phase 2 (Architecture & data model) — DOC WRITTEN, AWAITING APPROVAL.**
+`docs/DESIGN.md` exists and covers all twelve sections Seno specified. The phase closes on an
+explicit *"approved, continue"* — it has not been given yet.
 
-**No code exists.** Nothing outside `docs/` has been created. Phase 2 has not started;
-`docs/DESIGN.md` does not exist.
+**No code exists.** Nothing outside `docs/` has been created. Two throwaway verifications were run
+in the scratchpad (never in the repo): D8's `node:sqlite` pragma check, and a DDL check confirming
+the §2 schema executes — see "What was verified".
 
 ## What exists
 
 | File | What it is |
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
-| `docs/BRIEF_GAPS.md` | Audit register. 52 findings (G01–G52), six passes. 12 blocking, each tagged FIX/SPECIFY/NAME. Options and recommendations are pre-choice analysis, left unedited. **Owes an extensions section** — see "What is owed". |
-| `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B 26 decisions in `CLAUDE.md` §3 format, in four waves · §C 7 unratified assumptions. Answered/resolved ones carry a banner pointing at `DECISIONS.md`. |
-| `docs/DECISIONS.md` | Ratified decisions only. D1, T1, D26, then D2/D5/D7–D14 under "RATIFICATION PASS", then F1/F2 under "FOLLOW-UPS". Each entry carries Seno's verbatim wording; the pass also has a per-decision "Wording of record" table. |
-| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables only: ratified decisions (chose / why / forecloses), the four root-cause gaps, the ordered cut line. Hard one-screen limit. **Must be refreshed at the close of every phase.** |
-| `docs/SCOPE.md` | **Phase 1 output.** One page: what's real (P1–P16), what's sketched and in what form, what's cut with a one-sentence reason each, ordered cheapest-to-reinstate-first. §2–§4 is the block that goes into the README verbatim. |
+| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–E14, I1–I17) — the assembly source for the README's extensions section. |
+| `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–5 · §C 7 assumptions. Resolved ones carry a banner pointing at `DECISIONS.md`. |
+| `docs/DECISIONS.md` | Ratified decisions only — D1–D34, T1, F1, F2. **Use the index table at the top as the lookup:** twenty have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are ratified as rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in a per-pass "wording of record" table. |
+| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every phase close. |
+| `docs/SCOPE.md` | Phase 1 output. What's real (P1–P16), what's sketched, what's cut. §2–§4 is README-verbatim. |
+| `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary and cold start · aggregation with pros/cons tables · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 
 ## What is ratified
 
-Full entries with rationale, consequences and what each forecloses are in `docs/DECISIONS.md`.
-Summarised here only to the depth a cold resume needs.
+Full entries with rationale, consequences and what each forecloses are in `docs/DECISIONS.md`; the
+one-line-each version is `docs/CHEATSHEET.md` table 1. **Everything is now ratified except D17.**
 
-**Scope**
-- **D1 — surfaces.** Signal + Decision loop for real; Workbench sketched as an annotated mockup
-  plus one read-only component screen showing the reverse join over live data.
-- **T1 — triage of the 12 blocking findings.** FIX / SPECIFY / NAME per finding.
-- **D26 — slice depth (A, amended).** All FIX items ship. Budget pacing reinstated as P11, funded
-  from the data-health panel, not from traceability. Traceability at D24 level D in full. The
-  human-in-the-loop approval flow is cut and does **not** displace click-time attribution.
-  Re-affirms D1; its contribution is depth plus an ordered cut line. Buckets now
-  **FIX 7 · SPECIFY 5 · NAME 0**.
-- Resolved by D26: **D6** (lever set = `create_ad`, `launch`, `pause`, `resume`, `set_budget`,
-  `swap_component`) and **D24** (level D, in full).
+- **D1–D14, T1, D26, F1, F2** — scope, model and storage. Unchanged since Phase 1.
+- **D27–D32** — the Phase 2 design decisions: cohort bucket placement · rollup key `(ad_id,
+  minute_start)` · ingest-time incremental rollups · absolute-bucket-row wire + snapshot/stream ·
+  server-issued trace descriptors · separate simulator process.
+- **D33, D34, D20** — the residues: empirical maturity CDF (global, sample size shown) ·
+  structural raw-tail quarantine · adaptive granularity capped at hour.
+- **D3, D4, D15, D16, D18, D19, D21, D22, D23, D25** — the carried-over block.
+- **8 cheap defaults and U1–U7** — ratified as blocks.
 
-**Model and storage** — ratified 2026-09-03 as one batch of ten
-- **D2** recipe for authoring + materialised `config_generations` for history.
-- **D5** the fold originates at `create_ad` + `launch`; draft edits sit outside the log.
-- **D7** log authoritative; `ads` and `config_generations` are projections; **nothing writes a
-  projection except the replay/apply function**; the UI reads projections.
-- **D8** SQLite server-side via **`node:sqlite`** (not `better-sqlite3`); server owns every fact,
-  client owns nothing durable. Constitutes the §5 sign-off — of *no new dependency*. Node 24+ is
-  the floor, pinned in `engines`/`.nvmrc`. The flip condition to `better-sqlite3` is written down
-  in `DECISIONS.md` so it is not a later judgement call.
-- **D9** raw retained + minute-bucket rollups as a rebuildable projection, hours from minutes.
-- **D10** rollups store only additive counts; every ratio derived at read time.
-- **D11** no compaction built; the policy and what it would foreclose are written up instead.
-- **D12** `received_at` + `ingest_seq`, server-assigned at ingest, never emitter-assigned.
-- **D13** fixed 72h lateness horizon, configurable and displayed, ratified on settlement grounds.
-- **D14** conversions credited to the config generation live at the **attributed click's** `ts`.
-
-**Follow-ups**
-- **F1** `Ad.status: "archived"` stays in the type, reachable by no lever, named in the README.
-  My call, delegated by Seno, taken explicitly; chosen over dropping the enum member so that
-  reinstating cut #3 stays a one-variant change.
-- **F2** demo-mode horizon shortening is **P16 and not optional** — at the default 72h with 7d
-  backfill, no restatement is observable inside a demo. It is a settlement re-evaluation path with
-  a control on it, not a config toggle.
+**The three that most shape the build**, if you only reload three: **D27** (a conversion counts in
+its *click's* minute — this is why CPA/ROAS lag and CTR does not), **D7** (nothing writes a
+projection except the replay/apply function), **D30/D34** (the server owns all arithmetic; the raw
+tail is structurally incapable of producing a number).
 
 ## What is open
 
-**12 decisions**, all in `docs/OPEN_QUESTIONS.md` §B with full options and a recommendation.
-Nothing there is settled. By wave:
+**One decision: D17 — simulator architecture.** It is the whole of `SIMULATOR.md` and blocks
+Phase 3. `OPEN_QUESTIONS.md` §B wave 4 has the options. **D32 already fixed its topology slice**
+(separate process, HTTP batch POST to `/api/ingest`); what remains is the emitter's internals —
+the diurnal curve, fatigue, noise, the click→conversion lag distribution, seeded determinism, and
+the backfill/live handover.
 
-| Wave | Open | Note |
-|---|---|---|
-| **1 — Scope & identity** (D1–D6) | D3, D4 | D3 component versioning: answered in prose per D1, position still needs ratifying. D4 downgraded by D1 to a README paragraph. |
-| **2 — Storage & derivation** (D7–D12) | *none* | Fully ratified. |
-| **3 — Event correctness** (D13–D16, D22, D25) | D15, D16, D22, D25 | **D22 is the blocker**: pacing is settled via P11 but the account timezone is unpicked, and P6's bucketing is undefined without it. D15 presumed by P1, D16 by P8. D25 corrections — ratify as "cut, stated". |
-| **4 — Simulator, transport, presentation** (D17–D21, D23, D24) | D17, D18, D19, D20, D21, D23 | **D17 is the whole of `SIMULATOR.md`** and blocks Phase 3. D18 presumed by P9. D21 presumed by D7's two-store arrangement. D19 cut by D26, D23 downgraded by D1 — ratify both as "cut, stated". |
-
-**7 unratified assumptions (U1–U7)**, `OPEN_QUESTIONS.md` §C. Two have already passed their gate:
-
-| # | Assumption | Gate | State |
-|---|---|---|---|
-| U1 | USD only, no currency field, no FX | before `DESIGN.md` is finalised | **due now** |
-| U3 | Audiences and channels are static reference data; no lever changes an ad's audience or channel | before D6 is answered — D6 is now resolved | **overdue** |
-| U6 | Money is non-negative integers, enforced at ingest | before the ingest boundary is built | due at P1 |
-| U5 | Decisions are exactly-once, idempotent on `decision_id` | before the lever write path is built | due at P3 |
-| U7 | `Decision.ts` is request time, effects immediate, backdating rejected | before the fold is built | due at P4 |
-| U4 | One conversion kind; `value_cents` is gross revenue | before the ROAS metric is built | due at P9 |
-| U2 | Single user; `actor` is a hard-coded `human:` string | before the Decision loop is built | due at P10 |
+Constraints on D17 already fixed elsewhere, so it does not get to re-decide them:
+- Budget is a **pacing multiplier** on the rate curve, not a cap (I3, P11); overspend tolerance is
+  a stated simulator parameter.
+- Day boundary is **`America/New_York`** (D22).
+- Spend is a **delta per fixed interval** (I1); clicks carry a `click_id` distinct from `event_id`
+  (E3).
+- The simulator is **stateless** — it resumes from `SELECT MAX(ts) FROM signals` (DESIGN §3.3).
+- It must honour pause by ceasing emission — a simulator convention, not a contract property, and
+  named as such (G48).
+- The lag distribution it generates is what D33's maturity CDF will measure, so it needs to be a
+  defensible shape, not uniform.
 
 ## What is owed
 
-Documentation debt with a named owner and gate, so it is not rediscovered late.
-
-- **`BRIEF_GAPS.md` has no extensions section.** Seven ratified extensions to the given contract
-  are currently recorded only as *findings*, which is not the same thing: `received_at`,
-  `ingest_seq` (D12), `click_id`, spend-as-fixed-interval-deltas (P2), `create_ad`, `launch` (D5),
-  `config_generations` (D2). `CLAUDE.md` §8 and brief L40 both require each to be called out as an
-  extension. **Gate: before `DESIGN.md`** — the README's extensions section assembles from it.
 - **`SCOPE.md` §2–§4 is README-verbatim.** If scope moves, that block moves with it.
+- **`BRIEF_GAPS.md` § Extensions is the README's assembly source.** Any new extension in Phase 5
+  gets a row there first.
+- **Nothing else.** The extensions-section debt recorded at Phase 1 close is discharged.
+
+## What was verified, not assumed
+
+Run in the scratchpad, never in the repo. Both are cited in the docs that depend on them.
+
+| Claim | Result |
+|---|---|
+| `node:sqlite` loads unflagged; `PRAGMA journal_mode=WAL` returns `wal`; busy_timeout and manual transactions behave | Node v24.14.0 — passes (D8) |
+| The §2 DDL executes: `STRICT` tables, the `ts_effective` generated column with `MIN()`, the partial `UNIQUE` index on `click_id`, `STRICT, WITHOUT ROWID` + `ON CONFLICT DO UPDATE` | SQLite 3.51.2 — all pass; the clamp does clamp and the duplicate `click_id` is rejected (DESIGN §2) |
 
 ## Next action
 
-1. **Second ratification pass, before `DESIGN.md`:** D22's account timezone (blocks P6), then
-   D15, D16, D18, D21, and assumptions U1, U3, U5, U6, U7.
-2. **Write the `BRIEF_GAPS.md` extensions section** (see "What is owed").
-3. **Then Phase 2: `docs/DESIGN.md`.**
-4. **D17 before Phase 3** — it is the whole of `SIMULATOR.md`. D3, D4, D19, D20, D23, D25 can ride
-   along with either pass; most are "cut, stated" confirmations.
+1. **Seno approves `docs/DESIGN.md`** (or sends parts back). Phase 2 does not close without it.
+2. **Then D17**, as a `CLAUDE.md` §3 decision — it is the whole of Phase 3.
+3. **Then Phase 3: `docs/SIMULATOR.md`.**
+4. Then Phase 4 (`BUILD_PLAN.md`, which turns P1–P16 into ordered chunks), then Phase 5.
 
 ## Standing reminders
 
 Rules live in `CLAUDE.md`; these are the ones that bite hardest right now.
 
-- **No code until Seno says "start Phase 5".** Not a scaffold, not a `package.json`, not a type
-  sketch on disk. Type definitions inside a design document are fine.
-- **Refresh `docs/CHEATSHEET.md` whenever you update this file at a phase close** — see `CLAUDE.md` §9.
+- **No code until Seno says "start Phase 5."** Not a scaffold, not a `package.json`, not a type
+  sketch on disk. Type definitions inside a design document are fine. Throwaway verification in
+  the scratchpad is fine and has precedent — D8's pragma check — but it never lands in the repo.
+- **Refresh `docs/CHEATSHEET.md` whenever you update this file at a phase close** (`CLAUDE.md` §9).
+  The two files must not overlap: cheatsheet = decisions and their defences; status = where we are.
 - Never work from memory. If a field name, chosen option or scope boundary is needed, open the
   file. If it is not written down, ask.
 

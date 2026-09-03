@@ -1433,3 +1433,151 @@ tolerated-misbehaviours section per L123.
 
 Each of these is carried into `docs/OPEN_QUESTIONS.md` as, or inside, a decision. Nothing in
 this document is settled until it appears in `docs/DECISIONS.md`.
+
+---
+
+# Extensions to the given contracts
+
+Owed by `CLAUDE.md` §8 (*"Every schema extension gets an entry. The brief invites extension but
+requires it be called out"*) and by brief L40: *"Extend them if your slice needs it (new event
+types, new actions, extra fields), and call any extension out in your notes."* Written
+2026-09-03, before `docs/DESIGN.md`, and covering the extensions created by the Phase 2 design
+pass as well as those ratified earlier.
+
+**This section is the assembly source for the README's extensions section.** Each row names the
+finding that justifies it, the decision that ratified it, and where it appears in the model. A
+finding is a *problem*; an extension is a *change to the given contract* — the two are recorded
+separately on purpose, because the brief asks to be told about the second, not the first.
+
+## What counts as an extension
+
+Three dispositions, and only the first is an extension:
+
+- **Extended** — we added a field, type or variant the brief does not have.
+- **Narrowed** — we removed or restricted something the brief declares. *We do none.* `archived`
+  was the only candidate and F1 kept it, precisely so this row stays empty.
+- **Interpreted** — we fixed a meaning the brief left open without changing its shape (e.g. spend
+  as a delta, G19). Listed separately below, because an interpretation can be wrong in a way a
+  reviewer should be able to check.
+
+---
+
+## A. Extensions to `Signal`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E1 | `received_at` | `string` — ISO 8601 UTC, **server-assigned at the ingest boundary, never emitter-assigned** | G16 | D12 |
+| E2 | `ingest_seq` | `number` — monotonic, server-assigned; total replay order, SSE reconnect cursor, timestamp tie-break | G16, G21, G22 | D12 |
+| E3 | `click_id` on the `click` variant | `string`, distinct from `event_id` | G17 | T1 / P2 |
+
+**E1 + E2 are the highest-priority extensions in the project.** The asymmetry that makes them
+urgent: adding them costs two columns; omitting them costs the data *permanently*, because an event
+already ingested can never be given an arrival time afterwards. Everything the brief says it cares
+most about in Signal — lateness, restatement, as-of views, the mandatory mid-demo refresh surviving
+intact — is a statement about arrival time, and the given contract has no way to express arrival.
+
+**E3** separates the transport dedupe key from the domain foreign key. `event_id` is described at
+L73 as a dedupe key for at-least-once delivery; `attributed_click_id` (L81) points at a
+`click_id` that exists nowhere in the contract. Under the alternative reading — that
+`attributed_click_id` means the click's `event_id` — the same click redelivered under a *different*
+`event_id` produces a double-counted click that nothing can detect. E3 makes that failure
+representable.
+
+## B. Extensions to `Decision`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E4 | `create_ad` action variant | carries the initial config; the fold's origin | G33, G50 | D5 |
+| E5 | `launch` action variant | `draft → live`; the only writer of `launched_at` | G02, G33, G50 | D5 |
+| E6 | `decision_seq` | `number` — server-assigned fold order, mirroring E2 | G22, G45 | D21 |
+
+**E4 + E5 exist because L125's central claim is false as written.** *"Current config is derivable:
+the initial state folded over the decision log"* names no event that produces the initial state, so
+the fold has no origin and nothing is recomputable. E4 supplies the origin; E5 supplies the
+transition that L42's *"a live ad's config changes only through levers"* otherwise makes
+unreachable. The rule we ended up with is **sharper** than the brief's: config is free while
+`draft`, and once `live` only levers touch it.
+
+**Not extended:** `Decision.status`, `approved_by`, a `Recommendation` entity (G25, G36). The
+human-in-the-loop flow is cut — `SCOPE.md` §4 cut #6 — so the brief's Background definition of
+human-in-the-loop (L28) is unrepresented, named rather than silently absent.
+
+## C. Extensions to `Ad`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E7 | `created_at` | `string` ISO 8601 UTC — `Component` has one, `Ad` does not | G03 | Phase-2 defaults |
+| E8 | `name` | `string` — stable human label | G03 | Phase-2 defaults |
+| E9 | `current_generation_id` | `string` → `ConfigGeneration` | G01 | D2 |
+
+**E8's justification is specific, not cosmetic:** `ad_id` is the only label the contract offers, and
+the alternative — synthesising a display name from the headline component's payload — produces a
+name that *changes when the headline is swapped*, which is exactly the moment a strategist most
+needs a stable referent.
+
+## D. Extensions to `Component`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E10 | `lineage_id` | `string` — groups every version of one creative | G10 | D3 |
+| E11 | `version` | `number` — 1-based within the lineage | G10 | D3 |
+| E12 | `parent_id` | `string \| null` — the version this was copied from | G10 | D3 |
+
+**Ratified with a qualification worth repeating here:** no component editor ships (D1 sketches the
+Workbench), so nothing *writes* these at runtime. The columns exist and the seed data includes one
+lineage with two versions, so the reverse join's "per version or per lineage?" question has a
+concrete answer on screen rather than a hypothetical one in prose. Copy-on-write is the position
+defended in the README; these three fields are what it would be built on.
+
+## E. New entities the contract does not have
+
+| # | Entity | Why it must exist | Justified by | Ratified by |
+|---|---|---|---|---|
+| E13 | `ConfigGeneration` | Nothing in the given model names *"the config of `a_12` as of Sunday"*, so a conversion landing Thursday cannot be credited to the creative that earned it | G01, G18 | D2, D14 |
+| E14 | `TraceDescriptor` | Hard requirement #5 asks that any number be walked back to its events *and shown to agree*; nothing in the contract lets a number name the query that produced it | L143 | D31 |
+
+**E14 is an extension to the *product*, not to the data contract** — it carries no persisted state
+and describes a query, not a fact. It is recorded here because a reviewer reading the wire format
+will see a field the brief never mentions, and the honest place to explain it is the same list as
+everything else.
+
+## F. Interpretations — the brief's shape kept, its meaning fixed
+
+Not extensions. Each fixes a meaning the brief leaves genuinely open, and each could be wrong in a
+way a reviewer should be able to check, so each is stated rather than assumed.
+
+| # | Left open by the brief | Fixed as | Finding | Ratified by |
+|---|---|---|---|---|
+| I1 | `spend`: delta or cumulative, at what cadence | **Delta**, one tick per live ad per fixed interval | G19 | T1 / P2 |
+| I2 | Which day `daily_budget_cents` means | Account-level timezone, **`America/New_York`**; buckets stored UTC | G04 | D22 |
+| I3 | What the budget *does* | A **pacing parameter** on the emission rate, not a hard cap; mild overspend is normal and is a stated simulator parameter | G47 | D26 / P11 |
+| I4 | When a period is closed | Fixed **72h** lateness horizon, displayed and adjustable | G42 | D13 |
+| I5 | Which generation a late conversion credits | The one live at the **attributed click's `ts`** | G01 | D14 |
+| I6 | Which time bucket a conversion lands in | The **attributed click's minute** (cohort placement) | — | D27 |
+| I7 | Resolution of two deliveries sharing an `event_id` | **First write wins** for the aggregate; every delivery persisted; conflicts surfaced | G40 | D15 |
+| I8 | A conversion whose `ad_id` contradicts its click's | The **click** is authoritative; provisional against the conversion's own `ad_id` until resolved | G30, G41 | D16 |
+| I9 | `ts` precision and tie-break | Milliseconds; tie-break on `ingest_seq`, then `event_id` lexically | G22 | D12 |
+| I10 | Future-dated `ts` (clock skew) | **Clamped** to `received_at`, counted, never rejected | G44 | Phase-2 defaults |
+| I11 | Signals arriving for a non-live ad | Never rejected on ad status; counted as a self-check | G48 | Phase-2 defaults |
+| I12 | `Decision.ts` | Request time; effects immediate; backdating rejected | G23 | U7 |
+| I13 | `from_cents` / `from_id` | A **precondition** (compare-and-swap), not an audit annotation — and with one actor (U2) it is a *staleness* guard, not a concurrency feature | G24, G45 | U2, U5 |
+| I14 | `value_cents` | Gross revenue, one conversion kind | G20 | U4 |
+| I15 | Money sign | Non-negative integers, enforced at ingest | G49 | U6 |
+| I16 | Currency | USD only; no currency field, no FX | G05 | U1 |
+| I17 | L117's *"everything on screen is derived from the stream"* | Restated as: every **performance** number derives from the signal stream, every **config** value from the decision log folded over its origin, nothing is hard-coded | G39 | — |
+
+**I17 is a correction to the brief, not an interpretation of it.** Taken literally the sentence is
+false in the brief's own terms: budget, status, channel, audience and component payloads come from
+configs and the decision log, not from the signal stream. The restatement preserves the intent — no
+pre-baked arrays behind charts — while surviving contact with the brief's own three-way split.
+
+## G. Declared but unreachable
+
+| Contract element | State | Why | Recorded in |
+|---|---|---|---|
+| `Ad.status: "archived"` | Kept in the type, reachable by no lever | Unreachable in *our lever set*, not in the domain — the visible shadow of a scope cut, which belongs on the cut line and in the notes rather than encoded into a domain type | F1, `SCOPE.md` §4 cut #3 |
+| `Component.kind: "image" \| "body_copy"` | Kept in the type, attachable to no slot | `Ad` has two slots and `Component.kind` declares four; with the Workbench sketched, extending to four slots buys nothing | G06, D23 |
+
+Both are **narrowings we declined to make.** Narrowing a quoted contract needs the same call-out in
+the notes for strictly less fidelity, and it makes reinstatement a type change rippling through the
+fold, the projections and persisted rows rather than a one-variant change.

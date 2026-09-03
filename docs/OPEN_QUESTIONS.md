@@ -1261,3 +1261,346 @@ block current work; all need sign-off before Phase 2 closes.
 **Next gate:** none of this proceeds until answers land. Answered decisions are appended to
 `docs/DECISIONS.md` in your words, with what each forecloses and a one-line "how I'd defend this
 in review". Phase 1 (`docs/SCOPE.md`) starts after D1.
+
+---
+
+## Wave 5 — Phase 2 design (D27–D32)
+
+Presented 2026-09-03 as the Phase 2 design pass, before `docs/DESIGN.md` was written, on Seno's
+instruction: *"Work through it as a sequence of DECISIONs and stop for my answers before writing
+the doc — don't write the doc around your own preferences and then ask me to rubber-stamp it."*
+All six are answered; full analysis retained here, compressed entries in `docs/DECISIONS.md`.
+
+---
+
+### DECISION #27 — Which time bucket a conversion's value lands in [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 — option B (cohort/click-time), amended with a per-bucket maturity
+> indicator. See `docs/DECISIONS.md` § D27.** Residue: the maturity indicator's basis is D33.
+
+**Blocking:** the rollup schema, the restatement path (P7), what "a closed period moved" means,
+and every ROAS/CPA number on screen.
+
+**Context**
+D14 settled *which config generation* credits a late conversion — the one live at the attributed
+click's `ts`. It did not settle which minute bucket the conversion's count and `value_cents` are
+added to; the two are separable. Brief L83: a conversion *"may land hours or days after its
+click, retroactively changing periods you thought were closed."* Impressions, clicks and spend
+ticks bucket at their own `ts`. A conversion has two candidate times: its own, and its click's.
+
+**Options**
+
+**A) Recognition-time — bucket at the conversion's own `ts`.**
+- How it works: `conversions += 1`, `value_cents += v` in the minute of the conversion's `ts`.
+- Pros: one rule for all four event types; "revenue booked today" is a rollup read; the current
+  window never looks empty.
+- Cons: ROAS(T) = revenue recognised in T ÷ spend in T — numerator and denominator describe
+  different populations, so the ratio measures nothing. "Did the swap help?" is unanswerable from
+  rollups. The restatement it produces reaches back only by the *reporting* delay (hours), not
+  the click-to-conversion delay (days), so L83's sentence does not parse: the period rewritten is
+  a recent one, not one you thought was closed.
+- Forecloses: cohort analysis, per-generation ROAS, and the dramatic restatement demo.
+- Reversal cost: **high** — schema change plus a re-fold plus new restatement semantics.
+
+**B) Cohort-time — bucket at the attributed click's `ts`.**
+- How it works: on resolution the conversion is credited to the minute containing the click's
+  `ts`. A bucket becomes "activity at time T, and everything it eventually earned."
+- Pros: numerator and denominator match, so CPA(T) and ROAS(T) are real cohort ratios. Same
+  anchor as D14, so one sentence explains both generation credit and bucket placement. A
+  conversion arriving now rewrites a bucket from three days ago — exactly L83's scenario and the
+  best available restatement demo. `conversions ≤ clicks` holds within a settled bucket.
+- Cons: the current window shows ~0 conversions and near-zero ROAS; honest, but needs explaining
+  beyond D13's live/settled badge. An orphan (D16) has no click and therefore no bucket.
+  "Revenue booked today" stops being a rollup read.
+- Forecloses: recognition-time as a *pre-aggregated* view — not as a view at all, since raw is
+  retained forever (D9).
+- Reversal cost: **high**, same as A.
+
+**C) Dual — store both placements side by side.**
+- How it works: the rollup carries `conv_by_click_minute` and `conv_by_conv_minute` as separate
+  count/value column pairs.
+- Pros: both questions answerable; a cohort/recognised toggle is a good product moment.
+- Cons: two sets of counts to restate on every late arrival, so the restatement surface doubles
+  and P14 must check both; real risk of the UI showing the wrong one unlabelled.
+- Forecloses: nothing.
+- Reversal cost: **low** — additive, and re-foldable from retained raw.
+
+**Recommendation**
+B. For a slice graded on late conversions handled end to end and on numbers being traceable,
+cohort placement is the only placement under which the restatement the reviewer watches is the
+restatement the brief describes, and the only one under which the ratio it moves was
+arithmetically meaningful. C is the tempting hedge but doubles the restatement surface — the most
+delicate path in the build — to answer a question the slice is not graded on and that raw events
+answer on demand.
+
+**Flagged before the answer:** under B an orphan has no legitimate bucket, so it must be counted
+provisionally at its own `ts` and *moved* on resolution — a two-bucket restatement. The
+restatement path therefore has to be generic ("a fact changed, recompute affected buckets")
+rather than lateness-specific.
+
+---
+
+### DECISION #28 — What the minute rollup is keyed by [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 — option A. See `docs/DECISIONS.md` § D28.**
+
+**Blocking:** the rollup DDL, the hot-path index, and whether per-generation numbers are exact.
+
+**Context**
+D9 fixed minute as the base bucket; D10 fixed additive counts only. Neither fixed the key. T1
+trimmed G18 (stamping `config_generation_id` onto events at ingest) to SPECIFY on the ground that
+component-level metrics become a read-time join over `config_generations` by `(ad_id, ts)`. This
+decides where that join lands.
+
+**Options**
+
+**A) `(ad_id, minute_start)`.**
+- How it works: one row per ad-minute; per-generation numbers come from joining buckets to
+  `config_generations` validity intervals by time.
+- Pros: smallest table; the hot read (Signal, last N minutes × 8–12 ads) is one index range scan;
+  restatement touches one row.
+- Cons: a swap at 14:03:27 splits minute 14:03 across two generations and the join must assign
+  the whole minute to one — one minute of one ad per swap, an approximation that must be stated.
+- Forecloses: exact per-generation totals from rollups alone. Not from raw.
+- Reversal cost: **low by construction** — rollups are a rebuildable projection (D7), so re-keying
+  is a schema change plus a re-fold, not a migration.
+
+**B) `(ad_id, config_generation_id, minute_start)`.**
+- How it works: ingest resolves each event's generation; a straddled minute produces two rows.
+- Pros: exact per-generation totals by summation; the swap boundary is representable.
+- Cons: partially reinstates work T1 explicitly trimmed — every ingested event needs a generation
+  lookup, and a late event must resolve against the generation valid at its `ts`, not at
+  `received_at`. Row count multiplies; the hot read stops being a plain range scan.
+- Forecloses: nothing.
+- Reversal cost: low, same re-fold argument.
+
+**C) A, plus a second generation-keyed rollup for the component screen.**
+- Two tables, two restatement paths, two things P14 must check. Not recommended.
+
+**Recommendation**
+A. It looks like the expensive decision and is not, which is the defence: D7 makes rollups
+disposable, so the small key is not a bet. What makes A right now is that the surface consuming
+exact per-generation numbers is the *sketched* Workbench (D1), the component screen is read-only
+over ~12 ads, and exactness there is a raw-event scan away.
+
+---
+
+### DECISION #29 — When the rollup counts are maintained [CHEAP]
+
+> **RESOLVED 2026-09-03 — option A. See `docs/DECISIONS.md` § D29.**
+
+**Blocking:** the ingest write path (P1, P6), read latency, and whether restatement is separate code.
+
+**Context**
+D9 says rollups exist as a rebuildable projection but not when they are written. This is the
+write-time/read-time/cached half of L121, for the *counts*; D10 already answered it for the
+*ratios* (read time, always).
+
+**Options**
+**A) Ingest-time incremental.** Each accepted event, in the same transaction as its canonical
+insert, does `INSERT … ON CONFLICT DO UPDATE` on its bucket. Reads are lookups; a late event is
+the identical code path, updating an older bucket and setting `restated_at`. Cons: every write
+touches ≥1 rollup row. Reversal: free.
+**B) Lazy materialisation with invalidation.** Buckets computed on first read and cached,
+invalidated on a late touch. Cons: cache invalidation is the restatement problem solved a second
+way. Reversal: free.
+**C) Periodic batch sweep.** A tick every N seconds folds new raw rows into buckets. Cons: a
+visible lag between "event arrived" and "number moved" — the thing the pause demo needs to be
+instant — and it makes P14 racy. Reversal: free.
+
+**Recommendation**
+A. Cheap to reverse, so default to simple — and here simple also collapses normal ingest and
+restatement into one code path, which is what makes P7 small and P14 meaningful.
+
+---
+
+### DECISION #30 — What crosses the wire: the snapshot + stream contract [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 — option C. See `docs/DECISIONS.md` § D30.** Residue: structural
+> enforcement of the raw-tail quarantine is D34.
+
+**Blocking:** the Signal read path (P9), cold start, reconnect, restatement delivery, backpressure.
+
+**Context**
+D18 fixes the transport (SSE, `Last-Event-ID` = `ingest_seq`), not the payload. Cold start with an
+empty client and a populated store, and how the UI learns a number changed, are both this
+decision. Volume: 8–12 ads at diurnal peak is plausibly a few hundred events/sec.
+
+**Options**
+
+**A) Raw events only; the client aggregates.**
+- Pros: the purest reading of L117.
+- Cons: the client re-implements bucketing, so two implementations of the arithmetic exist and
+  the one on screen is the client's. A disagreement would be invisible — a direct hit on the
+  criterion the build is organised around. High frame volume; a long disconnect replays everything.
+- Forecloses: a single authoritative implementation of the numbers.
+- Reversal cost: low mechanically; the damage is to the central claim.
+
+**B) Server-computed bucket rows only.**
+- How it works: frames are absolute bucket rows `{ad_id, minute_start, impressions, clicks,
+  spend_cents, conversions, value_cents, settlement, restated_at, as_of_ingest_seq}`. Restatement
+  is another row for an older minute. Cold start: `GET /snapshot` returns the window's buckets
+  plus the current `ingest_seq`; SSE resumes from that cursor.
+- Pros: one implementation of the arithmetic. **Absolute rows are idempotent** — a delta replayed
+  after reconnect double-counts, an absolute row does not, which matters because the reviewer will
+  refresh mid-demo (L157). Low, coalescible volume.
+- Cons: no live raw ticker; drill-down becomes a request (which P12 specifies anyway).
+- Reversal cost: low.
+
+**C) B, plus a bounded raw tail on a second frame type.**
+- How it works: bucket rows drive every displayed number; a capped tail of recent raw events
+  (last N, dropped under burst with a visible "N not shown") drives a live event feed and nothing
+  else. Never summed for display.
+- Pros: keeps B's single-implementation guarantee while giving Signal events visibly ticking.
+  Backpressure gets an explicit answer: the tail drops and says so; bucket rows coalesce per
+  `(ad_id, minute)` on a ~250–500 ms flush tick and never drop.
+- Cons: two frame types; the quarantine needs enforcing.
+- Reversal cost: low.
+
+**Recommendation**
+C. B is the correctness core and A is disqualified by it — the moment the client owns the
+arithmetic, "trace it back and check they agree" compares the client to itself. The raw tail is
+added back deliberately and quarantined: a display of events, never a source of numbers.
+
+---
+
+### DECISION #31 — The traceability anchor [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 — option B. See `docs/DECISIONS.md` § D31.**
+
+**Blocking:** P12, P13, P14 — and whether traceability is a product feature or a debug affordance.
+
+**Context**
+D26 fixed traceability at D24 level D. It did not fix the mechanism by which a number on screen
+names the events behind it. Hard requirement #5: *"any number on screen can be walked back to the
+raw events underneath it, and the two must agree"* — demonstrated, not claimed.
+
+**Options**
+
+**A) The client builds the drill-down query from its own UI state.**
+- Pros: zero server work.
+- Cons: nothing binds the drill-down query to the query that produced the displayed number. If
+  display and drill-down disagree about, say, conversion placement (D27), they quietly differ —
+  and the headline claim is unproven at the moment it is being made.
+- Forecloses: the assertion. Reversal cost: low.
+
+**B) A server-issued trace descriptor on every number.**
+- How it works: every metric value carries `{metric, ad_id, from, to, placement_rule,
+  generation_scope, as_of_ingest_seq}`. Clicking posts it back; the server replays **from raw**
+  under exactly that descriptor and returns the recomputed figure plus contributing `event_id`s.
+  The UI shows both and asserts equality visibly. P13 is the same function run backwards; P14 is
+  the same function swept over every bucket.
+- Pros: turns the grading criterion into an on-screen assertion. Three plan items collapse into
+  one mechanism. `as_of_ingest_seq` makes "the number moved" demonstrable — re-run the descriptor
+  later, get a different figure, attributable to named late events.
+- Cons: a small descriptor on every metric payload; one replay function.
+- Forecloses: nothing. Reversal cost: low mechanically, but the demo value is lost if deferred.
+
+**C) A named server-side query registry.** Binding by convention rather than construction;
+degrades to A the first time someone adds a chart.
+
+**Recommendation**
+B. A debug log proves the number to me; an assertion rendered next to the number proves it to the
+reviewer, live, on a figure they picked. The descriptor→raw replay function is the one P14 needs
+regardless, so building it as a product surface costs the plumbing and nothing else.
+
+---
+
+### DECISION #32 — Simulator topology, and where the ingest boundary sits [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 — option B, on rationale different from the one recommended. See
+> `docs/DECISIONS.md` § D32.**
+
+**Blocking:** the §11 flow diagram, P1's shape, and the honesty of `received_at`.
+
+**Context**
+A narrow slice of D17, pulled forward because P1's ingest boundary is designed in `DESIGN.md` and
+D12 requires `received_at` / `ingest_seq` to be assigned *at our ingest boundary, never by the
+emitter*. The rest of D17 stays for Phase 3.
+
+**Options**
+**A) In-process.** A timer inside the server calling `ingest()` directly. One process, no
+transport, trivial backpressure. Cons: the boundary is a function call, so `received_at` measures
+nothing external; killing the simulator means killing the server. Reversal: low.
+**B) Separate process → HTTP `POST /ingest` in batches.** Pros: a real boundary with one owner of
+validation, dedupe, `received_at` and `ingest_seq`; killing it mid-demo stalls the stream visibly
+and restarting backfills late; backpressure is real and demonstrable. Cons: two processes, kept to
+one command by a small zero-dependency spawner. Reversal: low.
+**C) Separate process writing to the same SQLite file.** Two writers, WAL contention, and
+`ingest_seq` loses its single owner. Rejected.
+
+**Recommendation**
+B. (The recommendation as presented also cited `SCOPE.md` §2's promise that the simulator is
+independently killable. Seno rejected that citation as circular — see `DECISIONS.md` § D32.)
+
+---
+
+### DECISION #33 — Basis for the per-bucket maturity indicator [CHEAP]
+
+> **RESOLVED 2026-09-03 — option B, global and sample-size-labelled. See `docs/DECISIONS.md` § D33.**
+
+**Blocking:** `DESIGN.md` §5 and the Signal bucket rendering. Residue of D27.
+
+**Context**
+D27-B makes a young bucket predictably incomplete rather than merely unsettled. D13's
+live/settled/restated states are a binary claim about finality and do not carry the magnitude.
+
+**Options**
+**A) Elapsed fraction of the horizon** — `clamp((now − bucket_end) / 72h)`. Zero machinery,
+trivially explainable; systematically understates maturity across the whole range anyone looks at,
+because attribution lag is heavily front-loaded and the 72h horizon exists to catch a thin tail.
+Reports ~8% at six hours where the truth may be ~80%. Reversal: low.
+**B) Empirical attribution-lag CDF from our own settled cohorts** — collect
+`received_at − click.ts` for resolved conversions in settled buckets (the *observational* lag: how
+long until we knew, not how long until the human bought); `maturity(bucket) = CDF(now −
+bucket_end)`. Derived from the event stream, needs no disputable constant, correct in shape by
+construction, one cached query. It is a histogram, not a model. Needs settled cohorts to exist —
+always true with 7d backfill. Reversal: low.
+**C) A fixed stated curve** (50% @ 1h, 80% @ 6h, 95% @ 24h, 100% @ 72h) — honest and explainable,
+but circular in a demo, since it asserts a curve about a distribution our own simulator generates.
+Reversal: low.
+
+**Recommendation**
+B, with C named in the README as the cold-start fallback. Cheap to reverse either way, but A is the
+simple option and is actively misleading, which disqualifies it on the same honesty grounds D13 was
+ratified on.
+
+---
+
+### DECISION #34 — Structural enforcement of the raw-tail quarantine [LOAD-BEARING]
+
+> **RESOLVED 2026-09-03 — option C, with the stream-health exception named. See
+> `docs/DECISIONS.md` § D34.**
+
+**Blocking:** `DESIGN.md` §11 and the single-implementation guarantee D30-C rests on.
+
+**Context**
+D30-C's correctness argument is that exactly one implementation of the arithmetic exists. "Don't
+sum the tail" as a comment does not survive contact with a codebase. The reframing that makes it
+enforceable: **raw numbers reach the client only in response to a trace descriptor.** Two raw-event
+payload types exist, not one — `TailFrame` (display, unsolicited, pushed) and `TraceEvidence`
+(summable, returned only by D31's descriptor replay, and summed precisely so it can be asserted
+against the displayed figure).
+
+**Options**
+**A) Convention plus code review.** Recorded to say why not: it is the thing that erodes.
+**B) Branded numerics.** `type TailCents = number & { readonly __tail: unique symbol }`, not
+assignable to the metric arithmetic types. Compile-time and keeps the numbers available; one cast
+removes it, and the cast is easy to write and easy to miss. Reversal: low.
+**C) Numerics absent from the tail frame.** Money on a `TailFrame` is a pre-rendered display string
+(`amount: "$0.42"`), never an integer; and every performance number renders through D31's
+descriptor-taking component, which tail data cannot satisfy because it carries no descriptor — so
+TypeScript strict rejects it at compile time, with D31's on-screen recompute-and-assert as the
+runtime backstop. Summing the tail would require parsing strings, which is ugly enough to be
+visible in a diff. Loses client-side locale formatting on the tail. Reversal: low, and deliberately
+unpleasant, which is the mechanism.
+
+**Recommendation**
+C. It reuses D31 rather than adding a mechanism: the descriptor requirement already exists, and
+making it the only door through which summable raw numbers enter the client turns it into the
+enforcement point for free.
+
+**Stated exception:** stream-health figures (events/sec, last-event age, frames dropped) *are*
+derived from the tail and *are* numbers on screen. They describe the transport, not the ads. The
+rule is "no *performance* number is derived from the tail", not an absolute the design does not
+hold.

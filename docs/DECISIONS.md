@@ -81,8 +81,19 @@ level — and not a severity.
 | D14 | Which generation credits a late conversion | **ACCEPTED — B** | 2026-09-03 |
 | F1 | Disposition of `Ad.status: "archived"` | **DECIDED — keep in the type** | 2026-09-03 |
 | F2 | Demo-mode horizon shortening is a build item | **ACCEPTED** | 2026-09-03 |
+| D27 | Which time bucket a conversion's value lands in | **ACCEPTED — B, amended** | 2026-09-03 |
+| D28 | What the minute rollup is keyed by | **ACCEPTED — A** | 2026-09-03 |
+| D29 | When the rollup counts are maintained | **ACCEPTED — A** | 2026-09-03 |
+| D30 | The snapshot + stream wire contract | **ACCEPTED — C** | 2026-09-03 |
+| D31 | The traceability anchor | **ACCEPTED — B** | 2026-09-03 |
+| D32 | Simulator topology / where ingest sits | **ACCEPTED — B** | 2026-09-03 |
+| D3, D4, D15, D16, D18, D19, D21, D23, D25 | — | **ACCEPTED** (Phase-2 ratification block) | 2026-09-03 |
+| D22 | Day boundary and budget enforcement | **ACCEPTED — C + X, `America/New_York`** | 2026-09-03 |
+| D20 | Separating signal from noise | **ACCEPTED — B**, constants amended, coarsening capped | 2026-09-03 |
+| D33 | Maturity indicator basis | **ACCEPTED — B, global + sample size shown** | 2026-09-03 |
+| D34 | Raw-tail quarantine mechanism | **ACCEPTED — C, exception named** | 2026-09-03 |
 | D6, D24 | — | resolved by D26 | 2026-09-03 |
-| D3, D4, D15–D23, D25 | — | open | — |
+| D17 | Simulator architecture | open — Phase 3, less D32's topology slice | — |
 
 ---
 
@@ -791,3 +802,557 @@ agreement test.
 **How I'd defend this in review.** The lateness horizon is only an honest heuristic if a reviewer
 can watch it bite, so the control that makes a restatement happen on camera is part of the
 feature rather than a demo affordance bolted on afterwards.
+
+---
+
+# PHASE 2 DESIGN PASS — D27–D32, and the Phase-2 ratification block
+
+**Date:** 2026-09-03. Presented before `docs/DESIGN.md` was written, on Seno's instruction:
+
+> "Phase 2: design. Produce docs/DESIGN.md. Work through it as a sequence of DECISIONs and stop
+> for my answers before writing the doc — don't write the doc around your own preferences and
+> then ask me to rubber-stamp it."
+
+Six new decisions (D27–D32) plus ratification of nine carried-over decisions, eight cheap
+defaults and seven assumptions. **Full option analysis for D27–D32 is retained in
+`docs/OPEN_QUESTIONS.md` § Wave 5** and is not duplicated here; for the carried-over nine it is in
+`docs/OPEN_QUESTIONS.md` §B, waves 1–4.
+
+Three residues remain open out of this pass — **D33** (maturity indicator basis), **D34** (raw-tail
+quarantine mechanism), and an amendment to **D20** (the sample-size gate) — see § Residues.
+
+### Wording of record
+
+| # | Seno's words |
+|---|---|
+| D27 | *"go with B. But settlement being on/off doesn't explain why the current window looks half-empty, so add a maturity indicator per bucket, something like what fraction of the conversion window has elapsed. And put it in DESIGN.md that CTR is live while CPA and ROAS lag by cohort — that's a real product consequence, not a footnote."* |
+| D28 | *"A. Worth noting it composes with D27-B: the click's minute already carries the click's generation, so the only precision we lose is on a straddled minute."* |
+| D29 | *"D29 — A."* |
+| D30 | *"C. But how is 'the raw tail is never summed' actually enforced? Convention will erode. I want it structural."* |
+| D31 | *"D31 — B, yes."* |
+| D32 | *"B, but not for the SCOPE.md reason. That promise was written on a recommendation I hadn't ratified yet, so citing it is circular. The reason is that received_at means nothing if the emitter and consumer share a tick."* |
+| D22 | *"America/New_York. The audiences are US, so a UTC day rolls the budget mid-peak and we'd spend the demo explaining a pacing artifact. State the DST path as untested."* |
+| D20 | *"the gate has to scale with the window or be a rate. 500 impressions would suppress everything in a one-minute view. Constants are otherwise fine."* |
+| D3, D4, D15, D16, D18, D19, D21, D23, D25 | *"Part 2 as written. D3, yes to the seeded lineage columns."* |
+| Cheap defaults 1–8 | *"Part 3 all fine."* |
+| U1–U7 | *"Part 4 as a block — but U2 means D24's compare-and-swap concurrency is hypothetical, so don't present it as a live feature"* |
+
+---
+
+## DECISION #27 — Which time bucket a conversion's value lands in
+
+**Status:** ACCEPTED — option B, amended · **Tag:** [LOAD-BEARING] · **Depends on:** D13, D14
+**Residue:** D33
+
+**Question.** D14 settled which config generation credits a late conversion; it did not settle
+which minute bucket the conversion's count and value are added to. Options: A recognition-time
+(the conversion's own `ts`) · **B cohort-time (the attributed click's `ts`)** · C both, dual
+columns. Full analysis: `OPEN_QUESTIONS.md` § Wave 5 · D27.
+
+**Chosen.** B. A bucket is *"activity at time T, and everything it eventually earned"*. Conversion
+count and `value_cents` are credited to the minute containing the attributed click's `ts`.
+
+**Amendment — the maturity indicator.** Seno's words:
+
+> "settlement being on/off doesn't explain why the current window looks half-empty, so add a
+> maturity indicator per bucket, something like what fraction of the conversion window has
+> elapsed."
+
+D13's live/settled/restated states are a *binary* claim about finality. Under B a young bucket is
+not merely "unsettled", it is **predictably incomplete by a knowable amount**, and the UI owes the
+strategist that amount rather than a badge. The indicator's basis is D33.
+
+**Amendment — the lag is a product consequence, not a footnote.** Seno's words:
+
+> "put it in DESIGN.md that CTR is live while CPA and ROAS lag by cohort — that's a real product
+> consequence, not a footnote."
+
+`DESIGN.md` states it as a first-class property: **CTR is readable in near-real-time because both
+its numerator and denominator land at their own `ts`; CPA and ROAS lag by the click-to-conversion
+distribution because their numerator is credited backwards.** The two metric families are
+therefore not interchangeable for a real-time decision, and the surface must say so.
+
+**Consequences.**
+1. The restatement path must be **generic** — "a fact changed, recompute affected buckets" —
+   because an orphan (D16) has no click and so no legitimate bucket: it is counted provisionally
+   at its own `ts` and *moved* on resolution, which is a two-bucket restatement. This retires the
+   last argument for special-casing lateness, and makes D25's `conversion_void` extension nearly
+   free as predicted.
+2. `conversions ≤ clicks` (G46) holds *within a settled bucket*, so the funnel invariant becomes
+   checkable rather than permanently violable.
+3. "Revenue booked today" stops being a rollup read. It remains answerable by a raw scan (D9), and
+   is not built.
+4. The restatement demo reaches back days rather than hours, which is what makes P16's horizon
+   shortening land on camera.
+
+**Forecloses.** Recognition-time as a *pre-aggregated* view. Not as a view at all — raw is retained
+forever — but nothing in the slice reads it.
+
+**Defence.** Under recognition-time, ROAS(T) divides revenue recognised in T by spend in T, whose
+populations are unrelated — a ratio that measures nothing; cohort placement is the only rule under
+which the brief's own sentence about conversions *"retroactively changing periods you thought were
+closed"* describes what our system actually does.
+
+---
+
+## DECISION #28 — What the minute rollup is keyed by
+
+**Status:** ACCEPTED — option A · **Tag:** [LOAD-BEARING] · **Depends on:** D7, D9, D27
+
+**Question.** D9 fixed minute as the base bucket and D10 fixed additive counts; neither fixed the
+key. Options: **A `(ad_id, minute_start)`** · B `(ad_id, config_generation_id, minute_start)` ·
+C A plus a second generation-keyed rollup. Full analysis: `OPEN_QUESTIONS.md` § Wave 5 · D28.
+
+**Chosen.** A. Per-generation numbers come from joining buckets to `config_generations` validity
+intervals by time; exact numbers come from raw.
+
+**Composition with D27 — Seno's words:**
+
+> "Worth noting it composes with D27-B: the click's minute already carries the click's generation,
+> so the only precision we lose is on a straddled minute."
+
+Recorded because it is the argument that makes A safe rather than merely cheap. Under D27-B a
+conversion sits in its click's minute, and D14 credits it to the generation live at the click's
+`ts` — which is the generation covering that minute. So the bucket→generation join by time is
+*already* D14-compliant; it is not an approximation of the attribution rule, only of the minute in
+which a generation boundary falls.
+
+**Consequences.** The hot read — Signal, last N minutes × 8–12 ads — is one index range scan on
+the rollup's primary key. Restatement touches one row per affected bucket. A swap at 14:03:27
+assigns the whole of minute 14:03 to one generation; that is one minute of one ad per swap, stated
+in the README rather than silently absorbed.
+
+**Forecloses.** Exact per-generation totals *from rollups alone*. Not from raw.
+
+**Defence.** It looks like the expensive schema decision and is not, because D7 makes rollups
+disposable — re-keying is a re-fold, not a migration — so the small key buys the fastest read path
+for the surface built deep and gives up precision only on the surface that is sketched, where the
+exact answer is one raw scan away.
+
+---
+
+## DECISION #29 — When the rollup counts are maintained
+
+**Status:** ACCEPTED — option A · **Depends on:** D9, D10
+
+**Question.** L121's write-time / read-time / cached question, for the *counts* — D10 already
+answered it for the ratios. Options: **A ingest-time incremental** · B lazy materialisation with
+invalidation · C periodic batch sweep. Full analysis: `OPEN_QUESTIONS.md` § Wave 5 · D29.
+
+**Chosen.** A. Each accepted event, in the same transaction as its canonical insert, applies
+`INSERT … ON CONFLICT DO UPDATE` to its bucket.
+
+**Consequences.** A late arrival is the *identical* code path — it updates an older bucket and sets
+`restated_at` — so P7 is a flag and a fan-out, not a second mechanism. Reads are lookups, so the
+"pause and watch it stop" moment is immediate. Cheap to reverse: rollups are rebuildable (D7) and
+the maintenance strategy does not touch the schema.
+
+**Forecloses.** Nothing. C was rejected on demo grounds — a sweep interval is a visible lag between
+"event arrived" and "number moved", and it makes P14's agreement test racy against its own writer.
+
+**Defence.** The simple option is also the one that makes normal ingest and restatement the same
+code, which is the only reason P7 is small enough to ship inside this slice.
+
+---
+
+## DECISION #30 — What crosses the wire: the snapshot + stream contract
+
+**Status:** ACCEPTED — option C · **Tag:** [LOAD-BEARING] · **Depends on:** D8, D12, D18
+**Residue:** D34
+
+**Question.** D18 fixes the transport, not the payload; cold start and how the UI learns a number
+changed are both this. Options: A raw events only, client aggregates · B server-computed bucket
+rows only · **C B plus a bounded raw tail**. Full analysis: `OPEN_QUESTIONS.md` § Wave 5 · D30.
+
+**Chosen.** C. **Absolute bucket rows are the only source of any displayed performance number.** A
+capped raw tail rides a second frame type and drives the live event feed only.
+
+**Consequences.**
+1. **Cold start, refresh and reconnect are one path.** Empty client → `GET /snapshot` returns the
+   window's buckets plus the current `ingest_seq` → SSE resumes from that cursor. The mandatory
+   mid-demo refresh (L157) is therefore uneventful by construction, not by care.
+2. **Frames are absolute, not deltas.** A delta replayed after a reconnect double-counts; an
+   absolute row is idempotent. This is what makes resume safe rather than merely usual.
+3. **Restatement needs no new channel** — it is an absolute row for an older minute carrying
+   `restated_at`, so "the UI learns the number changed" is the same mechanism as "the UI learns
+   the number grew".
+4. **Backpressure has a stated answer.** Bucket rows coalesce per `(ad_id, minute)` on a
+   ~250–500 ms flush tick and are never dropped; the raw tail is capped per tick and drops with a
+   visible "N events not shown" counter rather than growing an unbounded queue.
+
+**Forecloses.** Client-side aggregation of displayed numbers, deliberately. Option A was rejected
+because the moment the client owns the arithmetic, *"trace the number back and check they agree"*
+compares the client to itself.
+
+**Open residue — Seno's words:**
+
+> "how is 'the raw tail is never summed' actually enforced? Convention will erode. I want it
+> structural."
+
+Correct, and the quarantine is load-bearing: it is the single rule that keeps the single-
+implementation guarantee true. Mechanism is **D34**, unanswered.
+
+**Defence.** One implementation of the arithmetic, on the server, with the wire carrying idempotent
+absolute rows — so a refresh, a reconnect and a restatement are the same code path, and the live
+event ticker that makes the surface feel like a stream is structurally incapable of contributing
+to a number.
+
+---
+
+## DECISION #31 — The traceability anchor
+
+**Status:** ACCEPTED — option B · **Tag:** [LOAD-BEARING] · **Depends on:** D24 (level D), D26
+
+**Question.** D26 fixed traceability at level D — drill-down (P12), `trace <event_id>` (P13),
+agreement test (P14) — without fixing how a number on screen names the events behind it. Options:
+A client-constructed query · **B server-issued trace descriptor** · C named query registry. Full
+analysis: `OPEN_QUESTIONS.md` § Wave 5 · D31.
+
+**Chosen.** B. Every metric value the server sends carries `{metric, ad_id, from, to,
+placement_rule, generation_scope, as_of_ingest_seq}`. Clicking it posts the descriptor back; the
+server replays **from raw** under exactly that descriptor and returns the recomputed figure plus
+the contributing `event_id`s. The UI renders both and asserts equality visibly.
+
+**Consequences.**
+1. **P12, P13 and P14 become one mechanism.** The drill-down is a descriptor replay; `trace
+   <event_id>` is that function run backwards; the agreement test is that function swept over every
+   bucket. Three plan items, one function.
+2. `as_of_ingest_seq` is what makes restatement *demonstrable*: re-run the same descriptor later,
+   get a different figure, and attribute the difference to named late events.
+3. The descriptor carries `placement_rule`, so D27-B is inspectable at the point of use rather than
+   being a fact about the README.
+4. It also supplies the compile-time hook D34 needs — a number with no descriptor has nothing to
+   render through.
+
+**Forecloses.** Nothing.
+
+**Defence.** A debug log proves the number to me; an assertion rendered beside the number proves it
+to the reviewer, live, on a figure they chose — and it costs only the descriptor plumbing, because
+the replay function underneath it is the one the agreement test needed anyway.
+
+---
+
+## DECISION #32 — Simulator topology, and where the ingest boundary sits
+
+**Status:** ACCEPTED — option B · **Tag:** [LOAD-BEARING] · **Depends on:** D12 · **Slice of:** D17
+
+**Question.** A narrow slice of D17 pulled forward, because P1's ingest boundary is designed in
+`DESIGN.md` and D12 requires `received_at` / `ingest_seq` to be assigned at our ingest boundary and
+never by the emitter. The rest of D17 remains open for Phase 3. Options: A in-process ·
+**B separate process → HTTP `POST /ingest`** · C separate process, shared SQLite file. Full
+analysis: `OPEN_QUESTIONS.md` § Wave 5 · D32.
+
+**Chosen.** B, launched alongside the server by a small zero-dependency spawner so *"run in one
+command"* (L151) still holds.
+
+**Rationale — Seno's words, and a correction to mine:**
+
+> "B, but not for the SCOPE.md reason. That promise was written on a recommendation I hadn't
+> ratified yet, so citing it is circular. The reason is that received_at means nothing if the
+> emitter and consumer share a tick."
+
+The recommendation as presented cited `SCOPE.md` §2's guarantee that the simulator process can be
+killed and restarted mid-demo. That was circular: the guarantee was written into `SCOPE.md` on the
+strength of an unratified recommendation, so it could not then be evidence for ratifying it. The
+ratified ground is narrower and better: **`received_at` is only a measurement if the emitter and
+the consumer are separated by something that can be slow, drop, batch or stall.** In-process, it is
+a same-tick constant wearing the name of an observation, and every lateness figure derived from it
+inherits that.
+
+**Provenance note.** `SCOPE.md` §2's promise is now valid, ratified after the fact by this entry
+rather than before it. Recorded because `SCOPE.md` §2 is README-verbatim, and a forward-committed
+promise in that block is worth being able to spot.
+
+**Consequences.** The ingest boundary is an HTTP endpoint with exactly one owner of validation,
+dedupe, `received_at` and `ingest_seq`. Killing the simulator stalls the stream visibly (G21's
+liveness display) and restarting it backfills, which exercises the late path without special
+casing. Backpressure is real and observable at the endpoint rather than hypothetical.
+
+**Forecloses.** Nothing. Both directions are a small change behind one `ingest()` function; C is
+rejected outright because two writers destroy the single owner of `ingest_seq`.
+
+**Defence.** Arrival time is the field the entire late-conversion story is built on, and it is only
+an honest measurement if the emitter and the consumer are genuinely separated — so the boundary is
+a process boundary, and killing the emitter mid-demo is a thing the reviewer can watch.
+
+---
+
+# PHASE-2 RATIFICATION BLOCK
+
+Nine carried-over decisions, eight cheap defaults and seven assumptions, ratified 2026-09-03 in the
+same pass. Full option analysis for the nine is in `docs/OPEN_QUESTIONS.md` §B, waves 1–4.
+
+**Seno's words:** *"Part 2 as written. D3, yes to the seeded lineage columns."* · *"Part 3 all
+fine."* · *"Part 4 as a block — but U2 means D24's compare-and-swap concurrency is hypothetical, so
+don't present it as a live feature"*
+
+## The nine
+
+| # | Status | Chosen | Note carried into `DESIGN.md` |
+|---|---|---|---|
+| **D3** | ACCEPTED — B, extended | Copy-on-write with `lineage_id` / `version` / `parent_id` | Prose-only per D1 — no editor ships. **The three columns ship anyway, seeded so one component has two versions**, so the component screen's "per version or per lineage?" answer is concrete rather than hypothetical. |
+| **D4** | ACCEPTED — C | Ad = unit of action, component = unit of analysis | README paragraph per D1. |
+| **D15** | ACCEPTED — C | First-write-wins for aggregates; **every delivery persisted**; conflicts surfaced | Feeds the DDL and the misbehaviour table. |
+| **D16** | ACCEPTED — C, restated under D27 | Provisional counting, visible re-attribution, orphan health counter | **Restated by D27-B**: provisional placement is the conversion's own minute, and resolution *moves* it to the click's minute — a two-bucket restatement. |
+| **D18** | ACCEPTED — A | SSE with `Last-Event-ID` = `ingest_seq` | D30 builds the payload contract on it. |
+| **D19** | ACCEPTED — cut | Decision scoring cut by D26 | Cut #1, stated. |
+| **D21** | ACCEPTED — A | Two stores, shared envelope `{id, ts, received_at, ingest_seq}`, merged at read | This is the answer to `DESIGN.md` §1 — configs, signals and levers distinct in storage. |
+| **D23** | ACCEPTED — B | Two slots kept; `image` / `body_copy` are library-only | Follows D1. Gets a `BRIEF_GAPS` entry. |
+| **D25** | ACCEPTED — A, B specified | Retractions out of scope; `conversion_void` specified in the README | D27's orphan consequence already forces the generic restatement path, so B's "nearly free" claim is now demonstrated rather than asserted. |
+
+**D20** was ratified only in part — constants accepted, gate mechanism sent back. See § Residues.
+
+**D22 — ACCEPTED: account timezone `America/New_York`, budget as a pacing parameter.** This
+unblocks P6. Seno's words:
+
+> "America/New_York. The audiences are US, so a UTC day rolls the budget mid-peak and we'd spend
+> the demo explaining a pacing artifact. State the DST path as untested."
+
+Buckets are stored in UTC; only the day boundary is account-local, computed with built-in `Intl`
+(no dependency). **Consequence:** with US audiences, a UTC midnight rollover falls in the middle of
+the US afternoon peak, so the budget would reset mid-peak and the pacing curve would show a
+discontinuity that is an artifact of our clock choice rather than a property of the domain — the
+demo would be spent explaining it. Choosing a non-zero offset also keeps G04 visible as a *choice*;
+UTC hides that one was ever made. **Stated limit:** no DST transition falls inside a September
+seven-day window, so the DST path is correct by construction and **untested in the demo window** —
+written up as a named limit, not left implicit.
+
+## The eight cheap defaults
+
+Ratified as a block; each is low-cost to reverse and written into `DESIGN.md` as a stated default.
+
+1. **Reverse join (G38)** — current-state only (fixed by D1), computed by scanning the `ads`
+   projection on read. At 8–12 ads a maintained index is dress-up.
+2. **Delivery storage** — `signal_deliveries` (every delivery, PK `delivery_seq`) + `signals`
+   (canonical, PK `event_id`, first write wins). Two tables, not one with a flag.
+3. **Orphan storage** — `attribution_state` + nullable `resolved_click_event_id` on the canonical
+   conversion row; no separate pending table.
+4. **Clock skew (G44)** — clamp future-dated `ts` to `received_at`, count it, never reject.
+5. **Events for a non-live ad (G48)** — never reject on ad status; count arrivals that should not
+   exist as a self-check, since under our own simulator they should be zero.
+6. **Funnel violations (G46)** — show unclamped with an "unsettled" marker and the orphan count
+   beside it; never clamp.
+7. **Divergence detection (D7's "both")** — a `/verify` endpoint rebuilding projections into temp
+   tables and diffing, run at boot in dev. P14 extended from rollups to the fold.
+8. **`Ad.created_at` and `Ad.name` (G03)** — both added; a stable name matters precisely because
+   components swap underneath it.
+
+## The seven assumptions
+
+**U1–U7 ratified as a block** (`OPEN_QUESTIONS.md` §C). U1 was gated on `DESIGN.md` finalising and
+is now answered; the rest are answered ahead of their build gates.
+
+| # | Ratified as |
+|---|---|
+| U1 | USD only; no currency field, no FX |
+| U2 | Single user; `actor` is a hard-coded `human:` string |
+| U3 | Audiences and channels are static reference data; no lever changes them |
+| U4 | One conversion kind; `value_cents` is gross revenue |
+| U5 | Decisions exactly-once, idempotent on `decision_id` |
+| U6 | Money fields non-negative integers, enforced at ingest |
+| U7 | `Decision.ts` is request time; effects immediate; backdating rejected |
+
+**U2's consequence for compare-and-swap — Seno's words:**
+
+> "U2 means D24's compare-and-swap concurrency is hypothetical, so don't present it as a live
+> feature"
+
+The compare-and-swap in question is **G24's** — the `from_cents` / `from_id` precondition on
+`set_budget` and `swap_component`. It ships, because it is one comparison and it catches the
+failure that *can* happen under U2: a stale browser tab, a double-submit, or a retried POST
+applying a lever against config it no longer describes. What does **not** ship, and must not be
+claimed, is the multi-actor story — two strategists racing, or a human racing
+`system:fatigue_rule`. With a single hard-coded actor and no `Recommendation` entity (D26 cut #6),
+there is no second writer, so concurrency control is **a staleness guard, not a concurrency
+feature**, and `DESIGN.md` and the README say exactly that.
+
+---
+
+# RESIDUES OF THE PHASE 2 PASS — D33, D34, D20 amendment
+
+Three items opened by Seno's answers and not yet closed. `docs/DESIGN.md` is blocked on all three.
+
+| # | What is open | Opened by |
+|---|---|---|
+| **D33** | The basis for D27's per-bucket maturity indicator: elapsed fraction of the horizon, an empirical attribution-lag CDF, or a fixed stated curve | D27 amendment |
+| **D34** | The structural mechanism enforcing that raw-tail frames can never contribute to a displayed number | D30 |
+| **D20** | The sample-size gate must scale with the window or be a rate; the fixed 500-impression form fails a one-minute view. Constants otherwise accepted | D20 partial ratification |
+
+---
+
+# RESIDUE CLOSE — D33, D34, D20 amendment
+
+**Date:** 2026-09-03. The three items opened by Seno's answers to the Phase 2 pass, now closed.
+`docs/DESIGN.md` is unblocked. Full option analysis for D33 and D34 is in
+`docs/OPEN_QUESTIONS.md` § Wave 5.
+
+### Wording of record
+
+| # | Seno's words |
+|---|---|
+| D33 | *"B is fine, the elapsed-fraction argument convinced me. Keep the CDF global though, don't segment by ad or channel at this volume, and show the sample size it was measured from so it's obviously a histogram and not a forecast. C as the cold-start fallback in the README, agreed."* |
+| D34 | *"C, approved. And I'd rather you name the stream-health exception than pretend to an absolute that doesn't hold — that's the right call. Just make sure the label makes it obvious those numbers describe the transport and not the ads."* |
+| D20 | *"B, and yes the conversions correction is right, CPA's denominator is conversions so gating on clicks was measuring the wrong thing. One thing to watch: a young cohort will never clear 10 conversions, so adaptive granularity could coarsen forever chasing a bar it can't reach. Cap the coarsening (hour, say) and past that just show the counts instead of an ever-wider bucket. Otherwise the chart quietly turns into one point."* |
+
+---
+
+## DECISION #33 — Basis for the per-bucket maturity indicator
+
+**Status:** ACCEPTED — option B, qualified · **Depends on:** D13, D27 · **Residue of:** D27
+
+**Question.** D27's maturity indicator needs a basis. Options: A elapsed fraction of the 72h
+horizon · **B empirical attribution-lag CDF from settled cohorts** · C a fixed stated curve. Full
+analysis: `OPEN_QUESTIONS.md` § Wave 5 · D33.
+
+**Chosen.** B. Over settled buckets, collect `received_at − click.ts` for every resolved
+conversion — the **observational** lag, how long until we knew, not how long until the human
+bought — and evaluate that empirical CDF at the bucket's age.
+
+**Qualifications — all three from Seno, all three load-bearing:**
+
+1. **The CDF is global.** Not segmented by ad, channel, audience or generation. At 8–12 ads the
+   per-segment sample would be thin enough that the indicator would itself become noisy — which is
+   the failure mode the indicator exists to protect against. Stated as a limit: a channel with a
+   genuinely different lag profile is misrepresented by the global curve, and we say so rather than
+   segmenting into noise.
+2. **The sample size it was measured from is displayed alongside it.** *"so it's obviously a
+   histogram and not a forecast."* This is the line that keeps the feature inside the brief's
+   disclaimer of statistical sophistication (L147): a number labelled "68% mature, measured over
+   1,432 settled conversions" is visibly a count of things that happened. Without the sample size
+   it reads as a prediction and invites exactly the scrutiny the brief says it does not want.
+3. **C is the README's stated cold-start fallback** — what we would use before any cohort has
+   settled. With 7d of backfill it never fires in the demo, which is itself worth stating.
+
+**Consequences.** One cached query over settled cohorts, recomputed periodically. The indicator is
+derived from the event stream like every other number, so it needs no constant anyone can dispute.
+It is displayed with its sample size and never without.
+
+**Forecloses.** Per-segment maturity, deliberately — and named as a limit rather than left as an
+absence.
+
+**Defence.** A young cohort is not merely "unsettled", it is incomplete by a knowable amount, and
+the honest way to say so is to measure the lag we have actually observed and show the reader how
+many observations that is — which makes it a histogram of our own data rather than a forecast about
+someone else's.
+
+---
+
+## DECISION #34 — Structural enforcement of the raw-tail quarantine
+
+**Status:** ACCEPTED — option C, exception named · **Tag:** [LOAD-BEARING]
+**Depends on:** D30, D31 · **Residue of:** D30
+
+**Question.** D30-C's single-implementation guarantee depends on raw-tail frames never contributing
+to a displayed number, and Seno rejected convention as the mechanism. Options: A convention plus
+review · B branded numerics · **C numerics absent from the tail frame, plus descriptor-gated
+rendering**. Full analysis: `OPEN_QUESTIONS.md` § Wave 5 · D34.
+
+**Chosen.** C. Three layers, two of them compile-time:
+
+1. **The data is not there.** Money on a `TailFrame` is a pre-rendered display string
+   (`amount: "$0.42"`), never an integer. Summing the tail requires parsing strings — visible in a
+   diff, which is the point.
+2. **The render path is gated.** Every performance number renders through D31's
+   descriptor-taking component. Tail frames carry no descriptor and cannot be given one, because
+   descriptors are server-issued and signed (`node:crypto`, built-in). Under TypeScript strict
+   there is nothing to pass, so it fails to compile.
+3. **The runtime backstop is already built.** D31's recompute-and-assert would fail visibly, on
+   screen, for any number that reached the display by another route.
+
+**The governing rule, stated once:** *raw numbers reach the client only in response to a trace
+descriptor.* There are two raw-event payload types — `TailFrame` (display, unsolicited, pushed) and
+`TraceEvidence` (summable, returned only by descriptor replay, and summed precisely so it can be
+asserted against the displayed figure).
+
+**The stated exception — Seno's words:**
+
+> "I'd rather you name the stream-health exception than pretend to an absolute that doesn't hold —
+> that's the right call. Just make sure the label makes it obvious those numbers describe the
+> transport and not the ads."
+
+Stream-health figures — events/sec, last-event age, frames dropped, deliveries deduped — are
+derived from the tail and are numbers on screen. They describe the **transport**, not the ads. They
+are rendered in a visually distinct treatment, grouped under a heading that names them as stream
+telemetry, and never share a surface with a performance metric in a way that could be read as one.
+The rule in `DESIGN.md` and the README reads *"no **performance** number is derived from the
+tail"*, not an absolute the design does not hold.
+
+**Consequences.** The descriptor signature earns its keep twice: it makes "server-issued" a
+structural fact rather than a naming convention, and it is what stops a client from minting a
+descriptor for tail-derived data. The tail loses client-side locale formatting.
+
+**Forecloses.** A future "sum the last N events" view would have to go through the descriptor path —
+which is the correct path anyway.
+
+**Defence.** The guarantee the whole read model rests on is that one implementation of the
+arithmetic exists, so the rule protecting it is enforced by the type system and by the absence of
+the data, not by a comment — and the one place the rule genuinely does not hold is labelled as
+transport telemetry rather than quietly excepted.
+
+---
+
+## DECISION #20 — Separating signal from noise
+
+**Status:** ACCEPTED — B (adaptive granularity), constants amended, coarsening capped
+**Depends on:** D9, D27, D33
+
+**Question.** L155 asks how we separate signal from noise. Options as originally presented: A
+sample-size gate · **B gate plus smoothed series** · C confidence intervals (the option the brief
+tells us not to take). Ratified as B; the *gate mechanism* was sent back on the ground that a fixed
+500-impression bar suppresses everything in a one-minute view. Full original analysis:
+`OPEN_QUESTIONS.md` §B · D20.
+
+**Chosen — the mechanism.** A **fixed statistical bar with adaptive point granularity**. The bar
+stays a property of the sample, because that is what makes a ratio meaningless — a CTR over 30
+impressions is noise whether those 30 arrived in a minute or an hour, and a rate-based gate would
+threshold on how busy an ad is rather than on how much evidence a point carries, which is backwards
+since the low-rate ad is precisely the noisy case. The *granularity* adapts instead: the chart picks
+the smallest bucket size at which its points clear the bar, and displays which one it picked. D9
+already derives coarser buckets from minutes, so this is the same fold, not new machinery.
+
+**Chosen — the constants.**
+
+| Ratio | Gate | Basis |
+|---|---|---|
+| CTR | ≥ 500 impressions per plotted point | relative standard error ≈ 30% at p ≈ 2% |
+| CPA, ROAS | ≥ 10 **conversions** per plotted point | RSE of a count of 10 ≈ 32% — comparable |
+
+Smoothing: EWMA, 15-minute half-life, with a toggle to the raw series.
+
+**Correction carried into the constants — Seno's words:**
+
+> "yes the conversions correction is right, CPA's denominator is conversions so gating on clicks was
+> measuring the wrong thing."
+
+The originally proposed CPA/ROAS gate of "≥ 25 clicks" thresholded the wrong quantity: CPA is spend
+÷ conversions, so conversions is the noisy denominator. Corrected before build.
+
+**Amendment — the coarsening cap. Seno's words:**
+
+> "a young cohort will never clear 10 conversions, so adaptive granularity could coarsen forever
+> chasing a bar it can't reach. Cap the coarsening (hour, say) and past that just show the counts
+> instead of an ever-wider bucket. Otherwise the chart quietly turns into one point."
+
+This is a genuine failure of the mechanism as designed and it composes badly with D27-B
+specifically: under cohort placement a *young* cohort has few conversions **because it is young**,
+not because it is low-volume, so the adaptive search has no granularity at which the bar is
+reachable and would widen until the chart is a single point — degrading silently, which is the one
+failure mode the whole gate exists to prevent.
+
+**Resolved as:** granularity escalates minute → 5 min → 15 min → hour and **stops**. If the hourly
+point still does not clear the bar, the ratio is not drawn at all and the **counts** are shown in
+its place, with the reason stated on the surface. A chart that says "not enough conversions yet —
+here are the counts" is honest; a chart that has quietly become one wide bar is not.
+
+**Consequences.** Two mechanisms with two distinct meanings now sit side by side and must stay
+visibly distinct: the **gate** says *too little data to be a ratio*; the **maturity indicator**
+(D33) says *the data is still arriving*. A young cohort trips both, for different reasons, and the
+surface says which.
+
+**Forecloses.** Sub-minute ratios (nothing needs them) and confidence intervals (C, which the brief
+disclaims).
+
+**Defence.** The bar is a statement about evidence and stays fixed so the constant is defensible;
+the resolution is what bends; and when neither can satisfy the other the chart stops drawing a
+ratio and shows the counts instead, rather than degrading into a single wide bucket that looks like
+an answer.
