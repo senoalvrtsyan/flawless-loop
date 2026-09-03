@@ -155,6 +155,7 @@ CREATE TABLE signals (
     GENERATED ALWAYS AS (MIN(ts, received_at)) STORED,-- I10: clock-skew clamp (G44)
   ad_id        TEXT NOT NULL,
   kind         TEXT NOT NULL CHECK (kind IN ('impression','click','spend','conversion')),
+  source       TEXT NOT NULL CHECK (source IN ('backfill','live')),  -- E15: server-assigned (D38)
 
   click_id            TEXT,        -- E3 (G17): click only, distinct from event_id
   cost_cents          INTEGER,     -- click only: the CPC charge (L78)
@@ -177,6 +178,10 @@ Notes that are decisions, not style:
 
 - **`ts` is never altered.** The skew clamp (I10) is a *generated* column, so the clamped value
   cannot drift from the rule that produced it and the emitted value is still there to show.
+- **`source` is assigned by the server, from which path the batch arrived on** — never by the
+  emitter (**D38-B**). It separates the seeded population from the observed one, which D33's
+  maturity label discloses (*"1,432 settled conversions (1,180 seeded)"*) and which any figure
+  resting on history can be checked against.
 - **`ux_signals_click_id` is unique and partial.** A second click claiming an existing `click_id`
   is a detectable error rather than a silent double-count — which is the whole reason E3 exists.
 - **`ix_signals_attr`** is what makes the reverse direction cheap: when a click finally arrives,
@@ -337,10 +342,25 @@ CREATE TABLE projection_meta (                        -- rebuild bookkeeping, an
 ) STRICT;
 ```
 
+```sql
+CREATE TABLE sim_scenarios (                          -- D40 / F3 (P17): the third replay input
+  scenario_id  TEXT PRIMARY KEY,
+  ts           TEXT NOT NULL,                         -- when it was triggered
+  name         TEXT NOT NULL,                         -- 'fatigue_collapse' | 'late_cascade' | ...
+  args_json    TEXT NOT NULL,
+  consumed_at  TEXT                                   -- NULL until the simulator picks it up
+) STRICT;
+```
+
+Not a projection and not a signal: it is **simulator input**, persisted because the reproducibility
+claim names it. Determinism is `(seed + decision log + sim_scenarios) → world` (**D40**), and a
+claim whose third input lives in memory is false. `SIMULATOR.md` §17.
+
 ### 2.5 What is a table, what is a log, what is derived — the one-line answer
 
 **Logs:** `decisions`, `signals` (+ `signal_deliveries` as its raw arrival record).
 **Tables (static):** `components`, `audiences`.
+**Simulator input:** `sim_scenarios` — neither a fact about the world nor derived from one.
 **Derived:** `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`,
 `projection_meta`.
 **Cached:** nothing. There is no cache tier — see §4.3 for why that is a decision and not an
@@ -604,13 +624,22 @@ applyConversion(ev, prev?):                    -- prev = its previous attributio
   bucket(new credited_minute)            += new contribution         -- credit the new one
   for each touched bucket B:
       B.max_ingest_seq = max(B.max_ingest_seq, ev.ingest_seq)
-      if settled(B) before this write:
-          B.restated_at = now;  B.restatement_count += 1
+      if settled_at(B, ev.received_at):                              -- NOT wall-clock now
+          B.restated_at = ev.received_at;  B.restatement_count += 1
       mark B dirty
 ```
 
-`settled(B)` is `now − (B.minute_start + 60s) > horizon`, horizon = **72h** (**D13**), displayed and
-adjustable. Three honest states, and they are the vocabulary the UI speaks in:
+`settled_at(B, at)` is `at − (B.minute_start + 60s) > horizon`, horizon = **72h** (**D13**),
+displayed and adjustable.
+
+**Evaluated at `ev.received_at`, never at wall-clock `now`** — corrected by **D38**. The question a
+restatement flag answers is *"was this bucket settled **when this event arrived**"*, and for a live
+event the two are the same because `received_at ≈ now`. They diverge exactly once, and expensively:
+during seeding (§3.2, D38-E) `now` is boot time, so the wall-clock form would stamp `restated_at` on
+**every** backfilled event landing in a bucket older than 72h — tens of thousands of spurious
+restatements, and P7 looking broken on frame one. `SIMULATOR.md` §15.3.
+
+Three honest states, and they are the vocabulary the UI speaks in:
 
 | State | Meaning |
 |---|---|
@@ -903,6 +932,17 @@ Re-run the same descriptor with a later `as_of_ingest_seq` and the figure change
 attributable to a named set of `event_id`s, each with its `received_at` and its lateness. That turns
 *"a conversion landed late and rewrote Tuesday"* from a claim into a diff the reviewer can read.
 
+**This works because `ingest_seq` is monotone in `received_at`** — for live events by construction,
+and for the seeded window because the seeder sorts by `received_at` before writing and hands anything
+arriving after the seed boundary to the live emitter instead (**D38**, `SIMULATOR.md` §15.3).
+
+**The one limit, stated rather than left looking like it works.** Within the *seeded* window
+`received_at` is **designed, not observed** — the seeder draws it from the reporting-lag distribution
+(D38-E). So for backfilled history `as_of` reconstructs *what the screen would have shown under the
+seeded arrival model*, not what anyone actually saw, because nobody was watching. For live arrivals
+there is no such caveat: those `received_at` values are measurements. The `source` column (§2.2) is
+what lets a reviewer tell which regime a given figure sits in.
+
 ### 10.4 The life of one event
 
 ```
@@ -948,11 +988,15 @@ Every step in that trace is a row a reviewer can select, in a table named above.
 
 ```
   ┌────────────────────┐
-  │ SIMULATOR          │   separate OS process (D32). Stateless: resumes from MAX(ts).
-  │ diurnal curve      │   Budget is a PACING multiplier on the rate, not a cap (I3/P11).
-  │ fatigue, noise     │   Honours pause: a paused ad stops emitting — a simulator
-  │ late conversions   │   convention, not a contract property (G48), stated as such.
+  │ SIMULATOR          │   separate OS process (D32). Holds NO durable state: it polls
+  │ diurnal curve      │   GET /api/sim/world each tick for config, fatigue state,
+  │ fatigue, noise     │   spend-so-far and pending scenarios (D40). 1x wall clock, 1s tick.
+  │ late conversions   │   Budget is a PACING multiplier on the rate, not a cap (I3/P11).
+  │ keyed RNG          │   Honours pause: a paused ad stops emitting — a simulator
+  │                    │   convention, not a contract property (G48), stated as such.
   └─────────┬──────────┘
+            ^  GET /api/sim/world  (1 Hz)   ·   POST /api/sim/scenario  (P17, on demand)
+            │  ── the only channel into the emitter; scenario triggers ride the same poll
             │  HTTP POST /api/ingest — BATCHED (~1 s of simulated time per request)
             v                                          ◄── backpressure point 1
   ┌────────────────────────────────────────────────────────────────────────┐
@@ -980,6 +1024,13 @@ Every step in that trace is a row a reviewer can select, in a table named above.
   │   click a number -> POST /api/trace {descriptor} -> raw re-sum + assert│
   └────────────────────────────────────────────────────────────────────────┘
 ```
+
+**The simulator's two endpoints** (**D40**, **F3**). `GET /api/sim/world` is a read the Workbench
+half-wants anyway — cumulative delivery per `(lineage, audience)` is §8's temporal reverse join — and
+it is what keeps §3.3's *"the simulator holds no durable state"* true rather than aspirational: the
+emitter's fatigue state is recomputed from the signal log, so it cannot silently disagree with the
+fatigue the app infers. `POST /api/sim/scenario` writes a row the same poll picks up, so there is no
+second control path and pause latency is a stated number (≤ 1 tick, ≤ 1 s).
 
 **Synchronous:** everything from `POST /api/ingest` to the rollup upsert, in one SQLite transaction.
 `node:sqlite` is synchronous by design, so a reader can never see a signal whose bucket has not been
@@ -1047,6 +1098,7 @@ contracts**. That section is the assembly source for the README. Summary:
 | E10–E12 | `lineage_id`, `version`, `parent_id` | `Component` fields | G10 | D3 |
 | E13 | `ConfigGeneration` | new entity | G01, G18 | D2, D14 |
 | E14 | `TraceDescriptor` | new wire type, no persisted state | L143 | D31 |
+| E15 | `source: 'backfill' \| 'live'` | `Signal` field | D33 conflict | D38 |
 
 **Nothing is narrowed.** `Ad.status: "archived"` (F1) and `Component.kind: "image" | "body_copy"`
 (D23) are kept in their types though no lever reaches one and no slot accepts the others — both are
@@ -1054,7 +1106,7 @@ the visible shadow of a scope cut, and a scope cut belongs on the cut line and i
 than encoded into a domain type where a later reader cannot tell deliberate omission from modelling
 claim.
 
-**Seventeen interpretations** (I1–I17) fix meanings the brief leaves open without changing its shape
+**Eighteen interpretations** (I1–I18) fix meanings the brief leaves open without changing its shape
 — spend as a delta, the account timezone, first-write-wins, click-authoritative attribution, and so
 on. They are listed in the same register because an interpretation can be wrong in a way a reviewer
 should be able to check, and I17 in particular is a **correction to the brief**, not a reading of it:

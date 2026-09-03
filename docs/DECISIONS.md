@@ -15,11 +15,11 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D26 |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D40 |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
-| `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1, F2 |
+| `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1, F2, F3 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
-| `P`*n* | **Plan item** — one reviewable build chunk | `SCOPE.md` §2; `BUILD_PLAN.md` from Phase 4 | P1–P16 |
+| `P`*n* | **Plan item** — one reviewable build chunk | `SCOPE.md` §2; `BUILD_PLAN.md` from Phase 4 | P1–P17 |
 | `L`*nnn* | **Line number in `docs/BRIEF.md`** — so a quote is checkable, never recalled | citations throughout | — |
 
 **Gap codes**, as they appear in a `BRIEF_GAPS.md` heading (`### G04 — <title> · US · B · FIX`) —
@@ -93,7 +93,15 @@ level — and not a severity.
 | D33 | Maturity indicator basis | **ACCEPTED — B, global + sample size shown** | 2026-09-03 |
 | D34 | Raw-tail quarantine mechanism | **ACCEPTED — C, exception named** | 2026-09-03 |
 | D6, D24 | — | resolved by D26 | 2026-09-03 |
-| D17 | Simulator architecture | open — Phase 3, less D32's topology slice | — |
+| D35 | What creative fatigue accrues to | **ACCEPTED — C**, headline weight kept | 2026-09-03 |
+| D36 | Conversion lag distribution | **ACCEPTED — C**, two lags kept separate | 2026-09-03 |
+| D37 | Noise and overdispersion | **ACCEPTED — C**, all six components | 2026-09-03 |
+| D38 | Backfill arrival semantics | **ACCEPTED — E + B**, amended | 2026-09-03 |
+| D39 | Volume calibration | **ACCEPTED — B**, progress print required | 2026-09-03 |
+| D40 | Simulator state and config sync | **ACCEPTED — A + X**, scenario table approved | 2026-09-03 |
+| D17 | Simulator architecture | **ACCEPTED** — closed by the Phase 3 proposal block | 2026-09-03 |
+| F3 | Scenario control is a plan item (P17) | **ACCEPTED** | 2026-09-03 |
+| D35p | D35 parameter ratification (`served_fraction`, version reset `r`) | **ACCEPTED** | 2026-09-03 |
 
 ---
 
@@ -1356,3 +1364,458 @@ disclaims).
 the resolution is what bends; and when neither can satisfy the other the chart stops drawing a
 ratio and shows the counts instead, rather than degrading into a single wide bucket that looks like
 an answer.
+
+---
+
+# PHASE 3 SIMULATOR PASS — D35–D40, D17 closed, F3
+
+**Date:** 2026-09-03. Presented before `docs/SIMULATOR.md` was written, on the Phase 3 prompt's
+instruction: *"Present the fatigue model, the lag distribution, and the noise model as DECISIONs with
+alternatives. The rest you can propose and I'll ratify."*
+
+Six decisions. Three were named by the prompt (D35, D36, D37). Three were surfaced during the read
+and **confirmed as decision-shaped by Seno rather than chosen by me** — asked as a plan-mode
+question, answered *"Backfill vs D33's CDF, Volume calibration, Simulator state + config sync"*.
+D17's residue was **not** selected for full treatment and is therefore closed below against the
+proposal block, not as its own entry.
+
+**Full option analysis for all six is retained in `docs/OPEN_QUESTIONS.md` § Wave 6** and is not
+duplicated here.
+
+### Wording of record
+
+Verbatim. No sentence is paraphrased into an entry's prose without appearing here first.
+
+| # | Seno's words |
+|---|---|
+| D35 | *"C, approved, and keep headline at 0.5. Copy does wear out, just slower than video, and zeroing it would mean the headline swap lever changes nothing observable."* |
+| D36 | *"approved, and keep the two lags separate. If you collapse them then received_at − ts becomes the purchase lag, which would make our own transport look like it's hours behind. That field has to describe us, not the buyer."* |
+| D37 | *"all six rows. I did think about collapsing the two AR(1) processes but I think both earn their place: channel-level moves ads together, ad-level is idiosyncratic, and the fact that you can't immediately tell which one you're looking at is a real property of the domain — it's also the honest basis for the fatigue flag's 'can't separate this from a platform delivery change' limit. If implementation drags, collapse to one and say so."* |
+| D38 | *"E+B. One thing to work through: backfilled rows get received_at in the past but their ingest_seq is assigned in a burst at boot, so for that window seq order and arrival order don't agree. I don't think it breaks SSE resume, but it does mean as_of_ingest_seq can't reconstruct 'what the screen showed on Tuesday' for the seeded period. Check §10.3 and state the limit rather than letting it look like it works."* |
+| D39 | *"B, and 40–60s is acceptable since it's once. But print progress, or a reviewer will think it hung on the one command that's supposed to just work. Also tell me how long P14's sweep takes over 1.05M events — if that's minutes it needs a bounded mode."* |
+| D40 | *"A+X, keyed RNG, and yes to the scenario table. Reproducibility as seed + decision log + scenario log is the better claim and I'd rather make the true one."* |
+| F3 | *"scenario control is new scope, take it as a plan item. Same argument as P16 — if the interesting thing can't be caused on demand it can't be shown. It goes in SCOPE.md §2 and therefore the README."* |
+
+---
+
+## DECISION #35 — What creative fatigue accrues to
+
+**Status:** ACCEPTED — option C · **Tag:** [LOAD-BEARING] · **Depends on:** D3, D4 · **Answers:** G37
+
+**Question.** Fatigue is named in the Background (L24), promised as inspectable (L133) and present in
+no contract (G37) — so the accrual key is the modelling claim. Options: A per ad · B per component
+lineage, global · **C per (component lineage × audience)** · D per (lineage × audience × channel).
+
+**Chosen.** C, **frequency-driven with recovery**: `f = F(lineage, audience) / served pool`,
+`φ(f) = 0.25 + 0.75·exp(−0.35f)`, idle recovery on a 5-day half-life, slots composing as
+`φ_video^1.0 × φ_headline^0.5`.
+
+**Rationale — Seno's words.**
+
+> "C, approved, and keep headline at 0.5. Copy does wear out, just slower than video, and zeroing it
+> would mean the headline swap lever changes nothing observable."
+
+**Consequences.**
+1. **Three brief questions become facts about the data rather than README sentences.** `vl_01` sits
+   at φ 0.43 on `cold_us` and φ 0.91 on `warm_us` simultaneously; sharing a pool between `a_02` and
+   `a_04` measurably accelerates burnout; a swap resets one slot only. `SIMULATOR.md` §7.2.
+2. **A is disqualified rather than merely worse.** It decays while paused — the audience tiring of an
+   ad it is not being shown — and it makes `swap_component` change nothing observable.
+3. **`set_budget` becomes a fatigue lever.** Frequency-driven decay means doubling the budget burns
+   the creative twice as fast. A real strategic tension, obtained free.
+4. **It forced D40.** The accrual key is state spanning ads and restarts, which is why the simulator
+   needs a recompute endpoint rather than a local file.
+5. **D3 gains an observable consequence.** D3's own entry says copy-on-write ships as prose because
+   *"nothing exercises this at runtime."* Under C something does: `vl_04` v2 (`a_05`) inherits v1's
+   frequency on the same audience and arrives pre-fatigued. See the D3 amendment note below.
+6. **Two parameters moved after the pass** and were ratified separately — `served_fraction` (§6,
+   replacing a reachable-fraction column whose value made cold fatigue invisible) and the version
+   partial-reset `r` = 0.35 (§7.3). See § D35 — PARAMETER RATIFICATION. The accrual key, the decay
+   form and `k` are unchanged.
+
+**Forecloses.** Nothing — A and B are C with a coarser key, and D was rejected because putting
+channel in the key would make a burned video *not* pre-fatigued in a new ad on the same audience,
+which is the property being demonstrated.
+
+**Defence.** It is the only accrual key under which the swap lever, the component-reuse premise and
+D4's ad-versus-component answer are all observable in the data at once — and retargeting's faster
+burnout, the budget-versus-burnout tension and the pre-fatigued-on-launch property all fall out of
+one formula instead of three parameters.
+
+---
+
+## DECISION #36 — The click→conversion lag distribution
+
+**Status:** ACCEPTED — option C, two lags kept separate · **Tag:** [LOAD-BEARING]
+**Depends on:** D13, D27, D33
+
+**Question.** The distribution is what makes D13's horizon, D27-B's cohort placement and P16's
+horizon shortening visible or invisible. Options: A exponential · B lognormal · **C fast/slow
+mixture** · D Weibull.
+
+**Chosen.** C, with `p_fast` a property of **audience temperature** (retargeting .65 / warm .45 /
+cold .30): fast `Exp(mean 12 min)`, slow `LogNormal(median 14 h, σ 1.1)`, hard cutoff 7 days. Plus a
+**separate reporting lag** `LogNormal(median 90 s, σ 0.9)` with a 2% straggler component.
+
+**Rationale — Seno's words.**
+
+> "approved, and keep the two lags separate. If you collapse them then received_at − ts becomes the
+> purchase lag, which would make our own transport look like it's hours behind. That field has to
+> describe us, not the buyer."
+
+**Consequences.**
+1. **Quantiles per temperature:** retargeting median 0.3 h / p95 1.87 d / 2.3% past horizon · warm
+   3.3 h / 2.49 d / 3.6% · cold 7.5 h / 2.85 d / 4.6%. p95 inside the horizon so headline numbers
+   mean something; the tail crosses it so **P7 fires on real data, not only on a scenario trigger**.
+2. **D27's stated product consequence is now quantified.** "CTR is live, CPA and ROAS lag by cohort"
+   has numbers: a retargeting cohort matures in an hour, a cold one in most of a day.
+3. **Two lags, two jobs.** Purchase lag decides whether a bucket was settled when the event landed,
+   so it drives restatement; reporting lag is what `received_at − ts` measures. A is disqualified
+   because one parameter cannot produce both a usable median and a crossing tail.
+
+**Forecloses.** Nothing; C degrades to B at `p_fast = 0`.
+
+**Defence.** The mixture earns its third parameter by making lag a consequence of audience
+temperature rather than a fitted knob — and keeping the reporting lag separate is what stops the
+entire lateness figure from landing in a field that is supposed to describe our own transport.
+
+---
+
+## DECISION #37 — The noise model and where overdispersion comes from
+
+**Status:** ACCEPTED — option C, all six components · **Tag:** [LOAD-BEARING] · **Depends on:** D20
+
+**Question.** L133 says the noise will be inspected and the Phase 3 prompt forbids jitter on a smooth
+curve. Options: A Poisson only · B negative binomial · **C B plus autocorrelated latent demand** ·
+D additive uniform jitter (named and rejected).
+
+**Chosen.** C. Six components: channel demand log-AR(1) (τ 45 min, sd 0.18) · ad demand log-AR(1)
+(τ 20 min, sd 0.25) · `NegBinomial(α = 8)` impressions · `BetaBinomial(κ 200)` clicks ·
+`BetaBinomial(κ 60)` conversions · `LogNormal(σ 0.35) × m_channel^0.6` CPC.
+
+**Rationale — Seno's words.**
+
+> "all six rows. I did think about collapsing the two AR(1) processes but I think both earn their
+> place: channel-level moves ads together, ad-level is idiosyncratic, and the fact that you can't
+> immediately tell which one you're looking at is a real property of the domain — it's also the
+> honest basis for the fatigue flag's 'can't separate this from a platform delivery change' limit.
+> If implementation drags, collapse to one and say so."
+
+**Consequences.**
+1. **Every source of variance is named and attached to the quantity it perturbs** — auction
+   competition, audience composition drift, platform creative rotation. A says arrivals are Poisson
+   (visibly not what delivery looks like); D says variance is decoration.
+2. **It is what makes D20's mechanisms necessary rather than decorative.** Under A the gate and the
+   EWMA would defend against a problem our own data does not have.
+3. **Because bursts persist, EWMA has a real lag-versus-variance tradeoff** — which is what lets
+   `SIMULATOR.md` §19 state the smoothing's limits honestly instead of hypothetically.
+4. **It is the stated basis for the fatigue flag's central limit.** The channel-level factor is
+   *why* a sustained platform dip and a genuine burnout are indistinguishable for the first hours —
+   by construction, because they are in reality.
+5. **Recorded fallback:** if implementation drags, collapse to one AR(1) process and say so.
+
+**Forecloses.** Nothing; setting the AR(1) standard deviations to zero degrades C to B, then to A.
+
+**Defence.** The brief's test is whether the data reveals a model of the domain, and overdispersion is
+where that shows — so every stochastic component has a stated source rather than a magnitude, and
+the two processes we cannot tell apart are the honest basis for a limit we state on the surface.
+
+---
+
+## DECISION #38 — Backfill arrival semantics vs D33's observational lag
+
+**Status:** ACCEPTED — options E + B, amended · **Tag:** [LOAD-BEARING]
+**Depends on:** D12, D13, D33 · **Corrects:** `DESIGN.md` §5.4 · **Refines:** F2
+
+**Question.** A conflict inside the ratified set, not a new question. D33 measures
+`received_at − click.ts` — the *observational* lag. D12 makes `received_at` server-assigned and never
+emitter-assigned. D17 backfills 7 days in one burst at boot. All three cannot hold: every backfilled
+conversion would carry `received_at ≈ boot`, so the maturity CDF would be a picture of the seed loop,
+and `DESIGN.md` §4.5 relies on precisely that population. Options: A emitter supplies `received_at` ·
+B `source` marker, exclude backfill from lag stats · C amend D33 to purchase lag · D split and
+convolve · **E the seeder stamps historical arrival times, reframing the actor**.
+
+**Chosen.** **E + B.** The seeder — already a privileged fixture writer per `DESIGN.md` §3.2 —
+stamps `received_at = ts + reporting lag` on historical rows; the envelope carries a server-assigned
+`source: 'backfill' | 'live'`; the CDF spans both populations and its label discloses the seeded
+share.
+
+**Rationale — Seno's words, carrying an amendment.**
+
+> "E+B. One thing to work through: backfilled rows get received_at in the past but their ingest_seq
+> is assigned in a burst at boot, so for that window seq order and arrival order don't agree. I don't
+> think it breaks SSE resume, but it does mean as_of_ingest_seq can't reconstruct 'what the screen
+> showed on Tuesday' for the seeded period. Check §10.3 and state the limit rather than letting it
+> look like it works."
+
+**The amendment, worked through — it turned out to be fixable, plus one bug.**
+
+1. **Fixed, not merely stated.** The seed is **sorted by `received_at` before writing**, so
+   `ingest_seq` is monotone in arrival time within the seeded window. One sort of ~1.6M rows.
+2. **The seam is fixed too.** Any event whose computed `received_at` falls after the seed boundary
+   `T0` is **not seeded** — it is handed to the live emitter and delivered at its real arrival
+   moment. So monotonicity holds across the handover, and *"the conversions that were in flight when
+   you started the app"* becomes a real population instead of a manufactured one. D40's keyed RNG is
+   what makes this free: the emitter re-derives each backfilled click's schedule from
+   `hash(seed, 'conv_lag', click_id)` rather than needing a stored queue.
+3. **A correctness bug in `DESIGN.md` §5.4, found by working the amendment through.** §5.4 evaluated
+   settlement as `now − (minute_start + 60s) > horizon` with `now` = wall clock. During seeding `now`
+   is boot time, so **every** backfilled event landing in a bucket older than 72 h would be stamped
+   `restated_at` — the demo would have opened with tens of thousands of spurious restatements and P7
+   would have looked broken on frame one. The correct rule is *"was this bucket settled **when this
+   event arrived**"*, i.e. evaluated at `ev.received_at`. For live events `received_at ≈ now`, so
+   nothing changes. **`DESIGN.md` §5.4 is corrected.**
+
+**Consequences.**
+1. **The residual limit, stated in `DESIGN.md` §10.3 and the README:** within the seeded window
+   `received_at` is *designed*, not observed, so `as_of_ingest_seq` reconstructs what the screen
+   *would have shown under the seeded arrival model* — not what anyone saw, since nobody was
+   watching. Live arrivals carry no such caveat. Smaller and truer than the limit anticipated.
+2. **`source` is a new envelope extension** (E15) and earns its column beyond the CDF: "is this
+   number resting on seeded or observed data" applies to more than one figure. D33's sample-size
+   label discloses the split.
+3. **F2 is refined.** F2's arithmetic said no restatement is observable at the default horizon. With
+   2–5% of conversions past-horizon under seeded arrival times, a handful of backfilled buckets
+   legitimately carry `restated_at` **from frame one**. P16 remains the only way to cause one *live*;
+   `scenario: late_cascade` the only way to cause one *on demand*. See the F2 amendment note below.
+
+**Forecloses.** Nothing. A was rejected because it breaks D12 head-on and every lateness figure in
+the app would inherit that; C was available and declined, keeping D33 exactly as ratified.
+
+**Defence.** The one option that required no ratified decision to be amended, produced a measurable
+maturity curve from the first frame, and cost one sentence of disclosure — and working the seq-order
+objection through is what turned up a settlement bug that would have made the flagship path look
+broken on boot.
+
+---
+
+## DECISION #39 — Volume calibration
+
+**Status:** ACCEPTED — option B · **Depends on:** D20, D35, D36 · **Amended:** progress print required
+
+**Question.** D20's gate, read backwards, is a volume requirement — and volume is rows to generate,
+ingest, roll up and sweep inside "run in one command". Options: A uniform small volumes · **B
+asymmetric portfolio calibrated against the gates** · C inflate everything.
+
+**Chosen.** B, with **staggered launch dates**: twelve ads, one fresh retargeting pair on the gate
+boundary, one high-volume cold ad clearing CTR at 15-minute granularity, the rest honestly showing
+counts. ~1.63M backfilled events; 5-day fallback stated.
+
+**Rationale — Seno's words.**
+
+> "B, and 40–60s is acceptable since it's once. But print progress, or a reviewer will think it hung
+> on the one command that's supposed to just work. Also tell me how long P14's sweep takes over
+> 1.05M events — if that's minutes it needs a bounded mode."
+
+**Answered by measurement, not estimate.** Verified in the scratchpad, never in the repo — the method
+D8 was settled by. Node v24.14.0, SQLite 3.51.2 via `node:sqlite`, WAL + `synchronous = NORMAL`,
+transactions of 5,000, through insert → attribution → rollup upsert:
+
+| Claim | Measured |
+|---|---|
+| Seed 1.06M events through the full write path | **7.9 s** (133,601/s) — so the 40–60s allowance was pessimistic; ~12 s at the final portfolio size |
+| **P14 full agreement sweep** | **2.72 s** over 56,160 buckets, **0 mismatches** — ~4.2 s at final size |
+| Hot read, 60-minute single-ad window (D28's `WITHOUT ROWID` PK) | 0.08 ms |
+| Store | 203 MB + 5 MB WAL — ~315 MB at final size |
+
+**So P14 needs no bounded mode.** But the sweep **must be a single whole-log pass**, not `replay()`
+per bucket: per-bucket is O(buckets × N) and takes hours. That is already what D7 specifies ("the
+rebuild path calls it with the whole log from zero"); it is written down because the obvious
+implementation is the quadratic one.
+
+**Consequences.**
+1. **Progress printing is a requirement, not polish** — twelve seconds of silence on the
+   one-command deliverable reads as a hang.
+2. **Calibration surfaced a wrong parameter.** At the originally ratified reachable-fraction of 0.55,
+   cold fatigue was invisible (φ 0.94 after seven days — a rounding error, not a curve). Replaced by
+   `served_fraction` — the slice the platform actually serves at our bid — which is both the correct
+   domain quantity and the reason retargeting burns out first. Carried as an assumption, then
+   **ratified separately** — see § D35 — PARAMETER RATIFICATION.
+3. **Fatigue pushes ads off the gate**, which is the interesting interaction: `a_01` at φ 0.25 yields
+   8.5 conversions/hour at peak and is *below* D20's bar, so the metric a strategist would judge it
+   by stopped being measurable as the ad died. The drawable ad therefore had to be a fresh pair on a
+   small pool (`a_08`, one day old, 15.3 conv/h at peak, 4.0 at trough).
+4. **Both branches of D20 fire on camera and the ladder steps during the day** — which a portfolio
+   where every bar cleared would have hidden.
+
+**Forecloses.** Nothing; volumes are constants in one table.
+
+**Defence.** D20 was already ratified, so the only open question was whether the data lets it be seen
+working — and the calibration arithmetic is also what caught a parameter that would have made the
+fatigue curves, the one thing the brief says it will look at, invisible.
+
+---
+
+## DECISION #40 — Simulator state, config sync, and the limit of determinism
+
+**Status:** ACCEPTED — options A + X · **Tag:** [LOAD-BEARING] · **Depends on:** D32, D35
+**Closes:** the D17 residue on determinism
+
+**Question.** `DESIGN.md` §3.3 declares the simulator stateless and §11 says it honours pause — both
+recorded as constraints on D17, not solved problems. D35's accrual and D9's pacing are stateful, and
+D32 ruled out shared DB access, so nothing tells the emitter a lever was pulled. Options for state:
+**A recompute from a server endpoint** · B pure function of seed and clock · C local sidecar file.
+For levers: **X poll `GET /api/sim/world` per tick** · Y subscribe to SSE · Z read the DB.
+
+**Chosen.** A + X, with a **keyed (counter-based) RNG** and the determinism limit stated.
+
+**Rationale — Seno's words.**
+
+> "A+X, keyed RNG, and yes to the scenario table. Reproducibility as seed + decision log + scenario
+> log is the better claim and I'd rather make the true one."
+
+**Consequences.**
+1. **`GET /api/sim/world`** returns, in one read transaction: the twelve `ads` rows,
+   `last_decision_seq`, `F(lineage, audience)`, `spend_so_far_today` per ad, backfilled clicks still
+   inside the lag window, and pending scenario triggers. Cold start, restart, lever propagation and
+   scenario delivery are **one code path**.
+2. **B was the trap.** Deriving fatigue from seed and clock reconstructs what the model *would* have
+   produced, which equals the store only if nothing was rejected or lost — and we inject 0.2%
+   emitter-side loss and 0.1% malformed payloads deliberately. The divergence would have been silent
+   and in the one number the artifact is judged on.
+3. **Not a simulator-only query.** Cumulative delivery per (lineage, audience) is the temporal
+   reverse join `DESIGN.md` §8 already documents for component-level performance.
+4. **Pause latency is a stated number:** ≤ 1 tick, ≤ 1 s.
+5. **Keyed RNG earns its keep three times.** Intervening on one ad does not reshuffle the others;
+   event ids are derived so a re-emission after restart is a tolerated `duplicate_identical` and the
+   emitter needs no memory of what it sent; and D38's pending-conversion queue becomes derivable
+   rather than stored.
+6. **One new table, `sim_scenarios`** — approved explicitly. Without persisted triggers the
+   reproducibility claim is false. Added to `DESIGN.md` §2.
+
+**The limit, ratified as the claim we make.** A seed does not reproduce the world — levers fork it.
+The claim is **`(seed + decision log + scenario log) → world`**, and all three are persisted, so
+replaying a specific interesting moment is genuinely possible. Stronger than seed-only determinism,
+and unlike seed-only determinism it is true.
+
+**Forecloses.** Nothing.
+
+**Defence.** The emitter's fatigue state and the app's inferred fatigue cannot silently disagree,
+because both are computed from the same log — and the reproducibility claim names all three of its
+inputs rather than the one that sounds impressive.
+
+---
+
+## DECISION #17 — Simulator architecture · CLOSED
+
+**Status:** ACCEPTED · **Date:** 2026-09-03 · **Closed by:** D32 (topology) + D35–D40 + the Phase 3
+proposal block
+
+D17 was the last open decision in the register. It is closed in three parts rather than as one entry,
+which is why it has no options table of its own here:
+
+| Sub-question | Settled by | Answer |
+|---|---|---|
+| 17a process placement | **D32** | Separate process, HTTP batch `POST /api/ingest` |
+| 17b clock | proposal block | **Live at 1× wall clock** — the only rate at which the envelope means anything, since an accelerated `ts` would outrun the wall clock and fire I10's clamp on nearly every event. Backfill accelerated, in-process at first boot through the same `ingest()` |
+| 17c determinism | **D40** | Seeded, **keyed** rather than sequential; reproducibility = seed + decision log + scenario log |
+| 17d backfill depth | proposal block | **7 days**, 5-day fallback stated. Both exceed the 72 h horizon |
+| tick cadence | proposal block | 1 second, one batched POST per tick |
+| the emitter's domain model | **D35, D36, D37, D39** | `SIMULATOR.md` §3–§13 |
+
+**Ratified as a block** with the rest of the proposal block; Seno's plan-mode answer explicitly
+declined to give the residue its own §3 entry. Nothing in D17 was decided by `SIMULATOR.md`.
+
+---
+
+## FOLLOW-UP F3 — Scenario control is a plan item
+
+**Status:** ACCEPTED · **Date:** 2026-09-03 · **Relates to:** D40, P16, F2
+
+**The instruction — Seno's words:**
+
+> "scenario control is new scope, take it as a plan item. Same argument as P16 — if the interesting
+> thing can't be caused on demand it can't be shown. It goes in SCOPE.md §2 and therefore the README."
+
+**Recorded as.** **P17** in `docs/SCOPE.md` §2, inside the README-verbatim block. Seven scenarios,
+listed in `SIMULATOR.md` §17, delivered over D40's existing `GET /api/sim/world` poll so there is no
+second control channel and every trigger is part of the replayable record.
+
+**Consequences.** P17 and P16 overlap in purpose and differ in mechanism, and the distinction is worth
+keeping written down: **P16 changes which buckets are *settled*** (a settlement re-evaluation sweep);
+**P17 delivers new *late events*** (a restatement of buckets that were already settled). The first
+exercises the horizon, the second the restatement path. Both are needed and neither substitutes for
+the other.
+
+**What it forecloses.** Nothing. It also makes the misbehaviour table in `DESIGN.md` §6 fully
+exercisable: burst, gap and stall were the three rows with a handler and no trigger.
+
+**How I'd defend this in review.** Every interesting property of an event pipeline is rare by
+construction, so a cockpit that can only wait for one cannot be demonstrated — the trigger surface is
+part of the feature, and it rides a channel that already existed.
+
+---
+
+# AMENDMENTS TO EARLIER ENTRIES — from the Phase 3 pass
+
+Recorded here rather than edited silently into the entries above.
+
+| Entry | Amendment | Source |
+|---|---|---|
+| **D33** | Unchanged as ratified. Its CDF is now measurable from frame one because D38-E gives backfilled conversions modelled arrival times; the sample-size label additionally **discloses the seeded share** — *"1,432 settled conversions (1,180 seeded)"* | D38 |
+| **F2** | Refined, not reversed. F2 said no restatement is observable at the default horizon. Under D38-E a handful of backfilled buckets legitimately carry `restated_at` from boot, so **historical restatements are visible immediately**; P16 remains the only way to cause one *live*, P17 the only way to cause one *on demand* | D38, F3 |
+| **D3** | Gains an observable consequence. D3's entry states copy-on-write ships as prose because *"nothing exercises this at runtime."* Under D35-C, `vl_04` v2 inherits v1's frequency on the same audience and arrives pre-fatigued (φ 0.25), so the versioning decision is visible in the data even with no editor. The prose claim is unchanged; the evidence for it is stronger | D35 |
+| **D20** | Unchanged. `SIMULATOR.md` §18.3 is evidence its constants are satisfiable: both branches of the gate fire in the seeded data and the ladder steps across the day | D39 |
+| **`DESIGN.md` §5.4** | **Corrected.** Settlement is evaluated at `ev.received_at`, not wall-clock `now` | D38 |
+
+---
+
+## D35 — PARAMETER RATIFICATION
+
+**Status:** ACCEPTED · **Date:** 2026-09-03 · **Relates to:** D35, D39 · **Not a new decision**
+
+Two parameters were carried in `docs/SIMULATOR.md` as `ASSUMPTION (unratified)` because both were
+mine rather than Seno's, and one of them silently replaced a value from the D35 pass. Both are now
+ratified. **Neither changes D35** — the accrual key is still `(component lineage × audience)`, the
+decay is still frequency-driven, and `k` is still 0.35. Only parameters moved.
+
+**Wording of record.** One sentence ratifies both, so the mapping is recorded explicitly rather than
+restated in each entry's prose (`CLAUDE.md` §3):
+
+| Parameter | Seno's words |
+|---|---|
+| `served_fraction` | *"Both approved"* |
+| version partial reset `r` | *"Both approved"* |
+
+### 1 — `served_fraction` replaces `reachable_fraction`
+
+| Temperature | Was (D35 pass) | **Ratified** | Served pool |
+|---|---|---|---|
+| `cold` | 0.55 | **0.04** | `cold_us` 96,000 · `cold_us_lookalike` 54,000 (0.06) |
+| `warm` | 0.70 | **0.25** | `warm_us` 95,000 |
+| `retargeting` | 0.85 | **0.70** | `rt_us` 32,200 |
+
+**Why it changed.** At 0.55, `a_02` on `cold_us` reaches **φ 0.94 after seven days** — a 6% CTR
+decline. That is not a fatigue curve, and L133 says the fatigue curves will be looked at. The error
+was modelling the frequency denominator as *"people the targeting allows"* when the quantity that
+governs frequency is *"people the platform actually serves us at our bid"*. Delivery concentrates
+hard on the responsive slice, which is why frequency in real campaigns climbs far faster than
+audience size suggests — and why retargeting, where the pool is *intentionally* exhausted, burns out
+first. Found by doing the calibration arithmetic (D39), not by reasoning about the model.
+
+**Consequences.** The seeded data now carries real curves: `vl_04 × rt_us` at φ 0.25 (floored),
+`vl_01 × cold_us` at 0.43 shared between two ads versus 0.49 for one alone, `vl_01 × warm_us` at
+0.91 fresh. Retargeting burns out ~50× faster than cold **as a consequence of the pool** rather than
+of a per-temperature decay parameter, which is why the temperature matrix still has no `k` column.
+
+**Forecloses.** Nothing. It is one column in `SIMULATOR.md` §21 and a re-seed to change.
+
+### 2 — Version partial reset `r` = 0.35
+
+A version bump scales the pair's inherited frequency by `(1 − r)`: a recut recovers about a third of
+the pool's freshness. Fatigue accrues to the **lineage**, so `vl_04` v2 inherits v1's exposure —
+which is the domain truth, since a re-edit is not new to someone who has seen the original four
+times — but it is not *nothing* either, and `r` is the size of "not nothing".
+
+**Consequence worth restating:** this is what gives **D3** an observable consequence. D3's own entry
+says copy-on-write ships as prose because *"nothing exercises this at runtime."* With `r` = 0.35,
+`a_05` (`vl_04` v2 on `rt_us`) arrives at φ 0.25 rather than 1.00, so the versioning position is
+visible in the data even though no editor ships.
+
+**Forecloses.** Nothing. At `r` = 0 a new version is a pure re-edit; at `r` = 1 it is a new
+creative. Both extremes are defensible and both are one constant away.
+
+**How I'd defend this in review.** The fatigue denominator is the parameter the whole curve hangs
+on, and the first value I chose made the phenomenon the brief says it will inspect invisible — so
+the arithmetic that caught it is in the document beside the corrected value, rather than the
+corrected value appearing as though it had always been right.

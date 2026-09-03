@@ -929,6 +929,13 @@ rather than a hard cap — approved?
 
 ### DECISION #17 — Simulator architecture [LOAD-BEARING]
 
+> **RESOLVED — see `docs/DECISIONS.md` § DECISION #17 · CLOSED.** Closed in three parts: 17a by
+> **D32** (separate process, HTTP batch POST), 17c by **D40** (seeded *keyed* RNG; reproducibility is
+> seed + decision log + scenario log), and 17b/17d by the Phase 3 proposal block (live at **1× wall
+> clock** — an accelerated `ts` would outrun the wall clock and fire I10's clamp on nearly every
+> event; backfill **7 days**, 5-day fallback; 1-second tick). The emitter's domain model is D35–D39
+> and `docs/SIMULATOR.md`.
+
 **Blocking:** Phase 3 (`SIMULATOR.md`) entirely.
 
 **Context**
@@ -1604,3 +1611,645 @@ enforcement point for free.
 derived from the tail and *are* numbers on screen. They describe the transport, not the ads. The
 rule is "no *performance* number is derived from the tail", not an absolute the design does not
 hold.
+
+---
+
+## Wave 6 — Phase 3 simulator (D35–D40)
+
+> **ALL RESOLVED — see `docs/DECISIONS.md` § PHASE 3 SIMULATOR PASS.** D35 → C (headline weight kept
+> at 0.5) · D36 → C (two lags kept separate) · D37 → C (all six components; collapse-to-one recorded
+> as the fallback) · D38 → **E + B, amended** (the seq-order objection turned out to be fixable, and
+> working it through found a settlement bug in `DESIGN.md` §5.4) · D39 → B (progress print required;
+> seed and sweep both **measured**, not estimated) · D40 → A + X (keyed RNG, `sim_scenarios` table
+> approved). The proposal block was ratified as a batch, with scenario control taken as new scope —
+> **F3 / P17**. Two parameters remain **unratified** and are flagged inline in `SIMULATOR.md`:
+> `served_fraction` (§6) and the version partial reset `r` = 0.35 (§7.3).
+>
+> This section is kept unedited as the pre-choice option analysis, per `CLAUDE.md` §3.
+
+**Date:** 2026-09-03. Presented before `docs/SIMULATOR.md` is written, on the Phase 3 prompt's
+instruction: *"Present the fatigue model, the lag distribution, and the noise model as DECISIONs
+with alternatives. The rest you can propose and I'll ratify."*
+
+Six decisions. Three are the ones the prompt names (D35 fatigue, D36 lag, D37 noise). Three more
+were surfaced during the read of `DESIGN.md` and `DECISIONS.md` and confirmed as decision-shaped by
+Seno rather than chosen by me (D38 backfill arrival semantics, D39 volume calibration, D40 simulator
+state and config sync). **D17's residue — clock, backfill depth, seeded RNG — is not a separate
+entry here**; per Seno's answer it goes in the propose-and-ratify block at the end of this wave.
+
+Everything in this wave is downstream of decisions already ratified and does not get to re-open
+them: **D22** (`America/New_York`), **D32** (separate process, HTTP batch POST), **D12** (envelope
+server-assigned, never emitter-assigned), **I1** (spend is a delta per fixed interval), **I3**
+(budget is a pacing multiplier, not a cap), **E3** (`click_id` distinct from `event_id`), **G48/I11**
+(pause honoured by simulator convention, never by ingest rejection), **D13** (72h horizon),
+**D20** (the gate and the granularity ladder), **D33** (the maturity CDF), **G37 option A**
+(fatigue is generated as decayed CTR and inferred by the app — the emitter is never authoritative
+for something the app is graded on detecting).
+
+---
+
+### DECISION #35 — What creative fatigue accrues to, and its decay function [LOAD-BEARING]
+
+**Blocking:** the centre of `SIMULATOR.md`; the credibility of the whole mock-data artifact.
+
+**Context**
+L24 defines fatigue as the core moving-target phenomenon: *"A creative that performed well for two
+weeks will often stop working as its audience tires of it."* L133 names *"fatigue curves"* as one of
+three things that will be inspected. G37 records that fatigue appears nowhere in the contracts — it
+is purely emergent, generated here and inferred by the app. So the accrual key is the single richest
+modelling claim in the project, and it is the same question the Workbench asks: is the unit the ad or
+the component (**D4**: *"you decide on ads, you learn about components"*).
+
+**Options**
+
+**A) Per ad.** Decay on the ad's own CTR as a function of time since `launched_at`.
+- How it works: `φ = φ_floor + (1−φ_floor)·exp(−age_days/τ)`.
+- Pros: trivial; one parameter; visible in a week of data.
+- Cons: wrong in three ways at once. A swap does not reset it, so `swap_component` — a lever we
+  ship — changes nothing observable. Reuse is invisible: the same video in three ads fatigues three
+  times independently, at one third the true rate. And it decays while **paused**, which says the
+  audience tires of an ad it is not being shown.
+- Forecloses: any component-level fatigue story, and with it D4's answer and §8's temporal reverse
+  join having anything interesting to show.
+- Reversal cost: low in code, total in the data — a demo recorded on A cannot be re-narrated.
+
+**B) Per component lineage, global across audiences.** Accrual keyed by `lineage_id`.
+- How it works: cumulative impressions of that lineage anywhere drive one decay curve.
+- Pros: reuse becomes visible — a video used in twelve ads burns out twelve times faster; a swap
+  genuinely resets the slot. Cheap: one counter per lineage.
+- Cons: says a creative is equally tired to an audience that has never seen it. Launching a burned
+  video against a fresh audience shows no recovery, which is the opposite of the domain truth.
+- Forecloses: the "fresh to a new audience, stale to an old one" property G37 names explicitly.
+- Reversal cost: low — it is B with a wider key.
+
+**C) Per (component lineage × audience) pair.** Accrual keyed by `(lineage_id, audience_id)`.
+- How it works: **frequency-driven**. `F(L,A)` = cumulative impressions of lineage `L` delivered to
+  audience `A`, summed across **every ad** that used the pair. Effective frequency
+  `f = F / (est_size × reachable_fraction)`, i.e. average exposures per reachable person. CTR
+  multiplier `φ(f) = φ_floor + (1 − φ_floor)·exp(−k·f)`, `φ_floor = 0.25`, `k = 0.35`. Recovery when
+  rested: `F ← F·exp(−Δt_idle/τ_rec)`, `τ_rec` = 5-day half-life. Per ad the two slots compose as
+  `φ_ad = φ_video^1.0 · φ_headline^0.5` — the video carries most of the burnout, the headline some.
+- Pros: every property the domain has. A burned-out video **arrives pre-fatigued** in a brand-new ad
+  on the same audience, which is the exact sentence the Phase 3 prompt asks the model to make true,
+  and the reason component is the unit of *analysis* while the ad is the unit of *action*. A swap
+  resets the swapped slot only, so the CTR discontinuity is explained by `config_generations` and
+  nothing else — which is what makes §8's temporal reverse join worth having. Retargeting burns out
+  ~50× faster than cold at equal volume **without a separate parameter**, purely because its
+  reachable pool is 50× smaller: the frequency denominator does the work. Budget interacts with
+  fatigue for free — doubling the budget burns the creative twice as fast, which is a real strategic
+  tension the strategist can watch.
+- Cons: the accrual key is state the emitter must hold across ads *and* across restarts, which is
+  what forces **D40**. Nothing in the app's schema names it, so it is inferable only from the
+  event stream — correct per G37-A, but it means the app must earn the inference.
+- Forecloses: nothing. A and B are both special cases of C with a coarser key.
+- Reversal cost: low in code (the key is one tuple), high in narrative — it is the artifact.
+
+**D) Per (lineage × audience × channel).**
+- Pros: strictly more realistic — the same audience on Reels and in Feed are different exposure
+  contexts.
+- Cons: splits the accrual across up to four keys, so each accrues four times slower and the curve
+  is four times less legible in a 7-day window. It also dilutes the one property we are trying to
+  demonstrate: with a channel in the key, a burned video is *not* pre-fatigued in a new ad on the
+  same audience if the channel differs, and the demo sentence stops being true.
+- Reversal cost: low.
+
+**Recommendation**
+**C, frequency-driven, with recovery.** It is the only key under which the swap lever, the reuse
+premise and D4's ad-versus-component answer are all simultaneously observable in the data rather
+than asserted in prose — and it gets retargeting's faster burnout, the budget-versus-burnout
+tension, and the pre-fatigued-on-launch property as consequences of one formula instead of three
+parameters. Frequency rather than calendar matters specifically because calendar decay fatigues a
+paused ad, which is both wrong and would quietly undermine the pause demo; frequency also makes
+`set_budget` a fatigue lever, which is a better story than a rate multiplier. For a slice under time
+pressure it is the same amount of code as B — one tuple key instead of one string key — and the
+whole difference in what the mock data can be read as evidence of.
+
+**What I need from you**
+Fatigue accrues to the (component lineage × audience) pair, frequency-driven with a 5-day recovery
+half-life, `φ_floor = 0.25`, `k = 0.35`, slots composing as video^1.0 × headline^0.5 — approved? And
+is the video/headline weighting right, or should the headline carry none?
+
+---
+
+### DECISION #36 — The click→conversion lag distribution [LOAD-BEARING]
+
+**Blocking:** whether late conversions are demonstrable at all; the shape D33's CDF measures.
+
+**Context**
+The brief calls the conversion *"the troublemaker: may land hours or days after its click,
+retroactively changing periods you thought were closed"* (L83). D13 fixes the horizon at 72h; D27-B
+places a conversion in its click's minute; P16 shortens the horizon so a restatement lands on
+camera. All three are machinery whose visible behaviour is a function of this distribution alone.
+Two distinct lags exist and the brief conflates them: **purchase lag** (`click.ts → conversion.ts`,
+the human decided later) and **reporting lag** (`conversion.ts → received_at`, the platform told us
+later). D33 measures their sum.
+
+**Options**
+
+**A) Exponential.** `lag ~ Exp(mean 6h)`.
+- Pros: one parameter; memoryless; trivially defensible as a first model.
+- Cons: not heavy-tailed. The p99/p50 ratio is fixed at 6.6, so a 3-hour median forces a ~20-hour
+  p99 and past-72h arrivals are ~0.001% — the flagship path would essentially never fire on real
+  data. Pushing the mean up to produce late arrivals drags the median with it and makes *everything*
+  immature, which breaks the live surface instead.
+- Forecloses: any independent control of median and tail. The single parameter is the problem.
+- Reversal cost: low.
+
+**B) Lognormal.** `lag ~ LogN(μ, σ)`, e.g. median 3h, σ = 1.3.
+- Pros: genuinely heavy-tailed; two parameters decouple centre and spread; the standard choice for
+  latency and for purchase timing.
+- Cons: unimodal, so it cannot represent the real bimodality — the impulse buy minutes after the
+  click and the considered purchase three days later are one population under B, and the mass
+  between them is overstated.
+- Forecloses: making lag a function of audience temperature in a principled way; under B, temperature
+  can only shift the whole curve.
+- Reversal cost: low.
+
+**C) Two-component mixture — fast exponential + slow lognormal.**
+- How it works: with probability `p_fast`, `lag ~ Exp(mean 12 min)`; otherwise
+  `lag ~ LogN(median 14h, σ = 1.1)`. **`p_fast` is a property of audience temperature** —
+  retargeting 0.65, warm 0.45, cold 0.30 — so the mixture weight carries domain meaning rather than
+  being a fitted knob. Truncated at **7 days**; nothing is emitted beyond that.
+- Resulting quantiles (warm, `p_fast` = 0.45): **median ≈ 3.5h · p95 ≈ 2.5 days · hard cutoff 7 days
+  · ~3.8% of conversions arrive past the 72h horizon.**
+- Pros: bimodality is the actual phenomenon, and making `p_fast` a temperature property means a
+  retargeting ad's ROAS matures in an hour while a cold ad's takes two days — a *product* statement
+  the cockpit can make, not a distribution detail. The three numbers the demo needs fall out at
+  once: enough fast mass that the live surface moves, a p95 inside the horizon so headline numbers
+  are meaningful, and ~3.8% past-horizon so D13's separate tally is non-zero without dominating.
+- Cons: three parameters plus a per-temperature weight; the most machinery of the four.
+- Forecloses: nothing.
+- Reversal cost: low; it degrades to B by setting `p_fast = 0`.
+
+**D) Weibull with shape k < 1** (decreasing hazard).
+- Pros: two parameters, heavy-tailed, and a decreasing hazard is the right qualitative story — the
+  longer since the click, the less likely a conversion ever comes.
+- Cons: same unimodality objection as B, with less familiarity and no clearer interpretation of its
+  parameters in this domain.
+- Reversal cost: low.
+
+**Recommendation**
+**C**, with a **separate, small reporting lag** applied on top: `LogN(median 90s, σ = 0.9)`, plus a
+2% straggler component at `Uniform(2h, 9h)` representing a platform batch. Keeping the two lags
+distinct is what makes the model honest under our own definitions — purchase lag is what drives
+restatement (it decides which bucket is settled when the event lands), reporting lag is what
+`received_at − ts` actually measures, and conflating them would put the entire lateness figure in a
+field that is supposed to describe *our* transport. The mixture earns its third parameter by making
+lag a consequence of audience temperature, which is the difference between a distribution we chose
+and a domain we modelled.
+
+**What I need from you**
+Mixture with `p_fast` set by temperature, median ≈ 3.5h, p95 ≈ 2.5 days, hard cutoff 7 days, ~3.8%
+past-horizon — approved? And is a separate reporting-lag term worth the extra concept, or should the
+two lags be collapsed into one?
+
+---
+
+### DECISION #37 — The noise model and where overdispersion comes from [LOAD-BEARING]
+
+**Blocking:** whether the mock data reads as real; whether D20's gate and EWMA earn their place.
+
+**Context**
+The Phase 3 prompt is explicit: *"Don't just add uniform jitter to a smooth curve; that reads as
+fake."* The register already anticipated this — D20's own context notes that *"multiplicative
+simulator noise (D17) will make [wild ratio swings] vivid"*, and D20's gate exists to protect against
+exactly the variance this decision generates. So the question is not how much noise but **what the
+noise is a picture of**.
+
+**Options**
+
+**A) Poisson arrivals on the deterministic rate.** `N_t ~ Poisson(λ_t)`.
+- Pros: the correct null model for arrivals; zero parameters; variance is not invented.
+- Cons: under-dispersed against reality. `Var = mean`, so a 3,000-impression hour varies by ±1.8%
+  and every curve looks like the formula that produced it. Worse for the read side: D20's gate and
+  the EWMA both become trivially satisfied, so two mechanisms we ship would be defending against a
+  problem our own data does not have.
+- Forecloses: the gate and the smoothing being demonstrably necessary.
+- Reversal cost: low.
+
+**B) Negative binomial — Gamma-mixed Poisson.** `N_t ~ Poisson(λ_t · G)`, `G ~ Gamma(α, 1/α)`,
+mean 1, `α = 8`.
+- Pros: `Var/mean = 1 + λ/α`, so overdispersion **grows with volume**, which is the empirical
+  signature of auction-served traffic. One parameter with a physical reading: `α` is how
+  concentrated the latent rate is.
+- Cons: the draws are independent across ticks, so the noise is white. Real traffic has *runs* — an
+  ad quiet for twenty minutes and then busy — and white noise at minute grain looks like static
+  laid over a smooth curve, which is the criticism in a subtler form.
+- Forecloses: nothing.
+- Reversal cost: low.
+
+**C) B plus an autocorrelated latent demand factor.** Two log-space AR(1) processes multiply the
+rate: one per **channel** (`τ` = 45 min, stationary sd 0.18) representing platform-wide traffic and
+auction pressure, one per **ad** (`τ` = 20 min, sd 0.25) representing idiosyncratic delivery. Counts
+are then negative-binomial around the modulated rate; **clicks are Beta-Binomial**
+(`impressions`, `p_ctr`, concentration κ = 200) and **conversions Beta-Binomial**
+(`clicks`, `CVR`, κ = 60), so the *rates* are overdispersed too and not just the volumes; **CPC is
+lognormal around the channel base with σ = 0.35, scaled by the channel demand factor^0.6**, so
+competition raises price and volume pressure together.
+- Pros: the noise has a stated **source** in every case — auction competition (channel factor and
+  its coupling to CPC), audience composition drift within a targeting segment (Beta-Binomial on the
+  rates), platform-side creative rotation (ad factor). Because bursts persist, EWMA smoothing has a
+  real lag-versus-variance tradeoff instead of a free lunch, which is what lets us state its limits
+  honestly per L147. Correlated bursts across ads on one channel are also what make the ingest
+  backpressure path (`DESIGN.md` §11) reachable without a scenario trigger.
+- Cons: four processes and five constants — the most complex thing in the simulator after fatigue.
+  Autocorrelation makes any statistical assertion in a test wider, so the traceability tests must
+  assert on **exact recomputation** rather than on ranges (which is what D31 does anyway).
+- Forecloses: nothing.
+- Reversal cost: low — set the AR(1) standard deviations to zero and it degrades to B, then to A.
+
+**D) Additive uniform jitter on a smooth curve.** Recorded to say why not: it is the thing the
+prompt names, and it is detectable in one glance at a chart — the mean is a visible spline and the
+residuals have no structure, no volume dependence and no persistence.
+
+**Recommendation**
+**C.** The test the brief is applying is whether the data reveals a model of the domain, and
+overdispersion is exactly where that shows: A says arrivals are a Poisson process (defensible, and
+visibly not what ad delivery looks like), D says variance is decoration, and only C says *why* the
+variance is there — competition, composition drift, rotation — with each source attached to the
+quantity it should perturb. It also pays for itself on the read side twice over: it is what makes
+D20's gate bind on low-volume ads, and it is what stops the EWMA's limits from being hypothetical.
+
+**What I need from you**
+Negative-binomial counts (`α` = 8) modulated by two AR(1) demand factors (channel `τ` 45 min sd
+0.18; ad `τ` 20 min sd 0.25), Beta-Binomial click and conversion rates (κ = 200 / 60), CPC lognormal
+coupled to channel demand — approved? Any of the four processes you would rather drop?
+
+---
+
+### DECISION #38 — Backfill arrival semantics, and D33's observational lag [LOAD-BEARING]
+
+**Blocking:** whether D33's maturity indicator works at all in the demo. **Amends a ratified
+decision**, so it is not mine to settle.
+
+**Context**
+**This is a conflict inside the ratified set, not a new question.** D33 measures the maturity curve
+as the empirical CDF of `received_at − click.ts` — deliberately the *observational* lag, ratified in
+Seno's words as *"how long until we knew, not how long until the human bought"*. `received_at` is
+server-assigned at ingest and **never emitter-assigned** (D12, the register's most strongly worded
+extension). D17's recommendation backfills 7 days of history at seed, ingested in one burst.
+
+Those three facts cannot all hold. Every backfilled conversion gets `received_at ≈ boot`, so its
+measured observational lag is its age — up to 7 days — and the CDF becomes a picture of the seed
+loop, spread near-uniformly across the backfill window. `DESIGN.md` §4.5 states the fixed
+cold-start curve *"never fires with 7d of backfill"*, which relies on precisely the population that
+is corrupted. Left alone, the maturity indicator ships wrong and reads plausible, which is the worst
+of the available outcomes.
+
+**Options**
+
+**A) The emitter supplies `received_at` for backfilled events.**
+- Pros: one field; the CDF is correct; nothing else changes.
+- Cons: breaks D12 head-on, and D12 is the extension the entire late-conversion story rests on. Once
+  the emitter can assign arrival times, `received_at` stops being a measurement anywhere and every
+  lateness figure inherits that — which is the exact argument D32 was ratified on
+  (*"received_at means nothing if the emitter and consumer share a tick"*).
+- Forecloses: the honesty of every lateness number in the app.
+- Reversal cost: low in code; the credibility loss is not reversible in a review.
+
+**B) Mark backfill and exclude it from lag statistics.** A `source: 'backfill' | 'live'` envelope
+field, **server-assigned** at ingest from which path the batch arrived on.
+- Pros: keeps D12 and D33 exactly as ratified; the two populations are separable for every purpose,
+  not just this one; costs one column.
+- Cons: the CDF is then measured over live conversions only, and at demo start there are none — so
+  D33's cold-start fallback fires, and `DESIGN.md` §4.5's claim that it never does becomes false.
+  For the first hour of a demo the maturity indicator is a stated constant curve rather than a
+  measurement, which is the weaker half of D33.
+- Forecloses: nothing, but it moves the demo onto the fallback path.
+- Reversal cost: low.
+
+**C) Amend D33 to measure emission lag `conversion.ts − click.ts`.**
+- Pros: correct for backfilled and live events alike, because both timestamps are simulated;
+  measurable from second one; simplest.
+- Cons: it measures the *purchase* lag, and D33 chose observational lag on purpose. Maturity would
+  then understate how much is still unknown, because it ignores reporting delay entirely — the
+  smaller term here, but the one that belongs to us.
+- Forecloses: the "how long until we knew" framing Seno ratified.
+- Reversal cost: low.
+
+**D) Split the measure and convolve.** Purchase-lag CDF over all conversions (valid for backfill),
+reporting-lag CDF over live only, maturity = the convolution.
+- Pros: keeps D33's total-observational-lag intent while letting backfill contribute the part it can
+  legitimately contribute.
+- Cons: the most machinery, and it puts a convolution inside a feature the brief's L147 disclaimer
+  says should be a simple honest heuristic.
+- Reversal cost: low.
+
+**E) The seeder writes historical arrival times; the emitter never does.** Reframes the actor:
+`DESIGN.md` §3.2 already has a privileged **seeder** that writes `components`, `audiences` and the
+`create_ad`/`launch` decisions directly. Backfill is a fixture, not an emission — so the seeder
+stamps `received_at = ts + a drawn reporting lag` for historical rows, and D12's rule continues to
+govern the emitter at the ingest boundary, which is a different actor with a different job.
+- Pros: D33 and `DESIGN.md` §4.5 both stay true as written; the CDF is measurable at demo start over
+  a realistic population; no amendment to a ratified decision. Combined with B's marker the two
+  populations stay separable, so the sample-size label can be honest about provenance —
+  *"measured over 1,432 settled conversions (1,180 seeded)"*.
+- Cons: the backfill's arrival times are **designed rather than observed**, and that must be said
+  plainly in the README or it is the same dishonesty as A wearing better clothes. It also puts a
+  second writer of `received_at` in the codebase, which needs the seeder to be visibly a fixture
+  path and not a general capability.
+- Forecloses: nothing.
+- Reversal cost: low.
+
+**Recommendation**
+**E combined with B** — the seeder stamps a drawn reporting lag on historical rows, the ingest
+envelope carries a server-assigned `source` marker, and the maturity CDF is computed over both
+populations while the label discloses how much of it is seeded. It is the only option under which
+no ratified decision has to be amended and the indicator is a measurement from the first frame; the
+`source` marker is worth its column independently, because "is this number resting on seeded or
+observed data" is a question a reviewer will ask about more than the CDF. The cost is one sentence
+of disclosure, which is cheaper than any of the alternatives' costs.
+
+**What I need from you**
+Seeder-stamped arrival times for backfill plus a server-assigned `source` marker, with the CDF
+labelled to disclose the seeded share — approved? Or would you rather amend D33 to purchase lag (C)
+and keep exactly one writer of `received_at`?
+
+---
+
+### DECISION #39 — Volume calibration: what scale the portfolio runs at [LOAD-BEARING]
+
+**Blocking:** every parameter value in `SIMULATOR.md`; the seed's row count and boot time.
+
+**Context**
+The parameters are not free — **D20 already pinned them.** Its gate is ≥ 500 impressions per plotted
+point for CTR and ≥ 10 **conversions** per plotted point for CPA/ROAS, with the granularity ladder
+capped at **hour** and counts shown instead past that. Read backwards, that is a volume requirement:
+
+| To draw | Needs per point | At hour granularity that is |
+|---|---|---|
+| CTR at minute | 500 impressions/min | 720k impressions/day/ad — not a real advertiser |
+| CTR at 15 min | 500 impressions/15 min | 48k impressions/day/ad |
+| **CTR at hour** | 500 impressions/hour | **12k impressions/day/ad** |
+| **CPA/ROAS at hour** | 10 conversions/hour | **12,500 impressions/hour** at CTR 2% × CVR 4% — i.e. **300k/day/ad** |
+
+The second line is the crunch: cohort ratios need three orders of magnitude more traffic than CTR,
+unless CTR × CVR is much higher — which is exactly what **retargeting** is. At CTR 4.2% × CVR 15%,
+10 conversions/hour needs only ~1,600 impressions/hour, or **40k/day**. So the ad on which per-ad
+hourly CPA/ROAS is drawable is a retargeting ad, for a domain reason rather than a demo reason.
+
+Against that, every impression is a row: 7 days × 12 ads at high volume is millions of events to
+generate, POST, ingest, roll up and re-sum in P14's agreement test, all inside *"run in one command"*.
+
+**Options**
+
+**A) Uniform realistic-small volumes, ~10–20k impressions/day/ad.**
+- How it works: 12 comparable ads; ~450k backfilled events at 7 days.
+- Pros: cheapest seed (~20s); most defensible as "what a mid-market advertiser looks like".
+- Cons: CTR is drawable at hour only, and CPA/ROAS is **never** drawable per ad — the cohort ratios
+  exist solely at portfolio roll-up. The demo's most interesting metric family is a counts display
+  for its whole duration.
+- Forecloses: showing D27-B's cohort ratios per ad at all.
+- Reversal cost: low, but it is a re-seed.
+
+**B) Asymmetric portfolio, calibrated against D20's gates deliberately.**
+- How it works: one **retargeting** ad at ~40k impressions/day sits *on* the 10-conversion boundary
+  at hour granularity, so the gate visibly binds and unbinds across the diurnal cycle. One
+  high-volume **cold** ad at ~45k/day clears CTR at 15-minute granularity. The remaining ten run
+  8–25k/day and honestly show counts where the bar is unreachable. **Launch dates are staggered** —
+  three ads live the full 7 days, the rest launched 1–4 days ago — which cuts the row count and, more
+  importantly, puts ads at different points on their fatigue and novelty curves *at one moment*, so
+  the fatigue story is legible in a single screenshot instead of requiring a time-travel narrative.
+- Budget: ~960k backfilled impressions + ~19k clicks + ~1.2k conversions + ~68k spend ticks ≈
+  **1.05M events**, ~40–60s of seeding. Fallback lever if that misses: **5 days instead of 7**
+  (~700k events, ~30s), which still exceeds the 72h horizon so nothing about settlement changes.
+- Pros: the gate is *demonstrated* rather than merely built — a reviewer sees one chart drawing a
+  ratio, another saying "not enough conversions yet, here are the counts", and the difference
+  explained by volume. Both D20 branches fire on camera. Different ad ages make fatigue and novelty
+  simultaneously visible.
+- Cons: the portfolio is shaped partly by what the read side needs, which must be disclosed rather
+  than presented as an independent domain observation. Heaviest seed of the three affordable options.
+- Forecloses: nothing.
+- Reversal cost: low; the volumes are constants in one table.
+
+**C) Inflate everything so every gate clears everywhere, ~300k/day/ad.**
+- How it works: ~15M backfilled events.
+- Pros: every chart draws every ratio.
+- Cons: minutes of boot time against a stated one-command deliverable, and it **hides the
+  mechanism** — D20's gate, its ladder and its counts fallback would all be dead code in front of
+  the reviewer. It also implies a $28k/day account, which is a claim about the customer we have no
+  reason to make.
+- Forecloses: any demonstration of the gate.
+- Reversal cost: low in code, expensive in boot time on every restart.
+
+**Recommendation**
+**B.** D20 is already ratified, so the only question left is whether the data lets it be seen
+working, and a portfolio where every bar clears would make our own noise-handling invisible while a
+portfolio where none clears would make the cohort ratios invisible. B is also the version that is
+*more* realistic rather than less: real accounts are asymmetric, retargeting really is the
+low-volume high-conversion-rate segment, and ads really do have different ages. The one thing to
+disclose is that the retargeting ad's volume was chosen to sit on the gate boundary.
+
+**What I need from you**
+Asymmetric portfolio with staggered launches, ~1.05M backfilled events at 7 days and a stated
+fallback to 5 days — approved? And is a ~40–60s first-boot seed acceptable, or should 7 days come
+down now?
+
+---
+
+### DECISION #40 — Simulator state, config sync, and the limit of determinism [LOAD-BEARING]
+
+**Blocking:** D35's accrual key having anywhere to live; the pause demo; reproducibility claims.
+
+**Context**
+`DESIGN.md` §3.3 states that *"the simulator holds no durable state of its own — it resumes from
+`SELECT MAX(ts) FROM signals`"*, and §11 that it honours pause by ceasing emission. Both are recorded
+there as **design constraints on D17**, not as solved problems. Two things make them non-trivial:
+D35's fatigue accrual and budget pacing are **stateful** (cumulative frequency per pair, spend so far
+today), and D32 rejected shared database access, so no channel currently exists through which the
+emitter learns that a lever was pulled.
+
+**Options — how state survives a restart**
+
+**A) Recompute from the server.** A read endpoint returns cumulative impressions per
+`(lineage_id, audience_id)` and spend-so-far-today per ad, both derived from the signal log and
+`config_generations`.
+- Pros: keeps §3.3's claim literally true — the state *is* a projection of the log, so a restart is
+  exact rather than approximate. The query is not simulator-specific: cumulative delivery per
+  (lineage, audience) is the temporal reverse join §8 already documents for component-level
+  performance, so this is an app query the Workbench wants anyway.
+- Cons: the server computes something whose only current consumer is the simulator.
+- Reversal cost: low.
+
+**B) Pure function of seed and simulated clock.** The simulator replays its own history from `t₀` on
+each start, deriving fatigue deterministically.
+- Pros: no endpoint; exactly reproducible; cheap (~10k ticks of arithmetic).
+- Cons: it reconstructs what the model *would* have produced, which equals what the store contains
+  only if nothing was rejected, lost or truncated mid-batch. Since we deliberately inject emitter-side
+  loss and malformed payloads, the two **will** disagree, and the fatigue curve the app infers would
+  drift from the one the emitter is applying. A silent divergence in the one number the artifact is
+  judged on.
+- Reversal cost: low.
+
+**C) Local sidecar state file beside the simulator.**
+- Pros: simplest to write.
+- Cons: contradicts §3.3 directly, and it makes killing the simulator mid-demo dirty — the world now
+  lives in two places, and deleting the file silently changes it.
+- Reversal cost: low.
+
+**Options — how the emitter learns about levers**
+
+**X) Poll `GET /api/sim/world` once per tick.** Returns the 12 `ads` rows (status, budget, slots,
+audience, channel), `last_decision_seq`, the A-state above, and any pending scenario triggers.
+- Pros: one endpoint serving cold start, resume and steady state identically; 12 rows a second is
+  free; a pause takes effect within one tick (≤ 1s), which is the *"pause `a_12` and its events
+  stop"* moment. Scenario triggers ride the same channel, so no second control path is needed.
+- Cons: 1 Hz polling is unfashionable and one more endpoint to write.
+
+**Y) The simulator subscribes to the SSE stream.** Reuses D18, but that stream carries bucket rows
+and tail frames, not config, so it needs a new frame type and the simulator becomes a client of a
+surface built for the browser.
+
+**Z) Read the database directly.** Already rejected by D32; read-only access avoids the two-writer
+problem but re-couples the processes the decision separated.
+
+**The limit that has to be stated either way**
+A seeded PRNG does **not** make the world reproducible from the seed alone, because levers change
+delivery: the moment a human pauses an ad, the world forks. The honest formulation is
+`(seed, decision log, scenario log) → world`, and all three are persisted, so replaying a specific
+interesting moment is genuinely possible — a stronger claim than seed-only determinism, and a true
+one. It also requires the RNG to be **counter-based/keyed** — draws derived from
+`hash(seed, stream, ad_id, tick_index)` rather than from a sequential stream — so that intervening on
+one ad does not shift every subsequent draw for every other ad. That is what keeps the unaffected
+part of the world identical across a forked run.
+
+**Recommendation**
+**A + X**, with the keyed RNG and the stated determinism limit. A is the only option under which the
+emitter's fatigue state and the app's inferred fatigue cannot silently disagree, and it costs a query
+the Workbench section already wants. X gives cold start, resume, lever propagation and scenario
+delivery one code path and one endpoint, and it makes the pause latency a number we can state (≤ 1
+tick) rather than a behaviour we hope for.
+
+**What I need from you**
+`GET /api/sim/world` polled at 1 Hz, fatigue and pacing state recomputed from the log rather than
+held locally, keyed RNG, and reproducibility stated as (seed + decision log + scenario log) —
+approved? Also: scenario triggers need to persist for that claim to hold, which means **one small
+table** added to `DESIGN.md` §2 — confirm you want that rather than scenarios being ephemeral.
+
+---
+
+### Propose-and-ratify block — everything else in `SIMULATOR.md`
+
+Per the Phase 3 prompt (*"The rest you can propose and I'll ratify"*) and Seno's plan-mode answer
+that D17's residue belongs here rather than as its own entry. Proposed as a batch; each line is
+low-cost to reverse and each becomes a stated parameter in the doc.
+
+**1. D17's residue — clock, backfill, determinism**
+
+| Sub | Proposal | Reason |
+|---|---|---|
+| 17b clock | **Live emission at 1× real time**; backfill generated as fast as it ingests | An accelerated *live* clock breaks lateness outright: `ts` would advance faster than the wall clock, so I10's skew clamp would fire on nearly every event and `received_at − ts` would measure our acceleration factor. 1× is not a compromise, it is the only rate at which the envelope means anything |
+| 17b backfill | Accelerated, in-process at first boot, through the same `ingest()` function | One writer of `ingest_seq` (D32's ownership argument); and per D38-E the seeder is a fixture path, not an emitter |
+| 17c determinism | **Seeded, counter-based (keyed) RNG**; default seed stated in the README | Keyed draws mean intervening on one ad does not reshuffle the others — see D40 |
+| 17d depth | **7 days**, with 5 days as the stated fallback lever | Fatigue and day-of-week both need multiple day cycles; 24h shows neither. Both exceed the 72h horizon, so settlement behaviour is unchanged either way |
+| tick | **1 second**, one batched POST per tick | ~3 events/sec average portfolio-wide, peaking ~8 — quiet enough that a burst is visible, dense enough to read as live |
+
+**2. Arrival process.** Per ad, per tick: `λ = base_ad × diurnal(h_local, channel) × dow(d) ×
+φ_fatigue(lineage×audience) × ν_novelty(age) × ρ_pacing(budget, spend) × m_channel(t) × m_ad(t)`,
+then a negative-binomial draw (D37). Every factor is a named section with a formula; nothing is a
+free constant.
+
+**3. Diurnal, in `America/New_York`** (D22). Two-peak curve rather than one, because social traffic
+has a midday and an evening peak:
+`d(h) = 0.30 + w₁·exp(−(h−13)²/(2·3.2²)) + w₂·exp(−(h−20.5)²/(2·2.0²))`, normalised to mean 1.0 over
+24h. **The peak weights are per channel** — `meta_feed` midday-weighted, `tiktok_feed` and
+`snap_stories` evening-weighted — so channel differences modulate the *shape* of the day and not
+just its level.
+
+**4. Day of week.** Volume: Mon 0.96 · Tue 1.00 · Wed 1.02 · Thu 1.03 · Fri 0.98 · Sat 0.88 ·
+Sun 0.93. Separately, a weekend browse-not-buy effect: CVR ×0.90 and order value ×1.05 on Sat/Sun.
+Two effects because they are two phenomena.
+
+**5. Channel matrix.**
+
+| Channel | Volume share | CTR mult | CVR mult | Pricing mix | CPM base | CPC base | Diurnal shape |
+|---|---|---|---|---|---|---|---|
+| `meta_feed` | high | 1.00 | 1.00 | 70% CPC / 30% CPM | $6.50 | $0.62 | midday-weighted |
+| `meta_reels` | medium | 0.85 | 0.90 | 50 / 50 | $5.20 | $0.48 | evening |
+| `tiktok_feed` | high | 1.20 | 0.75 | 30% CPC / 70% CPM | $4.10 | $0.35 | late evening |
+| `snap_stories` | low | 0.70 | 0.65 | 20% CPC / 80% CPM | $3.40 | $0.30 | evening |
+
+The pricing mix is what makes I1's two cost paths both real: on a CPM-priced channel almost all cost
+arrives as `spend` deltas and clicks carry `cost_cents = 0`; on a CPC channel cost arrives on the
+click and `spend` carries fees only. That is a direct reading of L79-80's *"disjoint"*.
+
+**6. Audience temperature matrix.**
+
+| Temperature | `est_size` | Reachable frac | CTR base | CVR | CPC mult | Order value (median) | `p_fast` (D36) |
+|---|---|---|---|---|---|---|---|
+| `cold` | 2,400,000 | 0.55 | 1.1% | 1.8% | 0.85 | $42 | 0.30 |
+| `warm` | 380,000 | 0.70 | 2.4% | 5.5% | 1.00 | $58 | 0.45 |
+| `retargeting` | 46,000 | 0.85 | 4.2% | 15.0% | 1.35 | $76 | 0.65 |
+
+Decay rate is **not** a column: `k` is global and the reachable pool does the work, so retargeting
+burns out ~50× faster than cold at equal volume as a consequence of the model rather than a
+parameter (D35).
+
+**7. Novelty at launch — yes, it is real.** `ν(age) = 1 + 0.25·exp(−age_hours/18)`: +25% CTR at
+launch, ~18-hour time constant. Modelled as a CTR effect only, not a delivery boost, for parsimony —
+and stated as such, since platforms do also favour new creative in the learning phase.
+
+**8. Budget pacing** (I3, P11). Pace against the *expected traffic shape*, not linearly, which is
+what real pacers do: let `e` = fraction of the day's expected impressions elapsed and `a` =
+`spend_so_far / daily_budget`. Then `ρ = clamp(1 + 3.0·(e − a), 0.05, 1.6)`, with a terminal taper
+`ρ ← ρ · clamp((1.05 − a)/0.15, 0, 1)` so delivery slides to zero as spend approaches **105%** of
+budget. Overspend tolerance **+5%**, stated. Throttles, never cliffs; `set_budget` visibly moves the
+rate within a tick; day rolls at midnight `America/New_York`.
+
+**9. Misbehaviour injection rates.** Cross-referenced to `DESIGN.md` §6 so every injected fault has a
+named handler and every handler has something that triggers it.
+
+| Injected | Rate | Handled by |
+|---|---|---|
+| Duplicate delivery, identical payload | 0.8% of events re-sent 1–20s later | D15 |
+| Duplicate delivery, conflicting payload | 0.05% (`value_cents` perturbed) | D15 / I7 |
+| Out-of-order, short | 3% held back one batch | D12 |
+| Out-of-order, long | 0.3% held 30–120s | D12 |
+| Orphan — click withheld then released | 0.4% of clicks delayed past their conversion | D16 promotion |
+| Orphan — click never delivered | 0.6% of clicks dropped after their conversion is scheduled | D16 `orphan_expired` |
+| Malformed payload | 0.1% (negative money or missing variant field) | `rejected_invalid` |
+| Future-dated `ts` | 0.2%, +5–90s | I10 clamp |
+| Same click under two `event_id`s | 0.05% | E3 partial unique index |
+| Emitter-side loss | 0.2% dropped silently | **G21 — deliberately injected so the one failure we cannot see is actually present in the data rather than hypothetical** |
+| Late conversion past 72h | ~3.8% — **emergent from D36, not injected** | D13 / P7 |
+| Signals for a non-live ad | **Not injected** — it is I11's self-check and must read zero | I11 / G48 |
+| Retraction / void | **Not injected** — unrepresentable by the contract (D25) | named, not built |
+| Burst · gap · stall | **Scenario-triggered only** | §11 backpressure, G21 liveness |
+
+**10. Scenario control.** `POST /api/sim/scenario {name, args}` persists a trigger which the
+simulator picks up on its next `GET /api/sim/world` poll (D40-X), so there is no second control
+channel and the triggers are part of the replayable record.
+
+| Scenario | What it does | What it demonstrates |
+|---|---|---|
+| `fatigue_collapse{ad_id, ×}` | Multiplies the pair's accumulated frequency ×4 | CTR halves within a minute; the fatigue flag fires |
+| `late_cascade{ad_id, n, min_age_h=96}` | Emits `n` conversions attributed to clicks ≥ 96h old | Restatement of settled buckets, on demand — the flagship path |
+| `budget_squeeze{ad_id}` | Jumps spend-so-far to 92% of budget | The pacing taper, visible within a tick |
+| `orphan_burst{n}` | Conversions whose clicks are withheld 90s, then released | Provisional → promoted: a two-bucket restatement |
+| `duplicate_storm{n}` | A batch replayed | Dedupe counters and `duplicate_identical` |
+| `stall{seconds}` | Emission stops | Liveness display; "last event 12s ago" |
+| `traffic_burst{×}` | Rate multiplier for 60s | Ingest backpressure and tail-frame drops |
+
+**11. Read side — inherited, not re-decided.** D20's gate (≥500 impressions · ≥10 conversions),
+ladder (minute → 5 min → 15 min → hour, **stop**, then show counts) and EWMA (15-min half-life, raw
+toggle) are ratified; so is D33's CDF with its sample size. `SIMULATOR.md` cites them and does not
+re-open them. **One thing is genuinely new — the fatigue flag:**
+
+> Flag a `(lineage × audience)` pair as fatiguing when its EWMA CTR over the last 6h has fallen
+> ≥ 25% below the pair's peak trailing-6h EWMA CTR, using only points that clear D20's impression
+> gate, with ≥ 3 qualifying points in each window.
+
+Its limits, stated on the surface per L147: it cannot separate fatigue from an audience-quality
+shift or a platform delivery change; it lags by roughly the EWMA half-life; it fires **late** on
+low-volume ads precisely because the gate suppresses their points; and it is a **display flag, not
+a recommendation** — `system:fatigue_rule` and the approval flow are D26 cut #6.
+
+**12. Two consequences that touch other documents**, raised rather than absorbed:
+
+- **`DESIGN.md` §2 gains one table** (the scenario trigger log) and the envelope gains D38's
+  `source` marker. Both are Phase-2 schema changes made in Phase 3 and both need a `BRIEF_GAPS.md`
+  extension row.
+- **Scenario control may be new scope.** Nothing in P1–P16 covers *"cause the interesting thing on
+  demand"*, and P16 exists only because restatement is otherwise invisible — which is the same
+  argument. If it becomes a plan item it lands in `SCOPE.md` §2, and that block is README-verbatim.
+  Flagged as a scope question with its cost, not slipped in.

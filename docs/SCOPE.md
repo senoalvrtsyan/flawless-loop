@@ -42,11 +42,26 @@ that earned them and visibly restate the numbers they land in, and two levers �
 | P14 | Rollup-vs-raw agreement test across every bucket, runnable on demand | — |
 | P15 | Read-only component screen: the reverse join over live data (D1's specified sketch) | — |
 | P16 | Demo-mode lateness horizon: shortening the horizon re-evaluates which buckets are settled | D13 |
+| P17 | Scenario control: `POST /api/sim/scenario` + the seven triggers, delivered over the simulator's existing world poll and persisted so they stay part of the replayable record | F3, D40 |
+
+**P17 is not optional either, and for the same reason as P16.** Every interesting property of an
+event pipeline is rare by construction — a fatigue collapse, a conversion cascade arriving four days
+late, a budget cap being approached — so a cockpit that can only *wait* for one cannot be
+demonstrated. The seven triggers are: `fatigue_collapse`, `late_cascade`, `budget_squeeze`,
+`orphan_burst`, `duplicate_storm`, `stall`, `traffic_burst`. They also make `DESIGN.md` §6's
+misbehaviour table fully exercisable: burst, gap and stall were the three rows with a named handler
+and nothing to trigger them. **P16 and P17 are not substitutes:** P16 changes which buckets are
+*settled*, P17 delivers new *late events*. The first exercises the horizon, the second the
+restatement path.
 
 **P16 is not optional.** With a 72h horizon and 7d of backfill, backfilled data is settled and
 live data is not, so shortening the horizon is the only way a restatement happens on camera. Its
 cost is not the control but the recompute — it is a settlement re-evaluation path, not a config
 toggle.
+
+Because triggers are persisted (`sim_scenarios`), reproducibility is **seed + decision log +
+scenario log**, which is the claim `DECISIONS.md` § D40 makes and the only one that is true once a
+human can intervene.
 
 **All eight FIX items ship in full.** Nothing in the mandatory bucket was traded to fund P11.
 Traceability ships at D24 level D — drill-down, trace endpoint, and agreement test — because
@@ -101,10 +116,23 @@ Ordered **cheapest to reinstate first**. If budget frees up, take from the top.
   live` is reachable via P3's `launch`; `archived` stays in the type, unreachable and named. Per
   D5, chosen over dropping the enum member so that reinstating cut #3 stays a one-variant change
   rather than a type change through the fold, the projection and persisted rows.
-- **P16** was added after `SCOPE.md` was first written, on D13's ratification. It is the only item
-  added since; nothing was removed.
+- **P16** was added after `SCOPE.md` was first written, on D13's ratification.
+- **P17** was added at the Phase 3 close, on F3's ratification — scenario control, taken as new scope
+  rather than absorbed into the simulator silently. P16 and P17 are the only items added since;
+  nothing has been removed.
+- **Phase 3 also produced two changes to `DESIGN.md`'s schema** (the `source` envelope field, E15 /
+  D38; and the `sim_scenarios` table, D40) and **one correction to it** — settlement is evaluated at
+  the arriving event's `received_at`, not at wall-clock `now`, without which seeding would stamp tens
+  of thousands of spurious restatements. Neither is a scope change; both are recorded in
+  `SIMULATOR.md` §22.
 
 ## 6. Cost note
+
+**P17** rides machinery that already exists: D40's `GET /api/sim/world` poll is the delivery channel,
+so the marginal cost is one endpoint, one table and seven small emitter branches — call it ~3%,
+funded from the measured slack in the seed path (the seed was budgeted at 40–60 s and measures ~12 s,
+and P14's sweep at 4.2 s needs no bounded mode, so the contingency reserved for both is unspent).
+Nothing on the cut line was reinstated to pay for it and nothing in §2 was traded away.
 
 P11 was priced at 6% standalone in D26's option A. Its marginal cost is ~4%, because the
 simulator needs a diurnal rate curve regardless and budget-as-pacing is a multiplier on that

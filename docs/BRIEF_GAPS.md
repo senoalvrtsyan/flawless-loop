@@ -1033,6 +1033,16 @@ simulator. This is the single richest place to demonstrate domain modelling, sin
 says outright it will be inspected, and it keeps the app's job honest: detect the decay, do not
 be told about it.
 
+> **RESOLVED — option A, by D35.** Fatigue accrues to the `(component lineage × audience)` pair,
+> frequency-driven: `f = F(lineage, audience) / (est_size × served_fraction)`,
+> `φ(f) = 0.25 + 0.75·exp(−0.35f)`, 5-day idle recovery, slots composing `video^1.0 × headline^0.5`.
+> Nothing records fatigue as state and no `fatigue` signal exists — the simulator generates it as
+> decayed CTR and the app infers it, which is what this finding asked for. The three consequences
+> named above are all now visible in the seeded data: **the same video sits at φ 0.43 on `cold_us`
+> and φ 0.91 on `warm_us` at the same instant**; a swap resets one slot and the discontinuity is
+> explained only by `config_generations`; audience overlap remains **unmodelled and named** (G15,
+> `SIMULATOR.md` §20). Model: `SIMULATOR.md` §7. Decision: `DECISIONS.md` § D35.
+
 ---
 
 ### G38 — "Used in twelve live ads" is a temporal join blocked by the missing origin · PA · D
@@ -1469,6 +1479,7 @@ Three dispositions, and only the first is an extension:
 | E1 | `received_at` | `string` — ISO 8601 UTC, **server-assigned at the ingest boundary, never emitter-assigned** | G16 | D12 |
 | E2 | `ingest_seq` | `number` — monotonic, server-assigned; total replay order, SSE reconnect cursor, timestamp tie-break | G16, G21, G22 | D12 |
 | E3 | `click_id` on the `click` variant | `string`, distinct from `event_id` | G17 | T1 / P2 |
+| E15 | `source` | `'backfill' \| 'live'` — **server-assigned from the path the batch arrived on** | D33 conflict (below) | D38 |
 
 **E1 + E2 are the highest-priority extensions in the project.** The asymmetry that makes them
 urgent: adding them costs two columns; omitting them costs the data *permanently*, because an event
@@ -1482,6 +1493,15 @@ L73 as a dedupe key for at-least-once delivery; `attributed_click_id` (L81) poin
 `attributed_click_id` means the click's `event_id` — the same click redelivered under a *different*
 `event_id` produces a double-counted click that nothing can detect. E3 makes that failure
 representable.
+
+**E15 exists because two ratified decisions could not both hold.** D33 measures the maturity CDF as
+`received_at − click.ts` — the *observational* lag. D12 makes `received_at` server-assigned. Seeding
+7 days of history in one burst gives every backfilled conversion `received_at ≈ boot`, so the CDF
+would have been a picture of the seed loop rather than of conversion lag. The seeder therefore stamps
+modelled historical arrival times (it is a fixture writer, not an emitter — `DESIGN.md` §3.2) and
+`source` keeps the two populations separable, so the maturity label can disclose the seeded share and
+any figure resting on history can be identified as such. Full analysis: `OPEN_QUESTIONS.md` § Wave 6
+· D38.
 
 ## B. Extensions to `Decision`
 
@@ -1565,6 +1585,11 @@ way a reviewer should be able to check, so each is stated rather than assumed.
 | I15 | Money sign | Non-negative integers, enforced at ingest | G49 | U6 |
 | I16 | Currency | USD only; no currency field, no FX | G05 | U1 |
 | I17 | L117's *"everything on screen is derived from the stream"* | Restated as: every **performance** number derives from the signal stream, every **config** value from the decision log folded over its origin, nothing is hard-coded | G39 | — |
+| I18 | L83's *"may land hours or days after its click"* — which lag? | **Two distinct lags.** *Purchase* lag `click.ts → conversion.ts` (the buyer decided later) and *reporting* lag `conversion.ts → received_at` (the platform told us later). `received_at − ts` is the **reporting** lag only; purchase lag is what drives restatement | L83, G16 | D36 |
+
+**I18 matters because collapsing the two lags would corrupt our own telemetry.** Ratified in Seno's
+words: *"If you collapse them then received_at − ts becomes the purchase lag, which would make our
+own transport look like it's hours behind. That field has to describe us, not the buyer."*
 
 **I17 is a correction to the brief, not an interpretation of it.** Taken literally the sentence is
 false in the brief's own terms: budget, status, channel, audience and component payloads come from
