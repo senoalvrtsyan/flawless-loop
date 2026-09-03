@@ -7,7 +7,62 @@ Each entry carries, per `CLAUDE.md` §3: id, date, the question, the options as 
 presented, what was chosen, the rationale **in Seno's words**, consequences, what it forecloses,
 and a one-line "how I'd defend this in review".
 
-Ids match `docs/OPEN_QUESTIONS.md` §B. `G##` references point into `docs/BRIEF_GAPS.md`.
+## Legend — the id prefixes and code letters
+
+Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They collide on `D`.
+
+**Id prefixes**
+
+| Prefix | Means | Lives in | Range |
+|---|---|---|---|
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D26 |
+| `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
+| `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1, F2 |
+| `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
+| `P`*n* | **Plan item** — one reviewable build chunk | `SCOPE.md` §2; `BUILD_PLAN.md` from Phase 4 | P1–P16 |
+| `L`*nnn* | **Line number in `docs/BRIEF.md`** — so a quote is checkable, never recalled | citations throughout | — |
+
+**Gap codes**, as they appear in a `BRIEF_GAPS.md` heading (`### G04 — <title> · US · B · FIX`) —
+category · severity · triage. That file's legend is the authoritative definition list; the examples
+below are here because this is the file that gets read cold.
+
+**Category** — *where the defect comes from.* The brief conflicts with the field's own name (US),
+with itself (IC), with what it can enforce (UI), with its own promises (PA), or with reality (RW).
+
+| Code | Means | Example |
+|---|---|---|
+| MI | missing identifier — something you must point at has no id | **G17** `attributed_click_id` references a `click_id` field that exists nowhere in the contract |
+| MF | missing field — the data is not in the type at all | **G16** `Signal` has no arrival timestamp, so lateness is inexpressible |
+| US | undefined semantics — *semantics = meaning.* The field exists and is named, and two competent people still implement it two incompatible ways | **G04** `daily_budget_cents`: daily per *which clock*? No timezone exists in the model, and `Audience.geo` is a country code — Berlin midnight and UTC midnight are both honestly "daily" |
+| IC | internal contradiction — two parts of the brief disagree with each other; nothing is missing, the pieces don't fit | **G08** the prose calls channel two dimensions ("which platform, which surface"), the type collapses both into one opaque string — while `audience`, no more structured, gets its own entity |
+| UI | unenforceable invariant — *invariant = a rule that must hold at all times.* Nothing in the model can guarantee it, usually because the rule and the model cannot both be true | **G02** L42 says a live ad's config changes only through levers, but no lever produces a launch — so obey the rule and `launched_at` stays null forever; set it and you've broken the rule |
+| PA | product ask not expressible with the given contracts — a promised user-facing capability the types cannot represent | **G06** L111 promises a library of "videos, images, copy"; `Component.kind` declares four kinds and `Ad` has slots for two, so a strategist can create an image and attach it to nothing |
+| RW | real-world case the contract cannot represent — the model is self-consistent, reality is not shaped like it | **G15** retargeting is *defined by what it retargets*; the model gives a label with no referent, so nothing links a retargeting audience to the conversions that populated it |
+
+**Severity** — **B** blocking (work cannot start on the affected surface) · **D** needs a decision
+(a defensible alternative exists; §3 applies) · **C** cosmetic (note it, pick a default, move on).
+
+**Triage** — carried on blocking findings only. The audit's job is to *find* problems; triage is the
+separate pass that decides what we **do** about each one, and prices it. Without it, 52 findings
+quietly become 52 build tasks. Exactly one bucket per blocking finding:
+
+| Code | Means | Example |
+|---|---|---|
+| FIX | extend the contract and build it | **G16** arrival timestamps — irreversible if skipped, since an already-ingested event can never be given an arrival time afterwards. Two columns now, or the data is gone permanently |
+| SPECIFY | design it fully in the README; do not build it | **G10** component versioning — nothing *edits* components while the Workbench is sketched, so there is no editing and therefore no versioning at runtime. L111 asks us to "pick one and defend it", which prose satisfies |
+| NAME | state it as a known limit we tolerate | **G05** money is USD-only while `Audience.geo` varies — we say so rather than building currency, and name what it costs |
+
+`T1` is that pass over the 12 blocking findings: **FIX 6 · SPECIFY 6 · NAME 0**, FIX costed at 8
+build chunks before any of it was built. NAME is empty there by construction — a blocking finding is
+by definition one we cannot merely tolerate — so the NAME set is drawn from the non-blocking
+register instead.
+
+**The `D` collision.** `D` is three unrelated things: a decision id (`D8`), the severity "needs a
+decision" (`· D ·` in a gap heading), and an option letter within a decision (`D26 — option A`).
+So *"traceability at D24 level D"* means **decision D24, option D** — its deepest traceability
+level — and not a severity.
+
+---
 
 | # | Title | Status | Date |
 |---|---|---|---|
