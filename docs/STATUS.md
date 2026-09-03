@@ -23,6 +23,7 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 | `docs/BRIEF_GAPS.md` | Audit register. 52 findings (G01–G52), six passes. 12 blocking, each tagged FIX/SPECIFY/NAME. Options and recommendations are pre-choice analysis, left unedited. **Owes an extensions section** — see "What is owed". |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B 26 decisions in `CLAUDE.md` §3 format, in four waves · §C 7 unratified assumptions. Answered/resolved ones carry a banner pointing at `DECISIONS.md`. |
 | `docs/DECISIONS.md` | Ratified decisions only. D1, T1, D26, then D2/D5/D7–D14 under "RATIFICATION PASS", then F1/F2 under "FOLLOW-UPS". Each entry carries Seno's verbatim wording; the pass also has a per-decision "Wording of record" table. |
+| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables only: ratified decisions (chose / why / forecloses), the four root-cause gaps, the ordered cut line. Hard one-screen limit. **Must be refreshed at the close of every phase.** |
 | `docs/SCOPE.md` | **Phase 1 output.** One page: what's real (P1–P16), what's sketched and in what form, what's cut with a one-sentence reason each, ordered cheapest-to-reinstate-first. §2–§4 is the block that goes into the README verbatim. |
 
 ## What is ratified
@@ -112,10 +113,11 @@ Documentation debt with a named owner and gate, so it is not rediscovered late.
 
 ## Standing reminders
 
-Rules live in `CLAUDE.md`; these are the two that bite hardest right now.
+Rules live in `CLAUDE.md`; these are the ones that bite hardest right now.
 
 - **No code until Seno says "start Phase 5".** Not a scaffold, not a `package.json`, not a type
   sketch on disk. Type definitions inside a design document are fine.
+- **Refresh `docs/CHEATSHEET.md` whenever you update this file at a phase close** — see `CLAUDE.md` §9.
 - Never work from memory. If a field name, chosen option or scope boundary is needed, open the
   file. If it is not written down, ask.
 

@@ -211,6 +211,17 @@ The docs are the memory; the conversation is scratch space.
   anything in flight) — then tell the human it is safe to `/clear`.
 - `docs/STATUS.md` must be sufficient, together with this file, to resume cold.
   Write it for someone with no memory of the conversation. That someone is you.
+- **At every phase close, refresh `docs/CHEATSHEET.md` alongside `STATUS.md`.**
+  One page, hard limit — it must fit on one screen. Exactly three tables and no
+  prose: (1) every ratified decision — what we chose, a one-sentence reason,
+  what it forecloses; (2) the root-cause gaps, one line each; (3) the ordered
+  cut line — item and reason only. Expand every reference inline (a plan item,
+  a finding id, a level) so it is readable without opening another file.
+- **The two files do not overlap. Do not restate anything from `STATUS.md` in
+  the cheatsheet.** `CHEATSHEET.md` is what Seno revises from — the decisions and
+  their defences, at a glance. `STATUS.md` is what you resume from — where we
+  are, what is open, what is owed, what is next. Anything about in-flight work,
+  gates or next actions belongs in `STATUS.md` only.
 - Never rely on something being "earlier in the conversation".
 - Keep documents append-friendly and skimmable: short sections, stable
   headings, no walls of prose.
