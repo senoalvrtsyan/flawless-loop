@@ -196,6 +196,11 @@ export const DOW_ORDER_VALUE: readonly number[] = [1.05, 1.00, 1.00, 1.00, 1.00,
  */
 export const NOISE = {
   clickKappa: 200,
+  /**
+   * **Removed from the model by D62** and kept here as a marker rather than deleted, because §21
+   * still lists it and a reader comparing the two needs to land somewhere. Conversion is now
+   * `Bernoulli(p_cvr)` keyed by `click_id` (`emit.ts`). Nothing reads this.
+   */
   conversionKappa: 60,
   orderValueSigma: 0.6,
   cpcSigma: 0.35,

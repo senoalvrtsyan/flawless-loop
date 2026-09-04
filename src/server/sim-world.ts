@@ -174,7 +174,17 @@ export function simWorld(db: DatabaseSync, nowMs = Date.now()): SimWorld {
       )
       .all() as { scenario_id: string; name: string; args_json: string; ts: string }[];
 
+    // D60: §14's first term, served so the emitter does not hold one. Read inside the same
+    // transaction as everything else, so a poll cannot see the seed of one world and the ads of
+    // another. `sim_run` is not a projection, so this read is unremarkable — but the SQL stays
+    // UNQUALIFIED like every other statement outside `verify.ts` (D55).
+    const run =
+      (db
+        .prepare('SELECT seed, t0, backfill_days FROM sim_run WHERE id = 1')
+        .get() as { seed: string; t0: string; backfill_days: number } | undefined) ?? null;
+
     return {
+      run,
       // Across ads, not per ad: the emitter wants one number to compare against its last poll, and
       // `ads.last_decision_seq` is per-ad (the fold's position for that ad). MAX is what "has
       // anything changed" needs; the per-ad values are in the rows for anyone who needs more.

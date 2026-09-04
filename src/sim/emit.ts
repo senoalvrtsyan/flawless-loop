@@ -162,6 +162,32 @@ export function pCvr(ad: AdConfig, atMs: number): number {
     temperatureOf(ad.audience_id).cvr * channel.cvrMult * (DOW_CVR[localWeekday(atMs)] ?? 1)
   );
 }
+/**
+ * §10's conversion draw — **`Bernoulli(p_cvr)` per click, keyed by `click_id` alone (D62).**
+ *
+ * It was `BetaBinomial(clicks(t), p_cvr, κ = 60)`, a draw over the TICK's clicks. Two facts made
+ * that untenable at B34 and neither is about the parameter:
+ *
+ *   * **κ = 60 did nothing.** A BetaBinomial's overdispersion enters through `(N−1)/(κ+1)`, exactly
+ *     zero at `N = 1`, and a tick's clicks are 0–1 and stay 0–1 over a minute. D57 consequence 6
+ *     already ratified it as inert.
+ *   * **It broke §15.3(b)'s handover.** That section promises the pending-conversion queue is
+ *     *derivable, not stored* — the emitter re-derives a backfilled click's schedule from
+ *     `hash(seed, 'conv_lag', click_id)`. A draw over the tick's clicks needs the tick's click
+ *     count and the click's index within it, and a handed-over `click_id` carries neither. Found
+ *     at B31a, written into `sim-world.ts`'s `PENDING_CLICKS_SQL` docstring, decided as D62.
+ *
+ * Keyed by `click_id` and nothing else, exactly like `lag.ts`'s schedule — so backfill and the live
+ * emitter answer the same question the same way for the same click, which is what makes B35's `T0`
+ * seam checkable rather than merely plausible.
+ *
+ * What it gives up, stated: correlated conversion behaviour within one tick's clicks. That was
+ * unmodelled in practice anyway at N = 0–1.
+ */
+export function converts(seed: string, clickId: string, ad: AdConfig, atMs: number): boolean {
+  return draw(seed, 'cvr', clickId) < pCvr(ad, atMs);
+}
+
 
 /** §10's order value: `LogNormal(median = order_value(temperature) × dow_aov, σ = 0.6)`, in cents. */
 export function orderValueCents(

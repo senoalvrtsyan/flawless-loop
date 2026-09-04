@@ -95,6 +95,13 @@ export type SimWorld = {
   last_decision_seq: number;
   /** The local day the spend figures are summed over, so the emitter never computes it twice. */
   account_day: { tz: string; starts_at: string };
+  /**
+   * §14's first term and the seed boundary, from `sim_run` — **D60**. The emitter holds NO seed of
+   * its own: it uses this one, so it cannot continue a seeded history under a seed that history
+   * was not generated with. `null` on a store that has been migrated but never seeded, which is
+   * exactly when the emitter must not emit.
+   */
+  run: { seed: string; t0: string; backfill_days: number } | null;
   ads: WorldAd[];
   /** Named for what it is: delivery per (lineage, version, audience). See `WorldDelivery`. */
   deliveries: WorldDelivery[];

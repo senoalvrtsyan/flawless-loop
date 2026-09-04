@@ -16,19 +16,31 @@ import { openDb, tx, DB_PATH } from '../server/db.ts';
 import { applyDecision } from '../server/apply.ts';
 import { ACTOR } from '../shared/decisions.ts';
 import { ADS, AUDIENCES, COMPONENTS } from './fixtures.ts';
+import { seedHistory, type HistoryAd } from './seed-history.ts';
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
 
-export type SeedResult = { t0: string; decisions: number; ads: number; generations: number };
+export type SeedResult = { t0: string; decisions: number; ads: number; generations: number; seed: string };
+
+/**
+ * §14's first term, and **D60**'s subject. Overridable at SEEDING time and only there: the emitter
+ * reads the seed back out of `GET /api/sim/world`, so forking a world means seeding a new store
+ * rather than passing a different flag to a running process.
+ */
+export const SEED = process.env.SIM_SEED ?? 'flawless-loop';
+
+/** §15.2's depth. Seven days, with five as the stated fallback lever. */
+export const BACKFILL_DAYS = Number(process.env.SIM_BACKFILL_DAYS ?? 7);
 
 /**
  * Seed the world. `t0` is **T0** — the seed boundary (§15.3(b)), which under **D53** is simply the
  * seeder's boot instant. It is passed in rather than read from the clock so the caller owns the
  * time, the way `ingest()`'s `now` and `apply()`'s `applied_at` are owned by their callers.
  *
- * **T0 needs no column.** It is recoverable from the log: the seven-day ads' `launch.ts` plus seven
- * days. B34 owes only the question of whether to make that explicit.
+ * **T0 now HAS a column** — `sim_run.t0`, added by **D60** at B34. It was recoverable from the log
+ * (the seven-day ads' `launch.ts` plus seven days), but that derivation runs backwards through
+ * D53's own backdating, so storing it removes a circular read rather than duplicating a fact.
  *
  * Refuses a non-empty world rather than merging into one. A second run with the same fixtures would
  * be *harmless* — `decision_id` is derived, so U5 would replay every decision — but it would also
@@ -108,8 +120,17 @@ export function seedWorld(db: DatabaseSync, t0: Date): SeedResult {
     }
   }
 
+  // §14's first term, into the store — D60. `sim_run` is NOT a projection (003's header), so this
+  // is a direct write for the same reason `components` and `audiences` above are: it is simulator
+  // input, not something derived from a log. Written once, never updated, and the CHECK on `id`
+  // is what enforces "one store, one world".
+  db.prepare(
+    `INSERT INTO sim_run (id, seed, t0, backfill_days, created_at) VALUES (1, ?, ?, ?, ?)`,
+  ).run(SEED, t0.toISOString(), BACKFILL_DAYS, t0.toISOString());
+
   return {
     t0: t0.toISOString(),
+    seed: SEED,
     decisions,
     ads: (db.prepare('SELECT COUNT(*) AS c FROM ads').get() as { c: number }).c,
     generations: (db.prepare('SELECT COUNT(*) AS c FROM config_generations').get() as { c: number }).c,
@@ -122,9 +143,49 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (version === 0) {
     throw new Error(`${DB_PATH}: store is not migrated — run \`npm run db:migrate\` first`);
   }
-  const result = seedWorld(db, new Date());
+  const t0 = new Date();
+  const result = seedWorld(db, t0);
   console.log(`[seed] store ${DB_PATH}`);
-  console.log(`[seed] T0 = ${result.t0}`);
+  console.log(`[seed] T0 = ${result.t0} · seed '${result.seed}' · ${BACKFILL_DAYS}d of history`);
   console.log(`[seed] ${result.decisions} decisions -> ${result.ads} ads, ${result.generations} generations`);
+
+  // Part 2 — B34. The ads must exist first: the backfill reads `launched_at` off the projection the
+  // fold above produced, so an ad delivers from its own launch rather than from the window's start.
+  const ads = db
+    .prepare(
+      `SELECT ad_id, channel, video_id, headline_id, audience_id, launched_at, daily_budget_cents
+         FROM ads WHERE launched_at IS NOT NULL ORDER BY ad_id`,
+    )
+    .all() as HistoryAd[];
+
+  let lastPct = -1;
+  const history = seedHistory(db, result.seed, t0.getTime(), BACKFILL_DAYS, ads, (done, total) => {
+    const pct = Math.floor((done / total) * 10) * 10;
+    if (pct !== lastPct) {
+      lastPct = pct;
+      process.stdout.write(`\r[seed] writing history ${pct}% (${done}/${total})   `);
+    }
+  });
+  process.stdout.write('\n');
+
+  console.log(
+    `[seed] ${history.ticks.toLocaleString('en-US')} ticks -> ` +
+      `${history.generated.toLocaleString('en-US')} events generated · ` +
+      `${history.seeded.toLocaleString('en-US')} seeded · ` +
+      `${history.handedOver.toLocaleString('en-US')} handed to the live emitter (arriving after T0)`,
+  );
+  console.log(
+    `[seed] ingested: ${history.accepted.toLocaleString('en-US')} accepted · ` +
+      `${history.duplicateIdentical} dup-identical · ${history.duplicateConflicting} dup-conflicting · ` +
+      `${history.rejectedInvalid} rejected`,
+  );
+  console.log(
+    `[seed] injected: ` +
+      Object.entries(history.faults).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(' '),
+  );
+  console.log(
+    `[seed] ${(history.generateMs / 1000).toFixed(1)}s generate · ` +
+      `${(history.sortMs / 1000).toFixed(1)}s sort · ${(history.ingestMs / 1000).toFixed(1)}s write`,
+  );
   db.close();
 }

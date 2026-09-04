@@ -42,29 +42,41 @@ import {
 import type { IngestResult, Signal } from '../shared/types.ts';
 
 /**
- * The world seed. No design document fixes a VALUE — §14 only fixes the formula — so this is the
- * `(seed + decision log + scenario log) → world` claim's first term, held as a constant so it is
- * stable across restarts, and overridable for a forked run.
+ * The seed used for `--dry-run` ONLY.
  *
- * ASSUMPTION (unratified): a code constant rather than a row in the store. Blocks nothing now;
- * needs sign-off at B34, where the seed path makes it load-bearing for reproducibility.
+ * **The live emitter has no seed of its own — D60.** It reads `run.seed` out of every world poll,
+ * so it cannot continue a seeded history under a seed that history was not generated with. That
+ * failure is silent: fatigue accrued by one world and extended by another leaves every number on
+ * screen plausible and the world internally incoherent.
+ *
+ * A dry run has no store to read, so it keeps the env override. `SIM_SEED` is therefore a
+ * SEEDING-time knob (`seed-world.ts` writes what it is given) and a dry-run knob, and never an
+ * emission-time one — forking a world means seeding a new store, which is the honest shape.
  */
-const SEED = process.env.SIM_SEED ?? 'flawless-loop';
+const DRY_RUN_SEED = process.env.SIM_SEED ?? 'flawless-loop';
+
+/**
+ * The seed for THIS world, from the poll. `null` until the first successful one, which is also
+ * exactly when nothing may be emitted.
+ */
+let SEED = '';
 
 /** §15.1: 1 s, one batched POST per tick, 1× wall clock. */
 const TICK_MS = 1_000;
 
 /**
- * How far back boot re-emits. Every whole second in `[now - CATCHUP_S, now)` is generated on
- * start, which is what makes the plan item's restart check work: the ticks the previous process
+ * How far back boot re-emits — **60 s, ratified as D61** (2026-09-04). Every whole second in
+ * `[now - CATCHUP_S, now)` is generated on start, which is what makes the plan item's restart check work: the ticks the previous process
  * already sent are re-derived byte-for-byte and land as `duplicate_identical` (§14, §16), and the
  * seconds it never reached are not lost. A gap there would be indistinguishable from the 0.2%
  * emitter-side loss §13 injects on purpose, which is the one failure the app cannot see (§6).
  *
- * ASSUMPTION (unratified): 60 s. One `rollup_minute` bucket (D28), so a restart re-emits at most
- * the minute you are watching. Needs sign-off before B34 — §15.3(b) makes the start
- * `max(now - CATCHUP_S, T0)` once the seeder owns everything up to T0 — and before B29, where
- * `GET /api/sim/world` could carry a server-derived resume position instead.
+ * One `rollup_minute` bucket (D28), so a restart re-emits at most the minute you are watching, and
+ * §15.3(b) bounds the start below at `T0`. The alternative — a server-derived resume position
+ * carried in the world poll, removing re-emission entirely — was put to Seno and **refused on
+ * purpose**: the re-emission IS the demonstration that derived ids make restart safety free (B11
+ * measured 14 `duplicate_identical`, 0 conflicting). Optimising it away would remove the evidence
+ * for the property §14 exists to claim.
  */
 const CATCHUP_S = 60;
 
@@ -329,6 +341,20 @@ async function tick(): Promise<void> {
     // the seconds that were missed instead of losing them.
     if (world === null) return;
 
+    // D60: the seed comes from the world, not from this process. A store that has been migrated but
+    // never seeded has no run identity, and an emitter with no seed cannot derive an `event_id` —
+    // so it says so once and emits nothing, the same shape as never having polled at all.
+    if (world.run === null) {
+      if (SEED !== '') console.error('[sim] world has no sim_run row — nothing will be emitted');
+      SEED = '';
+      return;
+    }
+    if (SEED !== world.run.seed) {
+      if (SEED !== '') console.error(`[sim] world seed changed '${SEED}' -> '${world.run.seed}'`);
+      else console.log(`[sim] world seed '${world.run.seed}' · T0 ${world.run.t0}`);
+      SEED = world.run.seed;
+    }
+
     const live = liveAds(world, Date.now());
     for (; nextTick < now; nextTick++) {
       // §13's injectors sit BETWEEN generation and the wire, which is where a delivery fault
@@ -395,7 +421,7 @@ function dryRunOptions(argv: readonly string[]): DryRunOptions | null {
   const fromArg = value('--from');
   const fromMs = fromArg === undefined ? localMidnightAtOrBefore(Date.now()) : Date.parse(fromArg);
   if (!Number.isFinite(fromMs)) throw new Error(`--from ${fromArg}: not a parseable instant`);
-  return { seed: SEED, hours, fromMs };
+  return { seed: DRY_RUN_SEED, hours, fromMs };
 }
 
 const dry = dryRunOptions(process.argv.slice(2));
@@ -415,7 +441,7 @@ if (dry !== null) {
 
 console.log(
   `[sim] polling ${WORLD_URL} at ${1_000 / TICK_MS} Hz → posting to ${INGEST_URL}` +
-    ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week and §12 demand, NegBinomial(λ, α=8)` +
+    ` · seed from the world (D60) · §3 λ with §4 diurnal + day-of-week and §12 demand, NegBinomial(λ, α=8)` +
     ` · §9 ρ_pacing from the poll's spend-so-far · §13's ten injected misbehaviours` +
     ` · §10 clicks at p_ctr with φ and ν FROM THE LOG (D56/D57), CPM spend every ${SPEND_TICK_S}s` +
     ` · replaying from ${new Date(FIRST_TICK * 1_000).toISOString()}` +

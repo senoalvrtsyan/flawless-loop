@@ -55,12 +55,12 @@ import { emptyCounts, injectFaults, type FaultName } from './faults.ts';
 import { derivedId } from './rng.ts';
 import {
   beta,
-  betaBinomial,
   clicksForTick,
   cpmAccrualCents,
   isSpendBoundary,
   orderValueCents,
   pCtr,
+  converts,
   pCvr,
   spendCents,
 } from './emit.ts';
@@ -252,19 +252,13 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
 
         // Conversions are COUNTED here and emitted nowhere: §10 schedules them (§11, B29). Keyed
         // on the `cvr` stream by `(ad, tick)`, which is the key B29 will re-derive them from.
-        if (clicks.length > 0) {
-          const converted = betaBinomial(
-            seed,
-            'cvr',
-            [ad.ad_id, tick],
-            clicks.length,
-            pCvr(ad, atMs),
-            NOISE.conversionKappa,
-          );
-          own.conversions += converted;
-          for (let j = 0; j < converted; j++) {
-            own.orderValueCents += orderValueCents(seed, ad, atMs, [ad.ad_id, tick, j]);
-          }
+        // D62: one Bernoulli per click, keyed by `click_id` alone, so a bare `click_id` is a
+        // sufficient handover (§15.3(b)). The order value stays keyed by the click too, for the
+        // same reason — B34 hands over click ids and nothing else.
+        for (const click of clicks) {
+          if (!converts(seed, click.click_id, ad, atMs)) continue;
+          own.conversions += 1;
+          own.orderValueCents += orderValueCents(seed, ad, atMs, [click.click_id]);
         }
 
         // I1's 60 s spend delta, accumulated and flushed exactly as `index.ts` re-derives it.
@@ -868,10 +862,12 @@ function clickRateUncertainty(opts: DryRunOptions): void {
     );
   }
   console.log(
-    `\n  κ = ${NOISE.conversionKappa} for CONVERSIONS is still inert and lifting it to the minute would not help:\n` +
-      `  a conversion draw is over one tick's CLICKS, which is 0-1, and stays 0-1 over a minute. It\n` +
-      `  would take an hour-wide window to give it any effect — a further decision about where\n` +
-      `  cohort-rate uncertainty lives, not a fix. Stated as a limit in BUILD_PLAN.md §14.`,
+    `\n  κ for CONVERSIONS is GONE — D62 removed it rather than leaving it inert:\n` +
+      `  it was over one tick's CLICKS, which is 0-1 and stays 0-1 over a minute, so (N-1)/(k+1)\n` +
+      `  was exactly zero. What forced its removal was §15.3(b)'s handover, not the parameter: a\n` +
+      `  draw over the tick's clicks needs the tick's click count and the click's index, and a\n` +
+      `  handed-over click_id carries neither. Conversion is now Bernoulli(p_cvr) keyed by click_id.\n` +
+      `  Cohort-rate uncertainty on conversions stays unmodelled and stays a stated limit.`,
   );
 }
 
