@@ -109,7 +109,7 @@ appears in B15 from the decision log, and never before.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
-| [ ] | **B04** | HTTP server, `GET /api/health`, and a dev runner that starts server and simulator as two processes | `src/server/http.ts`, `src/server/index.ts`, `scripts/dev.mjs` | `npm run dev`; `curl /api/health` returns the log position | D§11 | — |
+| [x] | **B04** | HTTP server, `GET /api/health`, and a dev runner that starts server and simulator as two processes | `src/server/http.ts`, `src/server/index.ts`, `scripts/dev.mjs` | `npm run dev`; `curl /api/health` returns the log position | D§11 | — |
 | [ ] | **B05** | `POST /api/ingest` for `impression` only: stamp `received_at` + `ingest_seq`, validate, write `signal_deliveries` **always**, dedupe on `event_id`, insert `signals` — one transaction | `src/server/ingest.ts`, `src/shared/types.ts` | POST one event, then the same `event_id` again: dispositions read `accepted` then `duplicate_identical`; `signals` has one row, `signal_deliveries` two; POST a negative amount → `rejected_invalid` with the raw body kept | D§5.1 | **HR2 HR8** |
 | [ ] | **B06** | `apply()` — the single writer. Rollup upsert for impressions, in B05's transaction. Establishes the rule the rest of the build obeys | `src/server/apply.ts` | POST three impressions spanning two minutes → `rollup_minute` has exactly two rows with the right counts and `max_ingest_seq`; grep proves no other file writes a projection | D§4.3, §1 | **HR2 HR6** |
 | [ ] | **B07** | `GET /api/snapshot?from&to&ads` — one read transaction, returns buckets + `as_of_ingest_seq` | `src/server/snapshot.ts` | `curl` after B06 and diff the JSON against `sqlite3` output by hand | D§3.1 | **HR2** |
