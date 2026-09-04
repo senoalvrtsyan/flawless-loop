@@ -12,6 +12,7 @@ import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
 import { parseSnapshotQuery, snapshot } from './snapshot.ts';
 import { createStream } from './stream.ts';
+import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -71,6 +72,35 @@ const routes: readonly Route[] = [
       // error instead of a rule someone has to remember.
       const responseBody: IngestResult = result;
       sendJson(res, 200, responseBody);
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/decisions',
+    handler: async (req, res) => {
+      // The lever. DESIGN §11: folds, opens the generation, writes `ads` and returns the NEW
+      // state in one transaction — so the console never shows an optimistic value that could
+      // then be rejected. `ts` and `actor` are ours (U7, U2); the wire cannot set either.
+      const body = await readBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { error: 'malformed_json' });
+        return;
+      }
+      // Annotated for the same reason the ingest response is: `sendJson` hides the shape from tsc.
+      const result: PostResult = postDecision(db, parsed);
+      sendJson(res, result.status, result.body);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/decisions',
+    handler: (_req, res, url) => {
+      // In fold order. B47's console reverses it; this endpoint answers "what produced this
+      // config", which is a question with exactly one correct order.
+      sendJson(res, 200, { decisions: listDecisions(db, url.searchParams.get('ad_id')) });
     },
   },
   {
