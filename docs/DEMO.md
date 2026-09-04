@@ -45,7 +45,7 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | 1 | **The world has a past** — the app opens onto seven days, not an empty chart | B36 | ✅ below |
 | 2 | Read a signal off the chart | B37, **B38** | ✅ below — ratios landed at B38 |
 | 3 | The gate refuses to draw a ratio it cannot support | **B39**, B40 | ✅ below |
-| 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | **B46, B47, B48** | ✅ below |
+| 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | **B46, B47, B48, B50a** | ✅ below — and the score, with its four limits |
 | 5 | **A late conversion restates a settled bucket** | **B41, B42, B43, B49, B50** | ✅ below — and now causable on demand |
 | 6 | **Walk a number back to its events** | B52, B53 | — |
 | 7 | Configs are versioned; the swap is visible | **B48**, B56 | partly — the boundary and the swap are in beat 4; B56's component screen is still owed |
@@ -343,10 +343,46 @@ the one property this whole design is built to demonstrate, and `/api/verify` is
     rows already says it, and a stored summary is a second copy of a fact that can go stale. The step
     in the series at that line is explained by the generation, and by nothing else."*
 
-**What this beat does not show.** Whether the swap *worked*. The log records what was tried and why,
-never whether it helped — decision scoring is `SCOPE.md` §4 cut #1, and **D68** reinstates it
-conditionally as `B50a` if stage 5 lands clean. Say that plainly; it is a scope cut with a named
-reason, not an omission.
+### Did it work? — the score, and its four limits (B50a / P18)
+
+**Say:** *"The obvious next question is whether any of that helped. There is a column for it, and
+the interesting thing about that column is how often it refuses to answer."*
+
+16. **The last column of the decision log: `score (±6 h, D70)`.** On the seeded week every row reads
+    **`no before-window`** — the twelve `create_ad`s because the ad did not exist, and the twelve
+    `launch`es because the ad was in `draft` and a draft ad delivers nothing. **Say so plainly:**
+    *"P18 is built and it has nothing to score here, because the seeded week contains no mid-week
+    lever pulls. That is a gap between built and demonstrable, and it is the same gap the horizon
+    control exists to close for restatements."*
+17. **Pull a lever now** (beat 4, step 3) and the row reads **`scoring in N h · awaiting conversion
+    settlement`**.
+
+    **Say:** *"That is not an apology, it is the clearest thing on this screen. Without the guard the
+    comparison is systematically biased in one direction: the before-window has had six more hours
+    to accumulate late conversions than the after-window, so **every** decision would look worse
+    than it was — with every number plausible and nothing erroring. So we withhold, and we say how
+    long."*
+18. **Shorten the horizon** (the control above the chart) **and watch the withheld entries release.**
+    Measured on the seeded week: at 72 h, six entries read `scoring in 2 h`; swept to 2 h, **all six
+    release**. That pairing is D19's own recommendation — *"pair with a shortened horizon in demo
+    mode so a score can be produced live."*
+19. **Where a score does appear**, it reads e.g. `▲ better · CPA $5.00 → $2.50 (−50.0%)`.
+
+    **Say:** *"One metric, never both — CPA where both windows carry conversions, CTR otherwise —
+    so nobody can pick whichever moved the way they hoped. And note the direction: CPA improving
+    means it went **down**. Reading a negative delta as 'worse' would flip the verdict on half the
+    log and read perfectly normally, which is why it is a tested property and not a convention."*
+20. **The `⚠ contaminated by #26` flag.** A second lever inside either window.
+
+    **Say:** *"We do not correct for it. The alternative was to pin the windows to the ad's own
+    generation boundaries, which is never contaminated by construction — but gives you two windows
+    of wildly different lengths that need normalising against a `valid_to` that moves. A
+    contamination the reader can see beats a correction they cannot audit, and the brief asks only
+    for a stated before-window versus after-window heuristic."*
+
+**What this beat still does not show.** Whether the swap worked *causally*. Six hours of the world
+moved too, and the score is a comparison, not an attribution. That limit is printed under the table
+rather than left for the reviewer to raise.
 
 ---
 
