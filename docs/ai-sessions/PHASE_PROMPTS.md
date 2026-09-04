@@ -181,6 +181,12 @@ Also give me a `docs/STATUS.md` scaffold I can rely on for context recovery.
 
 ## P5 — Implementation (paste once, at the start)
 
+> **SUPERSEDED FROM 2026-09-04 BY D48**, at the B11 close. This prompt says *"one plan item
+> at a time"* and *"no batching multiple items"*, which was `CLAUDE.md` §5 as it stood when
+> Phase 5 began. **The gate is now the GROUP** — use **P5-G** below for every gate from G1
+> on. Kept verbatim because it is the prompt that actually opened Phase 5, and this file is
+> part of the process artifact.
+
 ```
 Read CLAUDE.md, docs/BUILD_PLAN.md, docs/STATUS.md, docs/DESIGN.md.
 
@@ -201,6 +207,72 @@ Start with item 1. Tell me what it is before you touch anything.
 ```
 
 Then, for each subsequent item, just: `next` — or `ok, commit and next`.
+
+---
+
+## P5-G — Implementation, per GROUP (paste after any `/clear`, from G1 on)
+
+**Ratified by D48**, 2026-09-04: the gate is the group, not the chunk. Adapt three lines per
+gate — the **gate name and its chunks**, the **design sections that gate cites**, and the
+**chunk-specific constraints** at the bottom. Everything else is standing text. The version
+below is the one used for **G1 = B12 + B13 + B14**.
+
+```
+Read CLAUDE.md and docs/STATUS.md. Then read only the sections the next gate
+cites — DESIGN.md §7, §2.3, §2.4, and F1 in docs/DECISIONS.md. Do not read
+anything else to "get oriented".
+
+We are mid-Phase 5. Stages 0 and 1 are CLOSED — B11 is committed and ticked,
+12 of 64 chunks done, the walking skeleton runs end to end with no curl in it.
+
+Next is stage 2's first gate: G1 = B12 + B13 + B14, one concern, "config
+becomes real". Nothing is blocking it.
+
+READ CLAUDE.md §5 AS IT NOW STANDS, not as you would guess it. D48 amended it
+at the B11 close: THE GATE IS THE GROUP, NOT THE CHUNK.
+
+- A group is 3-5 related chunks and never crosses a stage boundary. Announce
+  the group before touching anything, build it, report ONCE with a PER-CHUNK
+  verification block, then stop.
+- Wait for my "ok". On approval: commit PER CHUNK, each message referencing its
+  plan item, tick each box in docs/BUILD_PLAN.md, then stop and wait again.
+- Chunk size is unchanged: ~150 lines, one reviewable concern, every chunk
+  leaves the app runnable. Verification is NOT batched — I re-run every chunk's
+  steps myself, so make them separately reproducible, ideally one paste.
+- STOP MID-GROUP if a chunk needs a decision (§3), reveals the design is wrong,
+  or wants a new dependency. Re-announce the remainder after I answer.
+- B20, B24, B34, B35, B36 and B37 are single-gated. Do not group them.
+- No drive-by refactors, renames or reformatting. src/server/apply.ts already
+  exists from B06 — add to it, do not reshape it.
+
+Standing rules that bite hardest here:
+
+- Surface decisions, don't take them (§3). D1-D50 are ratified; D44/D45 are
+  DEFERRED to B36 and must not be settled by drift before then. Record any
+  ratified decision in docs/DECISIONS.md with my wording verbatim before
+  building on it.
+- Nothing writes a projection except apply() (D7). fold() is pure and writes
+  nothing.
+- B12 owes THREE automated test targets under D43, not one: isCanonicalIso
+  (from B05), readCursor (from B10a), and the fold itself. npm test has no test
+  files yet, so G1 creates that surface.
+- Do not widen SUPPORTED in this group. ingest() stays impression-only; click
+  and spend are B16, conversion is B18.
+- Migrations are append-only — a schema change is a new numbered file.
+- Test claims against the real store rather than trusting them. Anything that
+  fails silently goes in BUILD_PLAN.md §14 and the STATUS.md traps list. There
+  are 12 traps there already — read them, they are all failures with no error
+  message.
+- docs/DEMO.md is owed from the B36 group onward (D50), not yet.
+- Every ~3 chunks, refresh docs/STATUS.md and tell me it's safe to /clear.
+```
+
+Then, for each subsequent gate, either paste this again with the three lines swapped, or
+just: `ok, commit and next gate` — `STATUS.md`'s "Next action" section carries the
+next gate's chunks and constraints, so a trimmed prompt still lands on the same picture.
+
+**The gate table for stage 2** (`BUILD_PLAN.md` §5): **G1** B12-B14 · **G2** B15-B17 ·
+**G3** B18+B19 · **G4** **B20 alone** · **G5** B20a+B21-B23 · **G6** **B24 alone**.
 
 ---
 
@@ -252,9 +324,12 @@ answer in one or two sentences, sourced from DECISIONS.md.
 Fresh context. Read, in this order: CLAUDE.md, docs/STATUS.md, and only the one
 design doc relevant to the current item. Do not read the rest.
 
-Then tell me: current phase, last completed item, next item, and any open
-decision blocking it. Do not start work until I confirm.
+Then tell me: current phase, last completed item, next GATE and its chunks, and
+any open decision blocking it. Do not start work until I confirm.
 ```
+
+**Use P5-G instead during Phase 5** — this one is deliberately minimal (it asks for a status
+read-back, not a build), and from G1 on a build gate needs the group rules in front of it.
 
 ## When Claude Code drifts
 
