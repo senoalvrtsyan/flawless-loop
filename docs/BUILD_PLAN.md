@@ -620,6 +620,16 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   indistinguishable from the 0.2% emitter-side loss §13 injects on purpose, which is the one
   failure the app has no way to see (§6).
 
+- **The `click_id` collision test must sit AFTER the `event_id` dedupe** (found at B16). §13
+  injects a 0.05% "dual click-id" fault — two different events claiming one `click_id` — and it has
+  to be caught in `ingest()`, because `ux_signals_click_id` would otherwise refuse the insert and
+  take the whole batch down with it. But a redelivery of ONE click carries its own `click_id` too:
+  tested before the `event_id` dedupe, every honest retry reads as a dual-click-id fault. B11's
+  measured restart property — 14 `duplicate_identical`, 0 conflicting — would have become 14
+  `rejected_invalid`, and §13's 0.05% injected rate would have measured near 100%. A collision is
+  only a collision **between two different `event_id`s**. Same shape as the trap above it: the
+  ordering is what is load-bearing, and neither order raises an error.
+
 - **Every projection id must be a FUNCTION of data the rebuild also has** (found at B13). The
   concrete case is `config_generations.generation_id`, minted as `g_${ad_id}_${seq_in_ad}` padded
   to three digits. A `randomUUID()` there typechecks, reads as normal practice, and passes every

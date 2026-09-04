@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1 closed) · 15 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1, G2 closed) · 18 / 64 chunks**
 
 ---
 
@@ -36,11 +36,18 @@ half-open `[valid_from, valid_to)` chain with exactly one open generation per ad
 consecutive ones · `npm test` exists and runs **31 tests** (D43's three owed targets, plus B13's
 eight against a real store).
 
-Fifteen commits, one per chunk. **The rest of stage 2 (B15–B24)** is the portfolio, the other three
-signal kinds, attribution, cohort placement, orphans and restatement — verified by `curl` and
+**G2 = B15 + B16 + B17 is closed too.** **The world exists and three of the four signal kinds are
+real.** `npm run seed` builds SIMULATOR §2's world — 16 components, 4 audiences, and **12 ads that
+exist only as a fold over 24 backdated decisions** — and `ingest()` now accepts impressions, clicks
+and spend, each landing additively in its own `rollup_minute` column. Attribution resolves a
+conversion to its click, its click's minute (D27-B) and the generation live at that click (D14),
+though nothing calls it yet.
+
+**The rest of stage 2 (B18–B24)** is conversions and cohort placement, orphans, restatement, the
+timestamp module, settlement on the read side, `/api/verify` and replay — verified by `curl` and
 `sqlite3` only — ending with the P14 agreement sweep.
 
-**No decision blocks anything from B15 to B35.** D44/D45 are *deferred* (**F4**) and come back at
+**No decision blocks anything from B18 to B35.** D44/D45 are *deferred* (**F4**) and come back at
 the stage 3 → 4 seam; see "What is open", which also carries the two unratified B11 assumptions.
 
 **One caveat on `DESIGN.md`.** It was approved at the Phase 2 close and has since been **corrected
@@ -54,7 +61,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
 | `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I19**) — the assembly source for the README's extensions section. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
-| `docs/DECISIONS.md` | Ratified only — **D1–D51, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
+| `docs/DECISIONS.md` | Ratified only — **D1–D53, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
 | `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale as of D41–D43/F4/U8–U9**, see "What is owed". |
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
@@ -70,18 +77,21 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/server/index.ts`** | B04/B05/B14. One `DatabaseSync` for the process; refuses to boot on an unmigrated store; `GET /api/health` (log position), `POST /api/ingest`, **`POST` and `GET /api/decisions`**; clean close on SIGINT/SIGTERM. Port **8787**, `PORT` overrides. |
 | **`scripts/dev.mjs`** | B04/B08. **Three** OS processes: server, simulator (D32), and Vite on :5173. A crash in any tears the rest down; a **clean** exit does not. **Unchanged by B11** — the simulator now runs forever instead of returning immediately, so that tolerance is no longer exercised, but it is what keeps `npm run dev` alive if the emitter is ever stopped alone. |
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
-| **`src/server/ingest.ts`** | B05/B09. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. **`isCanonicalIso` is exported** for its D43 test (B12) and for no other caller. |
+| **`src/server/ingest.ts`** | B05/B09/B16. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. **`isCanonicalIso` is exported** for its D43 test (B12) and for no other caller. **B16 widened `SUPPORTED` to impression + click + spend**, added the `OWN_FIELDS` ownership table and the `click_id` collision test — whose position in the ladder is a §14 trap. |
 | **`src/server/stream.ts`** | B09/B10a. **273 lines — B44 splits it** (§14/B44 row). `createStream(db)` — the process-wide dirty set (coalesced by `Map`), the **250 ms** flush tick, `subscribe`/`markDirty`/`shutdown`/`size`. **One frame per tick** carrying every touched bucket as an absolute row; `id:` = high-water `ingest_seq`. Plus B10a: `readCursor()` = `max(?cursor, Last-Event-ID)` validated as `/^\d+$/` on the RAW string, the store replay (`bucketsSinceReader`, `LIMIT 2001`), and the three `resnapshot` conditions. **Subscribes before replaying** — duplicates are free, gaps are not. |
 | **`src/server/snapshot.ts`** | B07/B09/B10a. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Also **`bucketReader()`** (the flush's single-bucket read) and **`bucketsSinceReader()`** (the resume read) — both here so the snapshot, the flush and the resume cannot drift into three row shapes. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
 | **`index.html`, `vite.config.ts`** | B08. Vite dev-serves `src/web` alone on **:5173** and proxies `/api` to :8787 (D41-A). Client fetches relative paths, so no CORS and one configuration. Unstyled: D45 deferred. |
 | **`src/web/main.tsx`, `src/web/App.tsx`** | B08/B10b. Snapshot for the last hour, then subscribe from its cursor; renders **one bucket's `impressions` verbatim** plus the server's window, the cursor and a link state. No sum — see **D46**. Nothing durable client-side (§3). A `resnapshot` bumps a generation counter that re-runs the whole effect, so §3.1's "return to step 1" is literally a re-mount. |
 | **`src/web/store.ts`** | B10b. The render cache. `createStore` / `applyRows` / `inWindow` / `latestBucket` / `bucketKey`. **The merge is an ASSIGNMENT keyed by `(ad_id, minute_start)`, never an addition** — absolute rows (D30) — and **out-of-window rows are dropped**, because the replay is unwindowed while the snapshot is windowed. |
 | **`src/web/stream.ts`** | B10b. `subscribe(cursor, handlers)` → `EventSource('/api/stream?cursor=N')`. **`?cursor=` is mandatory (D47)**: `EventSource` cannot set a header, so without it every refresh drops the snapshot-to-subscribe gap. |
-| **`src/server/apply.ts`** | B06/B13. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert — impressions only, B16/B18 widen it. Plus **`applyDecision()`** (B13): §7's four steps in one transaction — precondition, fold, close generation *n* / open *n+1*, write `ads`. It also inserts the `decisions` **log** row, deliberately, so the log and the projections it produces commit together. |
+| **`src/server/apply.ts`** | B06/B13/B16. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert — **one generalised statement binding four deltas**, covering impression, click and spend; `AppliedSignal` is a **discriminated union** on `kind`, so a caller that forgets the money is a compile error. B18 adds the conversion, which is the one kind that does not land at its own minute. Plus **`applyDecision()`** (B13): §7's four steps in one transaction — precondition, fold, close generation *n* / open *n+1*, write `ads`. It also inserts the `decisions` **log** row, deliberately, so the log and the projections it produces commit together. |
 | **`src/shared/decisions.ts`** | B12. `AdConfig`, `AdInitial`, `DecisionBody` (§2.3's six actions), `Decision`, `ACTOR`. The lever half of "configs, signals and levers stay distinct" — no signal type appears here. `AdInitial` omits `created_at` per **D51**. |
 | **`src/server/fold.ts`** | B12. **Two pure functions, no store, no clock.** `precondition()` = §7's compare-and-swap + the existence rules + the transition table (F1's unreachable `archived` branch lives in it, explaining itself). `fold()` = the six actions, returning a new object every time. |
 | **`src/server/decisions.ts`** | B14. `postDecision()` and `listDecisions()` — parse and shape only; **writes nothing**. `ts` and `actor` are server-assigned, so U7's backdating and U2's actor are unrepresentable on the wire rather than validated. |
-| **`src/server/*.test.ts`** | B12/B13. `npm test` = `node --test`, **31 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8, against a real migrated store in a temp dir). D43's criterion governs what goes here, not a list. |
+| **`src/server/attribute.ts`** | B17. `resolveAttribution()` and `generationAt()`. **Reads and computes only** — `conversion_attribution` is a projection and B18 persists the row this returns. Covers D14, D16, D27-B and I8/G30. **No caller yet.** |
+| **`src/sim/fixtures.ts`** | B15. SIMULATOR §2 transcribed: `COMPONENTS` (16, `vl_04` at two versions), `AUDIENCES` (4, all US), `ADS` (12, with `live_days` and D52's budgets — the expected-spend derivation is written above the table). `served_fraction` is deliberately **not** here: it is an emitter parameter, not an `audiences` column. |
+| **`src/sim/seed-world.ts`** | B15. `seedWorld(db, t0)` + `npm run seed`. Writes `components` and `audiences` directly (static reference data, not projections) and creates every ad **only** through `applyDecision()`. **D53:** decisions backdated to `T0 − live_days`. Refuses a non-empty world. |
+| **`src/server/*.test.ts`** | B12/B13/B17. `npm test` = `node --test`, **39 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8). D43's criterion governs what goes here, not a list — attribution is one of its four named functions. |
 | **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
 | **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. |
 
@@ -90,6 +100,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 ```
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
+npm run seed          # B15: the 12-ad world, as 24 backdated decisions. ONCE, on an empty store
 npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
 npm run sim           # the simulator alone, against an already-running server
 npm run typecheck     # tsc --noEmit, must be clean
@@ -112,39 +123,82 @@ sqlite3 data/loop.sqlite "SELECT disposition, COUNT(*) FROM signal_deliveries GR
 #   -> restart the sim within 60s: duplicate_identical rises, impressions do NOT
 ```
 
-**The lever, from B14.** `ads` has foreign keys to `components` and `audiences`, and **B15 is what
-seeds them** — so before B15 a `create_ad` needs reference rows inserted by hand. That is legal:
-both are static reference data (§2.1), not projections, and D7 does not cover them. Use a scratch
-store so `data/` stays as the simulator left it:
+**The seeded world, from B15.** On a scratch store so `data/` stays as the simulator left it:
 
 ```
-export DB_PATH=/tmp/g1.sqlite PORT=8791 && rm -f "$DB_PATH"* && node src/server/migrate.ts
-sqlite3 "$DB_PATH" "
-INSERT INTO components VALUES ('vl_04_v1','video','autumn.mp4','2026-09-01T00:00:00.000Z','vl_04',1,NULL);
-INSERT INTO components VALUES ('vl_04_v2','video','autumn_b.mp4','2026-09-02T00:00:00.000Z','vl_04',2,'vl_04_v1');
-INSERT INTO components VALUES ('hl_01_v1','headline','Autumn sale','2026-09-01T00:00:00.000Z','hl_01',1,NULL);
-INSERT INTO audiences  VALUES ('aud_25_34_it','IT','cold',1000000);"
+export DB_PATH=/tmp/g2.sqlite PORT=8791
+rm -f "$DB_PATH"* && node src/server/migrate.ts && node src/sim/seed-world.ts
+#   -> T0 = <boot instant>;  24 decisions -> 12 ads, 24 generations
+sqlite3 "$DB_PATH" "SELECT (SELECT COUNT(*) FROM decisions),(SELECT COUNT(*) FROM ads),
+  (SELECT COUNT(*) FROM config_generations),(SELECT COUNT(*) FROM config_generations WHERE valid_to IS NULL);"
+#   -> 24|12|24|12      TWENTY-FOUR generations, TWELVE open — see the note below
+sqlite3 -header -column "$DB_PATH" "SELECT ad_id,status,launched_at,daily_budget_cents FROM ads ORDER BY launched_at;"
+node src/sim/seed-world.ts        # refuses: "12 ads already exist"
+```
+
+**Twenty-four generations, not twelve.** `BUILD_PLAN.md`'s B15 row says "12 generations" and means
+the count of **open** ones. Every ad gets generation 1 in `draft` at `create_ad` and generation 2
+`live` at `launch`, because status is one of the six columns `config_generations` carries and §7
+opens a generation whenever a config value changes. Verified, reported at the G2 gate, not a bug.
+
+**The lever.** Against the same seeded store:
+
+```
 node src/server/index.ts &
-
 post() { curl -s -w " [%{http_code}]\n" -X POST -H 'content-type: application/json' localhost:8791/api/decisions -d "$1"; }
-post '{"decision_id":"d_001","ad_id":"a_12","rationale":"new autumn test","action":"create_ad","initial":{"name":"Autumn video","video_id":"vl_04_v1","headline_id":"hl_01_v1","audience_id":"aud_25_34_it","channel":"meta_feed","daily_budget_cents":50000}}'
-post '{"decision_id":"d_002","ad_id":"a_12","rationale":"go live","action":"launch"}'
-post '{"decision_id":"d_003","ad_id":"a_12","rationale":"cut spend","action":"set_budget","from_cents":49999,"to_cents":30000}'   # 409 stale_precondition
-post '{"decision_id":"d_004","ad_id":"a_12","rationale":"cut spend","action":"set_budget","from_cents":50000,"to_cents":30000}'
-post '{"decision_id":"d_005","ad_id":"a_12","rationale":"CPA blew out","action":"pause"}'
-post '{"decision_id":"d_005","ad_id":"a_12","rationale":"CPA blew out","action":"pause"}'    # 200 "replayed":true, same seq (U5)
-post '{"decision_id":"d_005","ad_id":"a_12","rationale":"CPA blew out","action":"resume"}'   # 409 decision_id_reused
-post '{"decision_id":"d_006","ad_id":"a_12","rationale":"x","action":"resume","ts":"2020-01-01T00:00:00.000Z"}'  # 400 ts_is_server_assigned
+post '{"decision_id":"d_live_1","ad_id":"a_12","rationale":"budget was binding all evening","action":"set_budget","from_cents":9000,"to_cents":15000}'
+post '{"decision_id":"d_live_2","ad_id":"a_12","rationale":"stale tab","action":"set_budget","from_cents":9000,"to_cents":99}'   # 409 stale_precondition
+post '{"decision_id":"d_live_3","ad_id":"a_12","rationale":"CPA blew out","action":"pause"}'
+post '{"decision_id":"d_live_3","ad_id":"a_12","rationale":"CPA blew out","action":"pause"}'    # 200 "replayed":true, same seq (U5)
+post '{"decision_id":"d_live_3","ad_id":"a_12","rationale":"CPA blew out","action":"resume"}'   # 409 decision_id_reused
+post '{"decision_id":"d_live_4","ad_id":"a_12","rationale":"x","action":"resume","ts":"2020-01-01T00:00:00.000Z"}'  # 400 ts_is_server_assigned
+post '{"decision_id":"d_live_5","ad_id":"a_99","rationale":"x","action":"pause"}'               # 409 ad_unknown
 
-curl -s localhost:8791/api/decisions          # the log, in fold order
-sqlite3 -header -column "$DB_PATH" "SELECT generation_id,seq_in_ad,valid_from,valid_to,daily_budget_cents,status,opened_by_decision FROM config_generations ORDER BY seq_in_ad;"
-sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM config_generations WHERE valid_to IS NULL;"   # exactly 1
+curl -s localhost:8791/api/decisions            # the whole log, in fold order
+curl -s "localhost:8791/api/decisions?ad_id=a_12"
+sqlite3 -header -column "$DB_PATH" "SELECT generation_id,seq_in_ad,valid_from,valid_to,daily_budget_cents,status FROM config_generations WHERE ad_id='a_12' ORDER BY seq_in_ad;"
 sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM config_generations a JOIN config_generations b ON a.ad_id=b.ad_id AND a.seq_in_ad+1=b.seq_in_ad WHERE a.valid_to <> b.valid_from;"   # 0: no gap, no overlap
 ```
 
 **A refused lever consumes no `decision_seq` and writes nothing** — not a log row, not a
 generation. Config derives from the log, so a decision that changed nothing would make the fold's
 own history unreplayable.
+
+**Click and spend, from B16.** Against the same running server:
+
+```
+T=$(node -e "console.log(new Date(Date.now()-90e3).toISOString())")
+curl -s -X POST -H 'content-type: application/json' localhost:8791/api/ingest -d '[
+ {"event_id":"e_i1","ts":"'$T'","ad_id":"a_12","event":"impression"},
+ {"event_id":"e_c1","ts":"'$T'","ad_id":"a_12","event":"click","click_id":"c_001","cost_cents":62},
+ {"event_id":"e_s1","ts":"'$T'","ad_id":"a_12","event":"spend","amount_cents":130}]'
+# a SECOND click claiming c_001 with a NEW event_id -> rejected_invalid / click_id_already_claimed
+# a REDELIVERY of e_c1 (same click_id)              -> duplicate_identical, NOT a reject
+sqlite3 -header -column "$DB_PATH" "SELECT ad_id,minute_start,impressions,clicks,click_cost_cents,spend_cents FROM rollup_minute;"
+sqlite3 -header -column "$DB_PATH" "SELECT strftime('%Y-%m-%dT%H:%M:00.000Z',ts_effective) m,
+  SUM(kind='impression'), SUM(kind='click'), COALESCE(SUM(cost_cents),0), COALESCE(SUM(amount_cents),0)
+  FROM signals GROUP BY m;"        # byte-identical to the rollup row above — P14 in miniature
+```
+
+**Attribution, from B17 — it has no HTTP surface.** Conversions do not enter `ingest()` until B18,
+so `npm test`'s eight `attribute.test.ts` assertions are the verification. The one worth running by
+hand is D53's payoff, because it is the thing that would have been silently wrong:
+
+```
+node --experimental-strip-types -e "
+import { openDb } from './src/server/db.ts';
+import { ingest } from './src/server/ingest.ts';
+import { resolveAttribution, generationAt } from './src/server/attribute.ts';
+const db = openDb();
+const ts = new Date(Date.now() - 5*86400000).toISOString();
+ingest(db, [{event_id:'e_bc', ts, ad_id:'a_12', event:'click', click_id:'c_back', cost_cents:62}], 'backfill', () => ts);
+console.log('generation covering a click 5d ago:', generationAt(db, 'a_12', ts));
+console.log(resolveAttribution(db, {event_id:'e_cv', ad_id:'a_12', ts_effective:new Date().toISOString(),
+  attributed_click_id:'c_back'}, new Date().toISOString()));
+db.close();"
+#   -> g_a_12_002, and credited_minute is FIVE DAYS AGO — the conversion arrived today.
+#      Under D53 option A that generation would have been null for the whole seeded week.
+```
 
 **The simulator's knobs** (B11, all env vars, all with defaults): `SIM_SEED` (`'flawless-loop'`),
 `SIM_INGEST_URL` (defaults to `http://localhost:${PORT ?? 8787}/api/ingest`, so moving `PORT` moves
@@ -222,6 +276,14 @@ one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind
   event. The endpoint rejects `initial.created_at` outright rather than ignoring it. Consequence to
   remember at **B15**: the seeder cannot backdate an ad's creation except through the decision `ts`
   it writes.
+- **D52–D53 (2026-09-04, at the G2 announcement — surfaced BEFORE any code, because both are
+  written into the append-only decision log by B15).** **D52:** `daily_budget_cents` is hand-set
+  per ad, grounded in an expected-spend derivation recorded above the fixture table, with **`a_08`
+  and `a_12` deliberately near their cap** so §9's pacing is visible on frame one instead of only
+  present in the code. **D53:** B15 **backdates** the seeded `create_ad` / `launch` decisions to
+  `T0 − live_days`, fixing `T0` as the seeder's boot instant — under the alternative every
+  backfilled click would sit before any generation and D14 would be `NULL` for the whole seeded
+  window, discovered at B37 and costing a reseed. Wording of record: *"52 - B and 53 - B"*.
 - **U1–U7**, and **U8–U9** (2026-09-04) — store path `data/loop.sqlite`; `ExperimentalWarning` left
   visible.
 - **8 cheap defaults** — ratified as a block.
@@ -271,12 +333,12 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 
 | | |
 |---|---|
-| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1 (B12–B14) closed**; B15 is next. |
-| **Last completed chunk** | **B14** — `POST` / `GET /api/decisions`. G1's three commits: `66afb5b` (B12), `515a8cf` (B13), `822cdaa` (B14). |
-| **Next gate** | **G2 = B15 + B16 + B17** — the portfolio exists, and click + spend + attribution land. Nothing blocks it. |
-| **Stage 2's six gates** | ~~**G1** B12–B14~~ **done** · **G2** B15–B17 · **G3** B18+B19 · **G4** **B20 alone** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
+| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1 (B12–B14) and G2 (B15–B17) closed**; B18 is next. |
+| **Last completed chunk** | **B17** — attribution. G2's commits: `dfca97a` (D52/D53), `955a74a` (B15), `271496b` (B16), `58d863b` (B17). G1's were `66afb5b`/`515a8cf`/`822cdaa`. |
+| **Next gate** | **G3 = B18 + B19** — conversions: cohort placement and orphans. Nothing blocks it. Only two chunks, which is within D48's 3–5 because `BUILD_PLAN.md` §5 defines the gate that way. |
+| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ **both done** · **G3** B18+B19 · **G4** **B20 alone** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
 | **In flight** | nothing |
-| **Chunks ticked** | **15 / 64** (B01–B09, B10a, B10b, B11, B12, B13, B14) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **18 / 64** (B01–B09, B10a, B10b, B11–B17) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -298,7 +360,7 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Thirteen now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Fourteen now — the Phase 5 ones were
 found against the real store and are in no design document.
 
 - **Nothing writes a projection except `apply()`** (D7). `ads`, `config_generations`,
@@ -306,6 +368,12 @@ found against the real store and are in no design document.
   property the design exists to demonstrate and **will not show up as a test failure**.
   `sim_scenarios` is **not** a projection and is the one table in `002_projections.sql` that
   `apply()` does not own.
+- **The `click_id` collision test must sit AFTER the `event_id` dedupe** (found at B16). §13
+  injects a 0.05% dual-click-id fault, caught in `ingest()` because `ux_signals_click_id` would
+  otherwise refuse the insert and take the whole batch down with it. But a redelivery of ONE click
+  carries its own `click_id` too: tested first, every honest retry reads as that fault, B11's
+  measured 14 `duplicate_identical` / 0 conflicting becomes 14 rejects, and §13's 0.05% rate
+  measures near 100%. A collision is only a collision **between two different `event_id`s**.
 - **Every projection id must be a FUNCTION of data the rebuild also has** (found at B13).
   `config_generations.generation_id` is `g_${ad_id}_${seq_in_ad}` padded to three digits. A
   `randomUUID()` there typechecks, reads as normal practice and passes every hand check — and then
@@ -427,6 +495,27 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 - **B33 owes a fault split.** Malformed (0.1%) and dual click-id (0.05%) both read `rejected_invalid`
   and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
   bodies, which is only correct once `SUPPORTED` covers all four kinds.
+- **B18 owes the WRITE that B17 does not do.** `resolveAttribution()` returns a
+  `conversion_attribution` row and persists nothing, because that table is a projection and
+  `apply()` is its only writer (D7). `BUILD_PLAN.md`'s B17 row says the table "is `resolved` with
+  the generation covering T" — it is empty until B18 wires the write in. B17's test asserts the
+  emptiness deliberately.
+- **`ad_id` known (§5.1 step 2) is still NOT validated at ingest.** `ingest.ts` says so in a
+  comment — "the check lands with the ad, not before it" — and B15 has now landed the ads, but **no
+  `BUILD_PLAN` row asks for the check** and adding it would make an unseeded store reject every
+  simulator event. It needs a row (B33's fault split is the natural neighbour) or a decision to
+  drop it. Note I11's boundary: never reject on ad *status*, which is a different thing.
+- **`resolveAttribution()` uses `ts_effective` where §5.2 writes "the click's `ts`".** They differ
+  only for the 0.2% clock-skew events §13 injects, and every other placement in the build uses
+  `ts_effective`. Reported at the G2 gate and left as built; one line in §5.2 would settle it.
+- **B35's calibration must expect `a_08` and `a_12` BELOW §2.3's stated impressions/day** (D52).
+  Both are budget-constrained on purpose so §9's pacing is visible; §18.3's ladder placement for
+  `a_08` was computed at its unthrottled rate, so a naive check reports a false failure.
+- **`served_fraction` is owed to the emitter chunk, not to `fixtures.ts`.** §2.2 tabulates it with
+  the audiences, but it is not an `audiences` column and it parameterises §7's fatigue accrual —
+  it belongs wherever the fatigue model lands (B25+).
+- **D52's budgets are an extension and owe a `BRIEF_GAPS.md` § Extensions row.** So do the ad
+  `name`s (E8 is registered; the twelve values are ours).
 - **`DESIGN.md` §2.3's `DecisionBody` sketch is now one field wider than the code** (D51):
   `create_ad`'s `initial` no longer carries `created_at`. The code is right; the divergence is
   annotated in `src/shared/decisions.ts` at the point it happens. Worth a one-line correction in
@@ -510,6 +599,12 @@ reproducible with the commands in "How to run what exists".
 | **B14** — `create_ad` → `launch` → stale `set_budget` (409) → good `set_budget` → `swap_component` → `pause`: five generations `g_a_12_001…005`, each `valid_to` **byte-identical** to the next `valid_from`, exactly one open, `ads.current_generation_id = g_a_12_005`, `last_decision_seq = 5`. The rejected decision consumed **no** `decision_seq` | **passes** |
 | **B14** — the refusals: `ts` on the wire → 400 `ts_is_server_assigned` · a blank rationale → 400 (brief L95) · `pause` on a paused ad → 409 `illegal_transition` · an ad with no `create_ad` → 409 `ad_unknown` · the same `decision_id` verbatim → 200 `replayed:true`, same seq | **passes** |
 | **B14** — HR1: server killed and restarted on the same store → all five decisions return, and a `resume` continues from `paused` with `launched_at` unchanged. D7 grep: 4 projection writes, **all in `apply.ts`**. `npm run dev` still boots all three processes; an impression still ingests | **passes** |
+| **B15** — `npm run seed` on an empty store: **24 decisions → 12 ads → 24 generations, 12 open**; 16 components, 4 audiences; `v_05` carries `parent_id = v_04`; launches staggered 2026-08-28 → 09-03 exactly as §2.3's `live_days` says; a second run is refused | **passes** |
+| **B15** — `grep` proves the seeder writes only `components` and `audiences` directly; every ad reaches `ads` through `applyDecision()`. The whole seeded world survives a server restart and a live `set_budget` continues the fold from the seeded head (`g_a_12_002` → `g_a_12_003`, seq 25) | **passes** |
+| **B16** — impression + click + spend in one batch → one bucket reading `1 / 1 / 62 / 130`, **byte-identical to the raw re-sum** over `signals`. A second click claiming a live `click_id` with a NEW `event_id` → `rejected_invalid` / `click_id_already_claimed`, **counted**. A redelivery of the first click → `duplicate_identical`, not a reject | **passes** |
+| **B16** — the reject reasons name the field: `spend_has_cost_cents`, `cost_cents_not_a_non_negative_integer`, `click_id_missing_or_not_a_string`, `amount_cents_not_a_non_negative_integer` (for `1.5`), `unsupported_kind:conversion` | **passes** |
+| **B17** — 8 assertions: D27-B credits the **click's** minute · D14 gives different generations either side of a swap (`g_a_12_002` / `g_a_12_003`) · I8/G30 credits the click's ad and flags `ad_id_conflict = 1` while staying `resolved` · D16 holds an orphan at its own minute with `resolved_at` null · `generationAt` boundaries are half-open and `null` before the ad existed · **`conversion_attribution` is still empty afterwards (D7)** | **passes** |
+| **B17/D53** — the payoff, on the seeded world: a click backdated 5 days resolves to `g_a_12_002`, and a conversion arriving today credits a bucket dated five days ago. Under D53 option A that generation would have been `null` for the entire seeded week | **measured** |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that
@@ -517,41 +612,47 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce G2, build it, report once, wait.** Nothing needs deciding first. **The gate is the
+**Announce G3, build it, report once, wait.** Nothing needs deciding first. **The gate is the
 group** (D48) — read `CLAUDE.md` §5 as it stands, not as remembered.
 
-**G2 = B15 + B16 + B17**, and the one concern is *the portfolio exists, and the other signal kinds
-land*. Still stage 2: verified by `curl` and `sqlite3` only, no UI beyond stage 1's single number
-until B36. Read **`DESIGN.md` §2.2, §5.1, §5.2, §5.3** and **`SIMULATOR.md` §2** before writing it.
+**G3 = B18 + B19**, and the one concern is *conversions: cohort placement and orphans*. Two chunks,
+not three — `BUILD_PLAN.md` §5 defines the gate that way, and D48's 3–5 is a ceiling on grouping,
+not a quota. Read **`DESIGN.md` §5.2, §5.3, §5.4** and **`SIMULATOR.md` §11** before writing it.
 
 | Chunk | Scope, from the plan row and no wider | Files |
 |---|---|---|
-| **B15** | Seeder part 1: `components` and `audiences` fixtures, then **12 `create_ad` + 12 `launch` decisions through `applyDecision`** | `src/sim/seed-world.ts`, `src/sim/fixtures.ts` |
-| **B16** | `click` (`click_id`, `cost_cents`) and `spend` (60 s delta) through **ingest *and* `apply()`** — `clicks`, `click_cost_cents`, `spend_cents`, kept disjoint | `src/server/ingest.ts`, `src/server/apply.ts`, `src/shared/types.ts` |
-| **B17** | Attribution: resolve `attributed_click_id` against `signals.click_id`, `credited_ad_id` from **the click**, `ad_id_conflict`, `credited_generation_id` = the generation live at the click's `ts`. **No caller yet** — exercised on a fixture; its `curl` verification is B18's | `src/server/attribute.ts` |
+| **B18** | `conversion` through ingest **and** cohort placement (D27-B) together — a conversion counts in **its click's minute**. Persists the `conversion_attribution` row B17 computes | `src/server/ingest.ts`, `src/server/apply.ts` |
+| **B19** | Orphans: `orphan_provisional` at its own minute into the **`provisional_*`** columns; `orphan_expired` past the horizon | `src/server/attribute.ts`, `src/server/apply.ts` |
 
-Four things that are already true and constrain the group:
+Five things that are already true and constrain the group:
 
-- **B15 goes through `applyDecision()`, not through SQL.** It is the first real exercise of the
-  fold at portfolio size, and it is also the first place **D51** bites: 12 ads all created at the
-  seeder's own `ts` unless the seeder varies the decision `ts` it writes.
-- **B16 is the split Seno called at B11**: click and spend land in ingest **and** in `apply()`
-  together, because `ingest()` calls `apply()` for every accepted signal and a no-op branch is the
-  exact divergence `default: throw` prevents. **Conversion is B18**, with placement.
-- **B17 has no caller.** Do not wire it into `ingest()` — that is B18, and doing it early merges
-  two gates.
-- **`max_ingest_seq` is the resume contract.** Every new `apply()` path B16 adds must raise it, or
-  a resuming client never learns the bucket moved and **B24's sweep will not catch it**.
+- **B18 is the chunk that makes B17 real.** `resolveAttribution()` returns a row and writes
+  nothing; `apply()` is the only writer of `conversion_attribution` (D7), so B18 owns the INSERT.
+- **B18 cannot be split.** `ingest()` calls `apply()` for every accepted signal, so a conversion
+  that ingests before `apply()` can place it would need a silent no-op branch — the exact
+  divergence `default: throw` prevents. This is the split Seno already made at B11 for click/spend.
+- **The conversion is the ONE kind that does not land at its own minute.** `apply()` currently
+  computes `minute_start = floorMinute(signal.ts_effective)` once, before the switch, precisely
+  because impression/click/spend all agree. D27-B breaks that for conversions, so B18 changes that
+  line — deliberately, not incidentally.
+- **`max_ingest_seq` is the resume contract.** Every path B18 and B19 add must raise it, or a
+  resuming client never learns the bucket moved and **B24's sweep will not catch it** because the
+  counts are right. B20's restatement touching only `restated_at` is the named case.
+- **Every orphan query must carry `state <> 'resolved'` as a literal term** (the B03 finding).
+  `ix_attr_unresolved` is a partial index with exactly that predicate; `state = 'orphan_provisional'`
+  and `state IN (...)` both full-scan, correctly and slowly.
+
+**Restatement is B20 and is SINGLE-GATED** — do not pull the decrement/credit forward into B19.
+B19 places an orphan and expires it; moving one between buckets is B20's whole concern.
 
 **Stop mid-group** if a chunk needs a decision, reveals the design is wrong, or wants a dependency.
 
-**After G2**: G3 = B18 + B19. Stage 2's remaining gates are in the "Build progress" table.
+**After G3**: **G4 = B20 alone**. Stage 2's remaining gates are in the "Build progress" table.
 
-**One thing to know about the ground G2 stands on.** The simulator emits continuously, so the store
-is never quiet while you work — `npm run sim`'s log is the fastest read on whether ingest is
-healthy. And **nothing yet stops emitting on a pause**: `GET /api/sim/world` is B29, so HR3's
-*"pausing `a_12` stops its events"* is demonstrated end to end only from that chunk on — B14 makes
-the pause real in the store, not yet in the world.
+**One thing to know about the ground G3 stands on.** The simulator still emits impressions only,
+for `a_12`, and **still emits regardless of status** — `GET /api/sim/world` is B29, so HR3's
+*"pausing `a_12` stops its events"* is real in the store from B14 but not yet in the world. B18's
+conversions therefore have to be posted by hand (`curl`) until the emitter learns to make them.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
