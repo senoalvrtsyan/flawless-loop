@@ -2872,3 +2872,57 @@ when it was written is a way for a correct store to fail it — we have been bit
 that shape. A also collapses two unresolved states into one before B20, which is §13's hardest
 chunk and is single-gated for that reason. B is the more literal reading of §5.2 and I would not
 argue against it; it just adds rebuild surface to the two chunks that can least afford it.
+
+---
+
+## Wave 11 — Phase 5 verification isolation (D55)
+
+**Raised mid-G5, 2026-09-04, after B20a/B21 and before B22** — `docs/DECISIONS.md` § THE G5 PASS.
+Preserved here in full because the entry there compresses the options to a line each
+(`CLAUDE.md` §3).
+
+### D55 — How the `/api/verify` rebuild is isolated from the store it checks
+
+**Blocking:** B22, and B24 is built on the answer. **B23 is not blocked** — it is a pure function
+over a log prefix and needs none of this.
+
+**Context.** `DESIGN.md` §7 rebuilds every projection from the logs into temp tables and diffs them
+against the live ones. The rebuild has to run the real `apply()` / `applyDecision()`, or verify
+compares a second implementation of the fold against the first and proves nothing. Those functions
+write unqualified table names, so where the rebuild lands is decided by name resolution — and if it
+lands wrong, the verifier overwrites the store it was asked to check.
+
+**Measured first.** A `TEMP` table shadowing `rollup_minute` captures unqualified writes, including
+from a statement prepared *before* the temp table existed (SQLite re-prepares on schema change), so
+`apply.ts`'s statement cache does not defeat the shadow.
+
+**A) `TEMP` tables shadowing the real names, same connection.** DDL derived from `sqlite_master` so
+the migration stays the single source of truth; replay through the real functions; `DROP` in a
+`finally`.
+*Pros:* the rebuild **is** the write path, which is the only arrangement in which "and they agree"
+says anything about `apply()`; no data copy, so it still works against the seeded store; §7 needs
+no amendment.
+*Cons:* two invisible invariants — no projection SQL may be schema-qualified, and all shadowed
+projections must be shadowed together. It must also be one synchronous block that always drops its
+temps.
+*Forecloses:* concurrent verifies on one connection. *Reversal cost:* moderate — B24 inherits it.
+
+**B) A separate in-memory `DatabaseSync`.** Migrate it, copy `signals` + `decisions` + reference
+data, replay, diff across handles.
+*Pros:* physically cannot write the live store; isolation is structural, not conventional.
+*Cons:* copies the whole log per verify (~1.6M signal rows at seeded size), so verify stops being
+"at boot in dev, on demand in the demo". `:memory:` cannot be WAL and `openDb()` refuses non-WAL,
+so it needs a carve-out in the file whose four pragmas were a design decision.
+*Forecloses:* running verify casually, which is most of its value. *Reversal cost:* moderate.
+
+**C) Differently-named rebuild tables, target threaded through `apply.ts`.**
+*Pros:* no shadowing invariant, no copy, explicit target at every call site.
+*Cons:* the single-writer file gains a parameter that exists only for the verifier; D7's "one
+writer" becomes "one writer, two targets"; statement cache keys multiply.
+*Forecloses:* nothing. *Reversal cost:* low, but it touches the most sensitive file in the build.
+
+**Recommendation: A.** The only option where the rebuild is provably the same code as the write
+path *and* stays cheap enough to run at boot and on demand at demo scale — and the hazard that
+would have ruled it out was measured away rather than assumed. Its two invariants are exactly the
+shape of a §14 trap, so both go into §14 with a test that greps for a schema-qualified projection
+name and fails the build on one.

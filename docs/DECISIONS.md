@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D54 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D55 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -117,6 +117,7 @@ level — and not a severity.
 | D52 | `daily_budget_cents` for the twelve seeded ads | **ACCEPTED — B** (hand-set, grounded in the expected-spend arithmetic; two ads near their cap) | 2026-09-04 |
 | D53 | Does B15 backdate the seeded decisions, and thereby fix `T0`? | **ACCEPTED — B** (backdate; `T0` = seeder boot) | 2026-09-04 |
 | D54 | What writes `orphan_expired`, and against which clock | **ACCEPTED — A** (derived at read; the store holds one unresolved state) | 2026-09-04 |
+| D55 | How the `/api/verify` rebuild is isolated from the store it checks | **ACCEPTED — A** (TEMP tables shadowing the real names, plus two §14 invariants and a build-failing tripwire) | 2026-09-04 |
 
 ---
 
@@ -2789,3 +2790,88 @@ The only thing that reads this state is a data-health count on one panel. Buying
 column would have put a clock inside the one projection family whose freedom from clocks is what
 makes `/api/verify` mean anything — and we have already been bitten twice by exactly that shape.
 Deriving it costs one function and leaves the gate that guards everything after it clean.
+
+---
+
+# THE G5 PASS — D55
+
+Surfaced **mid-group** (D48 permits exactly this), after B20a and B21 were built and before B22
+was started, because B24 is built on the answer and the failure mode of guessing is a verifier
+that overwrites the store it was asked to check.
+
+**Wording of record — Seno's words:**
+
+> "A — it's the only option where the rebuild is provably the same code path as the write path, and
+> you already measured away the one hazard that would have sunk it; take it with both invariants
+> written into §14 and the grep-for-schema-qualified-names test as a build-failing tripwire, since
+> an invisible invariant with an automated guard is a different risk from a bare one."
+
+---
+
+## DECISION #55 — How the `/api/verify` rebuild is isolated from the store it checks
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B22 · **Couples to:** B24, B49
+**Relates to:** D7, D8, `DESIGN.md` §7, §10.2, `BUILD_PLAN.md` §14
+
+### Question
+
+`DESIGN.md` §7 has `/api/verify` *"rebuild every projection from the logs into temp tables and diff
+them against the live ones, row by row"*. The rebuild must run the **real** `apply()` /
+`applyDecision()` — a rebuild that reimplements the fold checks a second implementation against the
+first and proves nothing about either. But those functions write **unqualified** table names, so
+where the rebuild lands is decided by name resolution; land it wrong and the verifier silently
+overwrites the projections it was asked to check.
+
+### Measured before deciding
+
+A `TEMP` table shadowing `rollup_minute` **does** capture unqualified writes, **including from a
+statement prepared before the temp table existed** — SQLite re-prepares on schema change, so
+`apply.ts`'s `WeakMap` statement cache does not defeat the shadow. That was the hazard expected to
+rule option A out, and it is not there. `main` kept the pre-existing row; `temp` took both writes,
+one of them through the stale prepared statement.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **`TEMP` tables shadowing the real names, on the same connection** — §7's literal mechanism | **CHOSEN** |
+| B | A separate in-memory `DatabaseSync`, with the logs copied across | Rejected — structurally safe, but it copies ~1.6M signal rows per verify, so verify stops being runnable at boot and on demand, which is most of its value; `:memory:` also cannot be WAL and `openDb()` refuses non-WAL |
+| C | Rebuild into differently-named tables, with the target threaded through `apply.ts` | Rejected — the single-writer file gains a parameter that exists only for the verifier, and D7's "one writer" starts reading as "one writer, two targets" |
+
+The full analysis as presented is in `OPEN_QUESTIONS.md` §B wave 11.
+
+### Consequences
+
+1. **The rebuild is the write path**, not a copy of it. `/api/verify` therefore tests the store
+   against the code that produced it, and B23's independent recomputation from raw `signals` is
+   what tests the code itself. §10.2 already keeps those two claims apart; this keeps them apart in
+   the implementation too.
+2. **Two invariants become load-bearing, and both go into `BUILD_PLAN.md` §14** (Seno's condition):
+   no projection SQL anywhere may be schema-qualified, and all shadowed projections must be
+   shadowed *together*. Either broken, the verifier writes through to the live store.
+3. **A build-failing tripwire guards the first invariant** (Seno's condition): a test greps the
+   source for a schema-qualified projection name and fails on one. *"An invisible invariant with an
+   automated guard is a different risk from a bare one."*
+4. **The verify must be one synchronous block that always drops its temps.** Safe today because
+   `node:sqlite` is synchronous and nothing can interleave — but that is a property of the runtime,
+   not of the code, so it is stated rather than assumed.
+5. **`decisions` is shadowed too**, because `applyDecision()` deliberately writes the log row in the
+   same transaction as the projections it produces (B13). The real log is read into memory first,
+   then replayed against the shadow. No wall-clock value reaches `ads` or `config_generations` —
+   `received_at` lands only in the log row, and `created_at` / `launched_at` are derived from each
+   decision's own `ts` (D51).
+6. **`signals` is NOT shadowed**, because attribution and orphan promotion must read the real log.
+   The cross-schema join (`main.signals` to `temp.conversion_attribution`) is what correctly limits
+   a promotion to conversions already replayed.
+
+### What it forecloses
+
+Running two verifies concurrently on one connection, and running one across an `await`. Neither is
+reachable in this build, and both would be a mistake for other reasons.
+
+### How I'd defend this in review
+
+The alternative that is obviously safe is also the one that makes the check too expensive to run,
+and a verifier nobody runs is a claim rather than a property. So the risk was moved rather than
+accepted: the mechanism was measured instead of assumed, and the invariant it rests on has a test
+that fails the build rather than a comment asking for care.
