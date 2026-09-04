@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1, G2, G3 closed) · 20 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1–G4 closed) · 21 / 64 chunks**
 
 ---
 
@@ -53,7 +53,17 @@ with `max_ingest_seq` raised to the conversion's seq. An unattributable conversi
 `orphanTally()` gives the same store two different answers three days apart with no write between
 them. `npm test` runs **50 tests**.
 
-**The rest of stage 2 (B20–B24)** is restatement, the timestamp module, settlement on the read side,
+**G4 = B20 alone is closed — restatement works, which is the flagship path.** A withheld click
+released four days late **promotes** its parked conversion: the provisional bucket is decremented
+and **stamped `restated_at` with a `restatement_count` of 1**, the click's bucket takes the settled
+credit, both carry the click's `ingest_seq`, and the attribution row is rewritten in full to the
+click's ad and the generation live at the click. `writeRollup()` is now the single place
+`rollup_minute` is written, and `apply()` **coalesces deltas by bucket** so a bucket is written once
+per event — §5.4 bumps the counter per *bucket*, not per write. Settlement is clocked at the
+delivery's `received_at` (D38), so the seeded week opens with no spurious restatements. `npm test`
+runs **58 tests**.
+
+**The rest of stage 2 (B20a–B24)** is the timestamp module, settlement on the read side,
 `/api/verify` and replay — verified by `curl` and `sqlite3` only — ending with the P14 agreement
 sweep.
 
@@ -76,7 +86,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (16). |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (17). |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
 | **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
@@ -94,14 +104,14 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/web/main.tsx`, `src/web/App.tsx`** | B08/B10b. Snapshot for the last hour, then subscribe from its cursor; renders **one bucket's `impressions` verbatim** plus the server's window, the cursor and a link state. No sum — see **D46**. Nothing durable client-side (§3). A `resnapshot` bumps a generation counter that re-runs the whole effect, so §3.1's "return to step 1" is literally a re-mount. |
 | **`src/web/store.ts`** | B10b. The render cache. `createStore` / `applyRows` / `inWindow` / `latestBucket` / `bucketKey`. **The merge is an ASSIGNMENT keyed by `(ad_id, minute_start)`, never an addition** — absolute rows (D30) — and **out-of-window rows are dropped**, because the replay is unwindowed while the snapshot is windowed. |
 | **`src/web/stream.ts`** | B10b. `subscribe(cursor, handlers)` → `EventSource('/api/stream?cursor=N')`. **`?cursor=` is mandatory (D47)**: `EventSource` cannot set a header, so without it every refresh drops the snapshot-to-subscribe gap. |
-| **`src/server/apply.ts`** | B06/B13/B16. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert — **one generalised statement binding four deltas**, covering impression, click and spend; `AppliedSignal` is a **discriminated union** on `kind`, so a caller that forgets the money is a compile error. **B18/B19 added the conversion** — the one kind that does not land at its own minute: `apply()` resolves attribution (so a rebuild re-derives placement through this same function), writes the `conversion_attribution` row, and credits either `conversions`/`value_cents` at the CLICK's minute or `provisional_*` at the orphan's own. It **returns `BucketKey[]`** — B20's promotion moves two buckets, and `stream.ts` treats every key as a row that certainly exists. Plus **`applyDecision()`** (B13): §7's four steps in one transaction — precondition, fold, close generation *n* / open *n+1*, write `ads`. It also inserts the `decisions` **log** row, deliberately, so the log and the projections it produces commit together. |
+| **`src/server/apply.ts`** | B06/B13/B16. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert — **one generalised statement binding four deltas**, covering impression, click and spend; `AppliedSignal` is a **discriminated union** on `kind`, so a caller that forgets the money is a compile error. **B18/B19 added the conversion** — the one kind that does not land at its own minute: `apply()` resolves attribution (so a rebuild re-derives placement through this same function), writes the `conversion_attribution` row, and credits either `conversions`/`value_cents` at the CLICK's minute or `provisional_*` at the orphan's own. It **returns `BucketKey[]`** — a click's promotions move two buckets each, and `stream.ts` treats every key as a row that certainly exists. **B20 added restatement:** `writeRollup()` (the one writer of `rollup_minute`, owning the counts, the `max_ingest_seq` raise and the settlement test), `promoteOrphans()`, and delta **coalescing by bucket** so `restatement_count` bumps once per bucket per event. Plus **`applyDecision()`** (B13): §7's four steps in one transaction — precondition, fold, close generation *n* / open *n+1*, write `ads`. It also inserts the `decisions` **log** row, deliberately, so the log and the projections it produces commit together. |
 | **`src/shared/decisions.ts`** | B12. `AdConfig`, `AdInitial`, `DecisionBody` (§2.3's six actions), `Decision`, `ACTOR`. The lever half of "configs, signals and levers stay distinct" — no signal type appears here. `AdInitial` omits `created_at` per **D51**. |
 | **`src/server/fold.ts`** | B12. **Two pure functions, no store, no clock.** `precondition()` = §7's compare-and-swap + the existence rules + the transition table (F1's unreachable `archived` branch lives in it, explaining itself). `fold()` = the six actions, returning a new object every time. |
 | **`src/server/decisions.ts`** | B14. `postDecision()` and `listDecisions()` — parse and shape only; **writes nothing**. `ts` and `actor` are server-assigned, so U7's backdating and U2's actor are unrepresentable on the wire rather than validated. |
-| **`src/server/attribute.ts`** | B17. `resolveAttribution()` and `generationAt()`. **Reads and computes only** — `conversion_attribution` is a projection and B18 persists the row this returns. Covers D14, D16, D27-B and I8/G30. Called by `apply()` from B18 on. **B19 added the derived half:** `HORIZON_MS` (72 h, D13 — **B21 moves it to `shared/config.ts`**), `attributionStateAt()` and `orphanTally()`. **D54: `orphan_expired` is computed at read, never stored** — the column holds two states. |
+| **`src/server/attribute.ts`** | B17. `resolveAttribution()` and `generationAt()`. **Reads and computes only** — `conversion_attribution` is a projection and B18 persists the row this returns. Covers D14, D16, D27-B and I8/G30. Called by `apply()` from B18 on. **B19/B20 added the derived half:** `HORIZON_MS` (72 h, D13), **`settledAt()`** (§5.4's test, clocked at the arriving event's `received_at` — D38) which `attributionStateAt()` calls so the arithmetic exists once, and `orphanTally()`. **B21 moves `HORIZON_MS` and `settledAt` out.** **D54: `orphan_expired` is computed at read, never stored** — the column holds two states. |
 | **`src/sim/fixtures.ts`** | B15. SIMULATOR §2 transcribed: `COMPONENTS` (16, `vl_04` at two versions), `AUDIENCES` (4, all US), `ADS` (12, with `live_days` and D52's budgets — the expected-spend derivation is written above the table). `served_fraction` is deliberately **not** here: it is an emitter parameter, not an `audiences` column. |
 | **`src/sim/seed-world.ts`** | B15. `seedWorld(db, t0)` + `npm run seed`. Writes `components` and `audiences` directly (static reference data, not projections) and creates every ad **only** through `applyDecision()`. **D53:** decisions backdated to `T0 − live_days`. Refuses a non-empty world. |
-| **`src/server/*.test.ts`** | B12/B13/B17. `npm test` = `node --test`, **50 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), **`conversion.test.ts` (11 — B18/B19, ingest→apply end to end)**. D43's criterion governs what goes here, not a list — attribution is one of its four named functions. |
+| **`src/server/*.test.ts`** | B12/B13/B17. `npm test` = `node --test`, **58 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), **`conversion.test.ts` (11 — B18/B19, ingest→apply end to end)**, **`restate.test.ts` (8 — B20, promotion and the D38 clock)**. D43's criterion governs what goes here, not a list — attribution is one of its four named functions. |
 | **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
 | **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. |
 
@@ -353,12 +363,12 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 
 | | |
 |---|---|
-| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1 (B12–B14), G2 (B15–B17) and G3 (B18–B19) closed**; B20 is next. |
-| **Last completed chunk** | **B19** — the orphan. G3's commits: `beff2dc` (D54), `061bb00` (B18), `7a8d956` (B19). G2's were `dfca97a`/`955a74a`/`271496b`/`58d863b`; G1's `66afb5b`/`515a8cf`/`822cdaa`. |
-| **Next gate** | **G4 = B20 ALONE — restatement.** §13's hardest chunk and **single-gated**: do not group it. Nothing blocks it. |
-| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ **three done** · **G4** **B20 alone** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
+| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1 (B12–B14), G2 (B15–B17), G3 (B18–B19) and G4 (B20) closed**; B20a is next. |
+| **Last completed chunk** | **B20** — restatement, commit `412a3b8`. G3's were `beff2dc` (D54), `061bb00` (B18), `7a8d956` (B19); G2's `dfca97a`/`955a74a`/`271496b`/`58d863b`; G1's `66afb5b`/`515a8cf`/`822cdaa`. |
+| **Next gate** | **G5 = B20a + B21 + B22 + B23** — the timestamp module, settlement on the read side, `/api/verify`, replay. Four chunks, one gate. Nothing blocks it. |
+| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ **four done** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
 | **In flight** | nothing |
-| **Chunks ticked** | **20 / 64** (B01–B09, B10a, B10b, B11–B19) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **21 / 64** (B01–B09, B10a, B10b, B11–B20) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -380,7 +390,7 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Sixteen now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Seventeen now — the Phase 5 ones were
 found against the real store and are in no design document.
 
 - **Nothing writes a projection except `apply()`** (D7). `ads`, `config_generations`,
@@ -469,6 +479,13 @@ found against the real store and are in no design document.
   down and `to` up and echoes the resolved window. **B53's drill-down asserts raw == buckets over
   `[from, to)`**, so unaligned it reports FAIL for a reason that is not corruption. The read side
   canonicalises where the write side rejects — a bound is a query, `signals.ts` is a fact.
+- **One event can write the same bucket more than once, and `restatement_count` must bump ONCE PER
+  BUCKET** (found at B20). A click whose promoted conversion lands in the click's own minute touches
+  that bucket twice; two conversions promoted by one click land in the same minute. Per-write, the
+  counter is wrong by one and **every count is still right**, so B24's sweep agrees with it.
+  `apply()` coalesces deltas by bucket. Same coalescing, second silent case: **a bucket the event
+  itself materialises is not a restatement** — it was absent, not settled — so the restatement
+  clause lives only in `ON CONFLICT DO UPDATE`.
 - **`conversions` and `provisional_conversions` must never be summed** (found at B19; bites at
   **B38**). Side by side in the same row, both counting conversions — so adding them is the natural
   thing to write, and it puts unattributed revenue into ROAS and CPA. They are disjoint by
@@ -525,10 +542,13 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
   bodies. Its precondition is now met: **B18 completed `SUPPORTED`**, so a click no longer reads as
   a fault.
-- **B21 owes the move of `HORIZON_MS`.** B19 needed the 72 h horizon two chunks before B21 creates
-  `src/shared/config.ts`, so it is exported from `src/server/attribute.ts` for now. B21's row
-  already says the horizon and the `America/New_York` constant land in one module — that is the
-  move, not a refactor to propose.
+- **B21 owes the move of `HORIZON_MS` *and* `settledAt()`.** B19 needed the horizon and B20 needed
+  the settlement test, both before B21 creates `src/shared/config.ts` and `src/server/settlement.ts`
+  — so both are exported from `src/server/attribute.ts` for now, which is not their home. B21's row
+  already says the horizon and the `America/New_York` constant land in one module; `settledAt()`
+  belongs with it. That is the planned move, not a refactor to propose. **`attributionStateAt()`
+  must keep calling whichever one survives** — two copies of the horizon arithmetic is a conversion
+  that reads expired in one panel and provisional in another.
 - **`ad_id` known (§5.1 step 2) is still NOT validated at ingest.** `ingest.ts` says so in a
   comment — "the check lands with the ad, not before it" — and B15 has now landed the ads, but **no
   `BUILD_PLAN` row asks for the check** and adding it would make an unseeded store reject every
@@ -641,51 +661,57 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B20, build it, report, wait.** Nothing needs deciding first.
+**Announce G5, build it, report once with a per-chunk block, wait.** Nothing needs deciding first.
 
-**G4 = B20 ALONE. It is single-gated** (`CLAUDE.md` §5, `BUILD_PLAN.md` §13) — do not group it with
-B20a or anything else. It is §13's hardest chunk, and everything it gets wrong is invisible.
+**G5 = B20a + B21 + B22 + B23** — four chunks, one gate, no stage boundary crossed. Read
+**`DESIGN.md` §5.4, §5.7, §7 and §10.2** before writing it.
 
 | Chunk | Scope, from the plan row and no wider | Files |
 |---|---|---|
-| **B20** | **Restatement.** `applyConversion(ev, prev)`: decrement the old bucket, credit the new; `settled_at(B, ev.received_at)` — *never* wall-clock `now`; `restated_at` + `restatement_count`; orphan promotion via `ix_signals_attr` | `src/server/apply.ts` |
+| **B20a** | `src/shared/time.ts` — **one** implementation of the timestamp invariant (`isCanonicalIso` / `toCanonicalIso` / `floorMinute`), callers switched. **No behaviour change** | `src/shared/time.ts`, `ingest.ts`, `apply.ts`, `snapshot.ts` |
+| **B21** | Settlement on the read side: `live` / `settled` / `restated` per bucket, in the snapshot **and** the SSE row; the horizon and `America/New_York` in one config module | `src/server/settlement.ts`, `src/shared/config.ts` |
+| **B22** | `GET /api/verify` — rebuild every projection from the logs into temp tables, diff row by row, return the first divergence or a clean bill with the log position; `content_hash` fast path | `src/server/verify.ts` |
+| **B23** | `replay(descriptor)` — pure over a log prefix, **raw `signals` only**, `ingest_seq <= as_of`, re-deriving attribution over that prefix. No HTTP | `src/server/replay.ts` |
 
-Read **`DESIGN.md` §5.4** and **`SIMULATOR.md` §15.3(c)** before writing it. What is already true
-and constrains it:
+What is already true and constrains the group:
 
-- **Restatement is GENERIC** (§5.4): *a fact changed, recompute the affected buckets.* Not
-  lateness-specific — D27-B forced that, because an orphan promotion moves a conversion between two
-  buckets and a lateness-only mechanism would be wrong on the very first orphan.
-- **The two buckets are already findable.** `conversion_attribution.credited_minute` stores the
-  placement precisely so the OLD bucket can be located to decrement; B19 writes it for orphans too.
-  `apply()` already returns `BucketKey[]`, so a two-bucket move needs no signature change.
-- **Settlement is evaluated at `ev.received_at`, never at wall-clock `now`** (D38, correcting §5.4's
-  own pseudocode). The wall-clock form stamps `restated_at` on every backfilled event landing in a
-  bucket older than 72 h — tens of thousands of spurious restatements, and P7 looking broken on
-  frame one.
-- **Every touched bucket must raise `max_ingest_seq`** — including a bucket whose counts do not
-  change and only `restated_at` moves. That is the named case in the §14 resume-contract trap: the
-  counts are right, so B24's sweep will not catch it, and every resuming client is told nothing.
-- **Promotion queries carry `state <> 'resolved'` as a literal term** (the B03 finding), and under
-  **D54** there is no expired state to exclude — an orphan whose click arrives on day eight still
-  promotes, because age is a reading, not a stored state.
-- **Orphan promotion also rewrites `credited_ad_id`** to the click's (I8/G30) and
-  `credited_generation_id` to the generation live at the click (D14). The provisional credit comes
-  out of `provisional_*` at the old minute; the settled credit goes into `conversions`/`value_cents`
-  at the new one. They are never summed (§14).
+- **B20a is a MOVE, not a rewrite.** Four copies of the timestamp invariant exist today: ingest's
+  round-trip (B05), `apply()`'s regex (B06), snapshot's inline canonicalise-and-snap (B07), and
+  B19/B20's `settledAt`/`HORIZON_MS` in `attribute.ts`. B20a is the reason B21's sweep is not the
+  fifth. Its verification is that **every §14 timestamp case still behaves identically** — the read
+  side canonicalises where the write side rejects, and that asymmetry is deliberate (a bound is a
+  query, `signals.ts` is a fact). Do not "unify" it away.
+- **B21 owes the two moves listed in "What is owed"** — `HORIZON_MS` and `settledAt()` out of
+  `attribute.ts`, with `attributionStateAt()` still calling the survivor.
+- **B22 and B23 are where every clock-in-a-projection trap comes due.** `first_written_at`,
+  `restated_at`, `resolved_at` and the derived-`orphan_expired` decision (D54) were all chosen so a
+  rebuild reproduces the live store. **The rebuild must pass each event's own `received_at` as
+  `apply()`'s `applied_at`** (the §14 trap added at B06), or `/api/verify` reports total divergence
+  on a correct store and the tempting fix is to drop the column from the diff.
+- **Generation ids must come out identical**, because they are a function of `(ad_id, seq_in_ad)`
+  and not minted (the B13 trap). A rebuild that re-derives them differently reports total
+  divergence on a correct store.
+- **B23 must never open `rollup_minute`** — its own verification asserts that. It reads raw signals
+  and re-derives; a replay that peeks at the projection proves nothing about the projection.
+- **B22 diffs `conversion_attribution` too**, and under **D54** its `state` column has no clock in
+  it — that is the property to lean on, not to re-litigate.
 
-**After B20**: **G5 = B20a + B21 + B22 + B23** — the timestamp module, settlement on the read side,
-`/api/verify`, replay. Then **G6 = B24 alone**.
+**B24 is SINGLE-GATED and is NOT in this group.** It is the P14 agreement sweep and the gate that
+guards everything after it. **It must be one ordered whole-log pass, not `replay()` per bucket** —
+per-bucket is O(buckets × N) and turns seconds into hours.
 
-**One thing to know about the ground B20 stands on.** The simulator still emits impressions only,
-for `a_12`, and still emits regardless of status — `GET /api/sim/world` is B29. Conversions and
-withheld clicks are posted by hand (`curl`) until the emitter learns to make them, so B20's
-promotion is demonstrated by ingesting a conversion first and its click second.
+**Stop mid-group** if a chunk needs a decision (§3), reveals the design is wrong, or wants a new
+dependency. Re-announce the remainder after the answer.
+
+**One thing to know about the ground G5 stands on.** The simulator still emits impressions only,
+for `a_12`, and still emits regardless of status — `GET /api/sim/world` is B29. So `/api/verify` and
+the replay are exercised against a `curl`-built dataset plus the seeded world, which is the dataset
+`BUILD_PLAN.md`'s B24 row means by *"the curl-built dataset"*.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
 1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5 as amended by D48.
-   **In progress, 20/64** — stages 0 and 1 closed, stage 2 half done.
+   **In progress, 21/64** — stages 0 and 1 closed, stage 2 two gates from done.
 2. **Phase 6 — packaging:** README, demo script, the "life of one event" trace, the AI artifact.
    These are `BUILD_PLAN.md` stage 7 (B57–B62) rather than a separate effort.
 
