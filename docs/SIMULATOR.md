@@ -99,17 +99,17 @@ so the fatigue story is legible in a single screenshot instead of needing a time
 
 | Ad | Video | Headline | Audience | Channel | Impr/day | Live | What it is there to show |
 |---|---|---|---|---|---|---|---|
-| `a_01` | `vl_04` v1 | `h_01` | `rt_us` | `meta_feed` | 75,000 | 7 d | **Burned out.** φ = 0.25. Its CPA has fallen *off* D20's gate — the metric you would judge it by stopped being measurable as it died |
+| `a_01` | `vl_04` v1 | `h_01` | `rt_us` | `meta_feed` | 75,000 | 7 d | **Burned out.** φ_ad = 0.126 (video pair 0.25, headline burned too). Its CPA has fallen *off* D20's gate — the metric you would judge it by stopped being measurable as it died |
 | `a_02` | `vl_01` | `h_02` | `cold_us` | `tiktok_feed` | 45,000 | 7 d | High volume; CTR drawable at 15-min. Shares the `vl_01 × cold_us` pool with `a_04` |
-| `a_03` | `vl_02` | `h_03` | `warm_us` | `meta_feed` | 22,000 | 7 d | The `swap_component` demo target: mid-volume, mid-fatigue (φ = 0.68) |
+| `a_03` | `vl_02` | `h_03` | `warm_us` | `meta_feed` | 22,000 | 7 d | The `swap_component` demo target: mid-volume, mid-fatigue (φ_ad = 0.555, video pair 0.68) |
 | `a_04` | `vl_01` | `h_04` | `cold_us` | `meta_reels` | 18,000 | 4 d | **Cross-ad transfer.** Same lineage *and* audience as `a_02`, so both drain one pool |
 | `a_05` | `vl_04` **v2** | `h_01` | `rt_us` | `meta_feed` | 26,000 | 2 d | **Copy-on-write made observable.** A recut of the video `a_01` burned, on the same audience — it arrives pre-fatigued |
-| `a_06` | `vl_03` | `h_05` | `cold_us_lookalike` | `tiktok_feed` | 14,000 | 3 d | Mid-life, fresh-ish pair (φ = 0.82) |
+| `a_06` | `vl_03` | `h_05` | `cold_us_lookalike` | `tiktok_feed` | 14,000 | 3 d | Mid-life, fresh-ish pair (φ_ad = 0.744, video pair 0.82) |
 | `a_07` | `vl_05` | `h_06` | `warm_us` | `snap_stories` | 6,000 | 1 d | **Newest.** Novelty at peak, and low enough volume that D20 suppresses its ratios and shows counts |
-| `a_08` | `vl_03` | `h_02` | `rt_us` | `meta_reels` | 65,000 | 1 d | **The gate-boundary ad.** Fresh pair on the smallest pool: hourly CPA/ROAS clears at peak (15.3 conv/h) and falls to counts overnight (4.0). The gate visibly binds and unbinds |
+| `a_08` | `vl_03` | `h_02` | `rt_us` | `meta_reels` | 65,000 | 1 d | **The gate-boundary ad.** Fresh pair on the smallest pool: hourly CPA/ROAS clears at peak (12.0 conv/h) and falls to counts overnight (3.1). The gate visibly binds and unbinds — on a 20% margin, see §18.3 |
 | `a_09` | `vl_02` | `h_05` | `cold_us` | `snap_stories` | 5,000 | 3 d | Cheapest CPM, lowest CTR: counts only, at every rung, honestly |
 | `a_10` | `vl_05` | `h_03` | `cold_us_lookalike` | `meta_feed` | 16,000 | 6 d | Shares `vl_05` with `a_07` on a *different* audience — the pools stay separate |
-| `a_11` | `vl_01` | `h_06` | `warm_us` | `tiktok_feed` | 18,000 | 2 d | **The headline claim.** `vl_01` is burned on `cold_us` (φ = 0.43) and **fresh on `warm_us`** (φ = 0.91) at the same instant |
+| `a_11` | `vl_01` | `h_06` | `warm_us` | `tiktok_feed` | 18,000 | 2 d | **The headline claim.** `vl_01` is burned on `cold_us` (φ = 0.43) and **fresh on `warm_us`** (φ = 0.91) at the same instant — these two are *pair* φ, per §7.2, and unaffected |
 | `a_12` | `vl_04` v1 | `h_04` | `cold_us` | `meta_feed` | 20,000 | 7 d | The **pause target** — the brief's own example is *"Pausing `a_12` stops its events"* |
 
 Two of these pairs are the whole argument for **D35-C** and they are readable side by side:
@@ -127,17 +127,24 @@ Per ad, per **1-second tick**:
 λ(ad, t) =  base_impr_per_day(ad) / 86400
           × d_channel(h_local(t))        -- §4  diurnal, account-local, per-channel shape
           × w_dow(weekday(t))            -- §4  day of week
-          × φ_fatigue(lineage, audience) -- §7  the centrepiece
-          × ν_novelty(age_ad, version)   -- §8  launch and recut freshness
           × ρ_pacing(ad, t)              -- §9  budget as a throttle
           × m_channel(t) × m_ad(t)       -- §12 autocorrelated demand
 
 N(ad, t) ~ NegBinomial(mean = λ, dispersion α = 8)      -- §12
 ```
 
-Six multiplicative factors and one stochastic draw. **Multiplicative, not additive** — the whole
+Four multiplicative factors and one stochastic draw. **Multiplicative, not additive** — the whole
 point of D37 is that variance scales with level, so a quiet ad is proportionally noisy and D20's
 gate has something to protect against.
+
+> **`φ_fatigue` and `ν_novelty` are deliberately NOT here — D56, 2026-09-04.** An earlier draft of
+> this equation listed both, which contradicted §7.1 (φ is *"the CTR multiplier"*), §10 (both appear
+> in `p_ctr`) and §18.3, whose impressions column is `base/24 × d_c` with neither in it. Keeping
+> them in both places would charge fatigue twice, as `φ²` on clicks. **Fatigue and novelty change
+> what an impression is worth, never how many arrive.** The budget lever still burns a creative
+> faster, through `ρ_pacing` → impressions → `F`. The alternative was rejected because §19's fatigue
+> flag reads fatigue as falling EWMA CTR, so a model that moved delivery instead of click-through
+> would leave that flag unable to ever fire.
 
 A paused ad emits nothing: `λ = 0` while `status ≠ 'live'`. That is §1's stated convention, not a
 property ingest enforces.
@@ -159,12 +166,18 @@ d_c(h) = [ 0.30 + w1_c · exp(−(h−13.0)² / (2·3.2²))
 `h` = fractional hour in **`America/New_York`** (D22), computed with built-in `Intl`. `Z_c`
 normalises each curve to mean 1.0 over 24 h, so `base_impr_per_day` means what it says.
 
-| Channel | `w1` midday | `w2` evening | `Z` | Peak / trough |
-|---|---|---|---|---|
-| `meta_feed` | 0.85 | 0.45 | 0.6719 | 1.71 @ 13:00 / 0.45 @ 02:00 |
-| `meta_reels` | 0.45 | 0.85 | 0.6164 | 1.89 @ 20:00 / 0.49 |
-| `tiktok_feed` | 0.35 | 1.05 | 0.6220 | 2.17 @ 20:00 / 0.48 |
-| `snap_stories` | 0.30 | 1.00 | 0.5956 | 2.18 @ 20:00 / 0.50 |
+| Channel | `w1` midday | `w2` evening | `Z` | Peak / trough | Swing |
+|---|---|---|---|---|---|
+| `meta_feed` | 0.85 | 0.45 | 0.6719 | 1.71 @ 13:00 / 0.45 @ 00:00 | 3.83× |
+| `meta_reels` | 0.45 | 0.85 | 0.6164 | 1.89 @ 20:00 / 0.49 @ 00:00 | 3.88× |
+| `tiktok_feed` | 0.35 | 1.05 | 0.6220 | 2.17 @ 20:00 / 0.48 @ 00:00 | 4.50× |
+| `snap_stories` | 0.30 | 1.00 | 0.5956 | 2.18 @ 20:00 / 0.50 @ 00:00 | 4.32× |
+
+Two corrections to this table, found at B25 by printing the curve rather than trusting it. The
+trough is at **00:00, not 02:00** — the value 0.45 was right, but neither Gaussian wraps around
+midnight, so the minimum over the 24 integer hours is the hour furthest from both peaks, which is
+the first one. And TikTok's swing is **4.50×, not the 4.8×** the paragraph below once claimed:
+2.17 / 0.48 by this table's own constants. Neither changes a parameter.
 
 Hourly multipliers, `meta_feed` (midday-weighted) and `tiktok_feed` (evening-weighted), hours 00→23:
 
@@ -175,7 +188,7 @@ tiktok_feed  0.48 0.48 0.48 0.49 0.49 0.51 0.53 0.58 0.65 0.74 0.84 0.95
              1.02 1.05 1.03 0.98 0.98 1.10 1.42 1.85 2.17 2.14 1.77 1.26
 ```
 
-The 4.8× peak-to-trough swing on TikTok is what makes D20's granularity ladder *step during the
+The 4.50× peak-to-trough swing on TikTok is what makes D20's granularity ladder *step during the
 day* rather than sitting on one rung — §18.
 
 ### 4.2 Day of week — two separate effects, because they are two phenomena
@@ -271,7 +284,7 @@ F(L, A)   = Σ impressions of lineage L delivered to audience A, over EVERY ad t
 pool(A)   = est_size(A) × served_fraction(A)                         -- §6
 f(L, A)   = F(L, A) / pool(A)                                        -- effective frequency
 φ(f)      = 0.25 + 0.75 · exp(−0.35 · f)                             -- CTR multiplier
-rest      : F ← F · exp(−Δt_idle / τ),  τ = 5-day half-life          -- a rested creative recovers
+rest      : F ← F · 2^(−Δt_idle / 5 days)                            -- a rested creative recovers
 per ad    : φ_ad = φ(f_video)^1.0 · φ(f_headline)^0.5
 ```
 
@@ -290,6 +303,12 @@ slower than video, and zeroing it would mean the headline swap lever changes not
 **The floor is 0.25, not 0.** A burned-out creative still gets clicked occasionally. A floor of zero
 would make a fatigued ad emit no clicks at all, which is both wrong and would make its CTR
 undefined rather than bad.
+
+**The recovery line is written as a half-life, corrected at B26.** It previously read
+`F ← F · exp(−Δt_idle/τ)` with `τ = 5-day half-life`, which as a formula is a 5-day *time constant*
+— a half-life of 3.47 d, and a different number. §21, D35's ratified rationale, `CHEATSHEET.md` and
+`BRIEF_GAPS.md` all state a **5-day half-life**, so the notation was the error and `2^(−Δt/5 d)` is
+what is implemented. `BRIEF_GAPS.md` §S carries the entry.
 
 ### 7.2 What this buys, in the seeded data
 
@@ -713,27 +732,40 @@ retargeting ad, for a domain reason rather than a demo reason.
 ### 18.2 And fatigue pushes ads off the gate
 
 The interaction is the interesting part. `a_01` — retargeting, 75k impr/day, seven days old — sits at
-φ 0.25 and yields **8.5 conversions/hour at the daily peak: below the bar.** The metric a strategist
-would use to judge the ad stopped being measurable exactly as the ad died. That is uncomfortable and
-it is true, so the drawable ad has to be a **fresh pair on a small pool**, not an old one.
+**φ_ad 0.126** and yields **4.3 conversions/hour at the daily peak: below the bar.** The metric a
+strategist would use to judge the ad stopped being measurable exactly as the ad died. That is
+uncomfortable and it is true, so the drawable ad has to be a **fresh pair on a small pool**, not an
+old one. (Its *video* pair sits at φ 0.25; the ad's multiplier is lower because the headline is
+burned too — see §18.3's note.)
 
 ### 18.3 Where every ad lands on the ladder
 
-Computed with the parameters above, at the daily peak / at the trough:
+Computed with the parameters above, at the daily peak / at the trough. **The φ column is
+`φ_ad = φ_video^1.0 · φ_headline^0.5`** (§7.1) — the multiplier that actually enters `p_ctr`. It was
+previously the video pair's φ alone, which is the figure §7.2 tabulates; corrected at B26, along
+with every conv/h that depends on it. Impressions are unaffected, because φ does not enter λ (D56).
 
-| Ad | φ | Peak impr/h | Peak conv/h | CTR rung pk / tr | CPA·ROAS rung pk / tr |
-|---|---|---|---|---|---|
-| `a_08` (rt, 1 d, fresh pair) | 0.62 | 5,118 | **15.3** | 15 min / hour | **hour / counts** |
-| `a_01` (rt, 7 d, burned) | 0.25 | 5,351 | 8.5 | 15 min / hour | counts / counts |
-| `a_02` (cold, tiktok) | 0.43 | 4,068 | 0.3 | 15 min / hour | counts / counts |
-| `a_03` (warm, meta_feed) | 0.68 | 1,570 | 1.4 | hour / counts | counts / counts |
-| `a_07` (warm, snap, newest) | 0.98 | 544 | 0.3 | hour / counts | counts / counts |
-| `a_09` (cold, snap) | 0.96 | 454 | 0.0 | counts / counts | counts / counts |
+| Ad | φ_ad | φ_video | Peak impr/h | Peak conv/h | CTR rung pk / tr | CPA·ROAS rung pk / tr |
+|---|---|---|---|---|---|---|
+| `a_08` (rt, 1 d, fresh pair) | 0.488 | 0.62 | 5,118 | **12.0** | 15 min / hour | **hour / counts** |
+| `a_01` (rt, 7 d, burned) | 0.126 | 0.25 | 5,351 | 4.3 | 15 min / hour | counts / counts |
+| `a_02` (cold, tiktok) | 0.302 | 0.43 | 4,068 | 0.2 | 15 min / hour | counts / counts |
+| `a_03` (warm, meta_feed) | 0.555 | 0.68 | 1,570 | 1.1 | hour / counts | counts / counts |
+| `a_07` (warm, snap, newest) | 0.929 | 0.98 | 544 | 0.3 | hour / counts | counts / counts |
+| `a_09` (cold, snap) | 0.941 | 0.96 | 454 | 0.0 | counts / counts | counts / counts |
 
 **Both branches of D20 fire on camera, and the ladder steps during the day.** `a_08` draws hourly
 CPA at peak and falls to counts overnight. `a_02` draws CTR at 15-min in the evening and at hour
 overnight. `a_09` never clears any bar and says so. A portfolio where every chart drew every ratio
 would make D20's mechanism invisible; one where none did would make cohort ratios invisible.
+
+**Not one rung assignment moved under the correction** — checked against D20's gates at both peak
+and trough for all six ads. What moved is `a_08`'s margin: **12.0 conversions/hour against a bar of
+10, where the earlier figure gave 53% of headroom and this gives 20%.** That single cell is D20's
+hourly branch firing on camera, so **B34 owes a check** (D56 consequence 5): whether the rung is
+chosen from the *realised* hour or from the *expectation*. If realised, `α = 8`'s overdispersion
+will put some hours under the bar and the demo moment will silently not happen. The figures here are
+expectations; ν is also omitted from them, which B28 will revisit.
 
 ### 18.4 Seed budget — measured, not estimated
 

@@ -2875,3 +2875,75 @@ The alternative that is obviously safe is also the one that makes the check too 
 and a verifier nobody runs is a claim rather than a property. So the risk was moved rather than
 accepted: the mechanism was measured instead of assumed, and the invariant it rests on has a test
 that fails the build rather than a comment asking for care.
+
+---
+
+## DECISION #56 — Where fatigue and novelty enter the model: λ, or `p_ctr`
+
+**ACCEPTED — A**, 2026-09-04. Raised mid-group at B26, before B27 was written.
+
+### Question
+
+`SIMULATOR.md` §3 lists `φ_fatigue` and `ν_novelty` among the multiplicative factors on **λ**, the
+impression rate. §7.1 calls `φ(f)` *"the CTR multiplier"*, §10 puts both in
+`p_ctr = ctr_base × ctr_mult × φ_ad × ν`, and §18.3's calibration table contains neither on its
+impressions column. Implementing both statements charges fatigue twice, as `φ²` on clicks. B27
+writes `p_ctr` and cannot be written without an answer.
+
+### Measured before deciding
+
+§18.3's six ads, recomputed both ways. Impressions as `base/24 × d_c` with **no** φ reproduce the
+table's own column — `a_08` 5,121 vs 5,118, `a_01` 5,350 vs 5,351 — and conversions with φ on CTR
+only reproduce its conv/h to two decimals on all six rows (`a_08` 15.30 vs 15.3, `a_01` 8.47 vs
+8.5, `a_03` 1.40 vs 1.4). With φ on both, `a_01` yields 2.13 conv/h against the table's 8.5. The
+calibration was done with φ on CTR only; §3's λ is the erroneous statement.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **φ and ν are CTR multipliers only — strike both from §3's λ** | **CHOSEN** |
+| B | φ multiplies λ only: a fatigued ad is served less but converts at the same rate | Rejected — contradicts §7.1, §10 and §18.3, and **breaks §19's fatigue flag**, which detects fatigue as a fall in EWMA CTR. Under B, CTR never moves and the flag can never fire |
+| C | Both, as literally written; clicks scale as `φ²` | Rejected — `a_01` would emit ~2 conversions/hour against §18.3's 8.5, and §18 would need re-calibrating from scratch |
+
+### Rationale, in Seno's words
+
+> D56 — A. φ and ν come out of §3's λ and enter only p_ctr. […] I checked it independently rather
+> than trusting your table: a_01 at 75,000/day is 3,125/h nominal × peak d_meta_feed 1.71 = 5,344
+> against §18.3's 5,351, the gap being w_dow — φ is nowhere in it. Your case against B is the one
+> that settles it: §19's fatigue flag reads fatigue as falling EWMA CTR, so under B the flag can
+> never fire, and the model and the heuristic would disagree about what fatigue is.
+
+### Consequences
+
+1. **§3's λ loses two factors** and now reads `base/86400 × d_c × w_dow × ρ_pacing × m_channel ×
+   m_ad`. Corrected in place, with a line saying why, *"so the next reader doesn't re-derive this"*.
+2. **`RateFactors.phi` in `src/sim/rate.ts` is never passed**, and says so at the point it matters.
+   The field is kept rather than deleted so the contradiction stays visible where it was resolved.
+3. **Fatigue still responds to the budget lever.** §7.1's *"double the budget and you burn the
+   creative twice as fast"* survives unchanged: budget raises impressions through `ρ_pacing`, and
+   impressions are what accrue `F`.
+4. **A doc fix follows, not a second decision** (Seno: *"The §18.2/§18.3/§2.3 φ correction is a doc
+   fix, not a decision"*). Those three sections quote the **video pair's** φ where D35 ratifies
+   `φ_ad = φ_video^1.0 · φ_headline^0.5`. Every conv/h figure moves; **no rung assignment in §18.3
+   changes** — verified against D20's gates at both peak and trough for all six ads.
+5. **A calibration risk is carried to B34, deliberately not fixed now** (Seno): `a_08`'s peak goes
+   from 15.3 to 12.0 conversions/hour against D20's bar of 10 — a 20% margin where it was 53%, and
+   it is D20's hourly branch firing on camera. *"Confirm at calibration whether the rung is chosen
+   from the realised hour or the expectation; if realised, α = 8 will put some hours under the bar
+   and the demo moment silently won't happen."*
+
+### What it forecloses
+
+Modelling platform-side throttling of tired creative — a real phenomenon in which a poor performer
+loses delivery, not just clicks. Under A that is representable only through `ρ_pacing`, which is a
+budget mechanism, so the model says fatigue costs an ad its click-through and never its reach. Named
+as a limit rather than a gap: §20 is where it belongs if it is ever wanted.
+
+### How I'd defend this in review
+
+The spec said two things and the calibration only agreed with one of them, so the disagreement was
+settled by arithmetic against a table already in the document rather than by preference. The
+deciding argument was not which reading is more realistic — both are — but that under the rejected
+one the model and the read-side heuristic would disagree about what fatigue *is*, and a fatigue flag
+that can never fire is worse than either model.

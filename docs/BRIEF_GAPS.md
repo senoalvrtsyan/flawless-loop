@@ -1608,3 +1608,77 @@ pre-baked arrays behind charts — while surviving contact with the brief's own 
 Both are **narrowings we declined to make.** Narrowing a quoted contract needs the same call-out in
 the notes for strictly less fidelity, and it makes reinstatement a type change rippling through the
 fold, the projections and persisted rows rather than a one-variant change.
+
+---
+
+## H. Contradictions found in our own design documents
+
+Opened at B25/B26. CLAUDE.md §8 asks for *"every underdetermined field, contradiction, missing
+identifier, undefined semantic"* — and by phase 5 the document most likely to contradict itself is
+no longer the brief but `SIMULATOR.md`, which states 60-odd parameters and derives numbers from
+them. Both entries below were found by printing what the code computes and diffing it against the
+table it was transcribed from, which is the only reason they were found at all: each would have run
+without erroring and been wrong by a constant factor.
+
+`DECISIONS.md` **D56** is a third such contradiction and is *not* here — it needed a decision rather
+than a correction, so it went through §3.
+
+---
+
+### H1 — `SIMULATOR.md` §7.1's idle recovery is a half-life in prose and a time constant in the formula · **CORRECTED**
+
+**Spec:** §7.1's model block read `rest : F ← F · exp(−Δt_idle / τ), τ = 5-day half-life`.
+
+**Problem:** The formula and its own annotation are different quantities. `exp(−Δt/τ)` with `τ` =
+5 days is a 5-day **time constant** — a half-life of 3.47 days. Read as the words say, `F` halves in
+5 days. The two differ by a factor of `ln 2` in the exponent, so a rested creative recovers ~44%
+faster under one reading than the other. Nothing observable distinguishes them: both are smooth
+exponential decays with the same shape, and the only surface that would ever show the difference is
+a paused ad's φ several days later.
+
+**Options:** (a) implement the formula literally, `τ` = 5 d as a time constant; (b) implement the
+prose, half-life = 5 d; (c) raise it as a decision.
+
+**What we did — (b), corrected in place, argued rather than assumed.** Four places state the
+quantity — §21 (*"recovery half-life τ_rec 5 days"*), D35's ratified rationale (*"idle recovery on a
+5-day half-life"*), `CHEATSHEET.md` and `OPEN_QUESTIONS.md` — against one place that states the
+notation. A notation slip in one formula does not outweigh the ratified quantity repeated in four,
+so this was a transcription error to fix and not an open choice: (c) was rejected on that ground.
+§7.1 now reads `F ← F · 2^(−Δt_idle / 5 days)`.
+
+**Where it shows up in code:** `src/sim/fatigue.ts` → `rest()`, with the discrepancy in its
+docstring, and `FATIGUE.recoveryHalfLifeMs` in `src/sim/params.ts`. `npm run sim -- --dry-run`
+prints the recovery curve for `vl_04 × rt_us` at 0/1/2/5/10/20 days idle, so the half-life is
+visible in output rather than asserted in a comment — `f` 17.92 → 8.96 at 5 days.
+
+---
+
+### H2 — `spend` is specified as "CPM accrual plus fees" and no fee parameter exists · **NAMED AS A LIMIT**
+
+**Brief:** L79-80 — *"`spend` — non-click charges (CPM, fees); disjoint from click costs — total
+spend = sum of both"*. `SIMULATOR.md` §10 follows it: a `spend` delta carries *"that interval's CPM
+accrual plus fees"*, and on the CPC share of a channel's mix, *"`spend` ticks carry fees only"*.
+
+**Problem:** There is no fee parameter anywhere. §21's appendix — which exists so that *"every
+constant"* can be inspected — has a CPM base and a CPC base per channel and nothing else. So §10
+names a cost component the model cannot compute, and on a 70/30 channel the sentence "spend ticks
+carry fees only" describes a tick whose value would be zero.
+
+**Options:** (a) invent a fee — a percentage of spend, or a flat per-mille; (b) model CPM only and
+state the omission; (c) raise it as a decision and pick a number.
+
+**What we did — (b).** `CLAUDE.md` §2 and this repo's standing rule are explicit that a missing
+constant is a gap to raise and not a number to choose, and the arithmetic already ratified agrees:
+**D52's budget baseline** (transcribed in `src/sim/fixtures.ts`) computes each ad's daily cost as
+`cpm charge + cpc charge` with no fee term, so every one of the twelve seeded budgets was set
+against a fee-free baseline. Inventing a fee now would silently invalidate twelve ratified numbers
+and §9's pacing behaviour with them. On the CPC share, a `spend` tick is therefore **not emitted**
+rather than emitted as zero.
+
+**Stated limit:** our `spend` is CPM accrual only, so "total spend = click costs + spend" is exactly
+right and *"non-click charges"* is narrower in our model than in the brief's parenthesis. Belongs in
+the README's honest-limits list beside §20. A fee would be a one-line parameter if it is ever
+wanted; it is absent because no ratified number exists, not because it is hard.
+
+**Where it shows up in code:** `src/sim/emit.ts` (B27), at the point the 60-second `spend` delta is
+computed.
