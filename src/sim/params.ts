@@ -204,3 +204,13 @@ export const NOISE = {
 
 /** §21 / **I1**: `spend` is emitted as a delta per 60-second interval per live ad. */
 export const SPEND_TICK_S = 60;
+
+/**
+ * §8's novelty. `ν(age_hours) = 1 + 0.25 · exp(−age_hours / 18)` — +25% CTR in the first minutes,
+ * ~4% left after two days.
+ *
+ * A **CTR effect only, not a delivery boost**, which §8 states as a deliberate simplification:
+ * platforms do also favour new creative during the learning phase, and that would be a volume term.
+ * D56 makes the same point structurally — ν never enters λ.
+ */
+export const NOVELTY = { peak: 0.25, timeConstantHours: 18 } as const;

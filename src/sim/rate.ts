@@ -120,7 +120,12 @@ export type RateFactors = {
    * the point it matters rather than resolved by omission — DECISION #56.
    */
   phi?: number;
-  /** §8's `ν` — B28. */
+  /**
+   * §8's `ν`. **Never passed either, for the same reason as `phi` — D56.** §8 calls novelty a CTR
+   * effect *"not a delivery boost"* in its own words, and states that as the deliberate
+   * simplification it is: platforms do favour new creative during the learning phase, and that
+   * would be a volume term. It is not one here.
+   */
   nu?: number;
   /** §9's `ρ_catchup × ρ_terminal` — B32. */
   rho?: number;

@@ -12,7 +12,7 @@
 // budget and you burn the creative twice as fast.
 
 import { AUDIENCES, COMPONENTS, ADS } from './fixtures.ts';
-import { BASE_IMPR_PER_DAY, FATIGUE, SERVED_FRACTION } from './params.ts';
+import { BASE_IMPR_PER_DAY, FATIGUE, NOVELTY, SERVED_FRACTION } from './params.ts';
 
 const AUDIENCE_SIZE = new Map(AUDIENCES.map((a) => [a.audience_id, a.est_size]));
 const COMPONENT = new Map(COMPONENTS.map((c) => [c.component_id, c]));
@@ -143,4 +143,80 @@ export function adFatigue(adId: string, accrual: Map<string, number>): AdFatigue
     phi_headline: headline.phi,
     phi_ad: phiAd(video.f, headline.f),
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// §8 — Novelty at launch. B28.
+//
+// It lives beside fatigue because it is the same quantity's other end: φ is what a creative loses
+// to repetition and ν is what it starts with, both keyed to the pair rather than to the ad, and
+// both landing on CTR alone. `a_07` carries ν 1.07 and φ 0.98; `a_01` carries ν 1.00 and φ 0.25 —
+// the two ends of a creative's life on screen at the same moment (§8).
+
+/**
+ * §8's `ν(age_hours) = 1 + 0.25 · exp(−age_hours / 18)`.
+ *
+ * A CTR effect only, never a delivery boost. §8 states that as a deliberate simplification —
+ * platforms do favour new creative during the learning phase, which would be a *volume* term — and
+ * **D56** makes it structural: ν cannot enter λ, only `p_ctr`.
+ */
+export function novelty(ageHours: number): number {
+  if (ageHours < 0) return 1 + NOVELTY.peak;
+  return 1 + NOVELTY.peak * Math.exp(-ageHours / NOVELTY.timeConstantHours);
+}
+
+/**
+ * Keyed by `(lineage, VERSION, audience)`, not by the ad and not by lineage alone.
+ *
+ * §8: novelty applies to the pair's **first exposure**, *"so a version bump gets a fresh novelty
+ * window as well as §7.3's partial reset; a reused pair does not."* That last clause is the claim
+ * worth having — `a_04` launching onto the `vl_01 × cold_us` pool `a_02` has already burned gets
+ * no novelty at all — and it is why §3's looser `ν_novelty(age_ad, version)` notation cannot be
+ * taken literally. The version is in the key because a recut is new to the platform's learning
+ * phase even though §7.3 says it is not new to the audience.
+ */
+export function noveltyKey(lineageId: string, version: number, audienceId: string): string {
+  return `${lineageId}\u0000v${version}\u0000${audienceId}`;
+}
+
+/**
+ * Each novelty key's age in hours at `T0`, from §2.3's staggered launches: the pair's first
+ * exposure is the EARLIEST launch among the ads that use it, so the oldest `live_days` wins.
+ *
+ * Frozen at `T0` for the same reason `nominalAccrual()` is (see above) — and here the freeze is
+ * forced rather than chosen. ν feeds `p_ctr`, `p_ctr` decides click counts, and a click's
+ * `event_id` is derived: if ν moved with wall-clock time, a restart would re-derive the same
+ * `event_id` with a different click count and the re-emission would land as
+ * `duplicate_conflicting` instead of `duplicate_identical`. The cost is small — ν decays 0.0023
+ * over ten minutes at the 18 h constant — and B31 is where a polled world can carry a real age.
+ */
+export function noveltyAgesAtT0(): Map<string, number> {
+  const ages = new Map<string, number>();
+  for (const ad of ADS) {
+    const video = COMPONENT.get(ad.video_id);
+    if (video === undefined) throw new Error(`no component ${ad.video_id} — §2.1`);
+    const key = noveltyKey(video.lineage_id, video.version, ad.audience_id);
+    const ageHours = ad.live_days * 24;
+    ages.set(key, Math.max(ages.get(key) ?? 0, ageHours));
+  }
+  return ages;
+}
+
+/**
+ * One ad's ν. **The VIDEO slot only** — and that is a reading of §8, not an omission.
+ *
+ * §7.1 states a slot composition for φ (`video^1.0 × headline^0.5`); §8 states none at all, and
+ * refers to *"the `(lineage, audience)` pair"* in the singular. Its worked example settles which:
+ * `a_07` is quoted at **ν ≈ 1.06**, which is its video pair's age of one day. Composing over both
+ * slots would give 1.075, because `hl_06 × warm_us` was first exposed two days ago by `a_11`.
+ * Recorded in `BRIEF_GAPS.md` §H3 as an underspecification the doc's own arithmetic resolves.
+ */
+export function adNovelty(adId: string, ages: Map<string, number>): number {
+  const ad = ADS.find((a) => a.ad_id === adId);
+  if (ad === undefined) throw new Error(`${adId} is not in the seeded portfolio — §2.3`);
+  const video = COMPONENT.get(ad.video_id);
+  if (video === undefined) throw new Error(`no component ${ad.video_id} — §2.1`);
+  const ageHours = ages.get(noveltyKey(video.lineage_id, video.version, ad.audience_id));
+  if (ageHours === undefined) throw new Error(`no novelty age for ${adId} — §8`);
+  return novelty(ageHours);
 }

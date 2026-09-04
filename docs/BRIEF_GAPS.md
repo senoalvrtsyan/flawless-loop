@@ -1682,3 +1682,43 @@ wanted; it is absent because no ratified number exists, not because it is hard.
 
 **Where it shows up in code:** `src/sim/emit.ts` (B27), at the point the 60-second `spend` delta is
 computed.
+
+---
+
+### H3 — §8 gives novelty no slot composition, where §7.1 gives fatigue one · **RESOLVED BY THE DOC'S OWN ARITHMETIC**
+
+**Spec:** §7.1 states fatigue's slot rule explicitly — `φ_ad = φ(f_video)^1.0 · φ(f_headline)^0.5`,
+with a ratified reason for the 0.5. §8 states novelty as `ν(age_hours) = 1 + 0.25 · exp(−age/18)`
+and says it *"applies to the `(lineage, audience)` pair's first exposure"* — singular pair, no slot
+rule. §10's `p_ctr` carries one `ν`. §3 writes it as `ν_novelty(age_ad, version)`, which is a third
+description again: the age of the **ad**.
+
+**Problem:** An ad has two slots and therefore two pairs, each with its own first exposure. Three
+readings are available and they disagree: ν on the video pair, ν composed over both slots the way
+φ is, or ν on the ad's own age. Nothing errors under any of them.
+
+**Options:** (a) video pair only; (b) compose `ν_v^1.0 · ν_h^0.5` by analogy with §7.1; (c) ad age;
+(d) raise it as a decision.
+
+**What we did — (a), settled by §8's own worked example rather than by analogy.** §8 quotes `a_07`
+at **ν ≈ 1.06**. Its video pair `vl_05 × warm_us` is one day old, giving 1.0659; its headline pair
+`hl_06 × warm_us` was first exposed two days ago by `a_11`, so (b) would give 1.0752 and (c) — ad
+age of one day — would coincide with (a) here but diverge elsewhere. Only (a) reproduces the quoted
+figure while also satisfying §8's other sentence.
+
+**And that other sentence is why the key carries the version and the audience.** §8: a version bump
+gets a fresh novelty window, *"a reused pair does not."* So the key is
+`(lineage, version, audience)`, not the ad and not the lineage alone — which makes `a_04` the
+demonstration: four days old as an ad, launched onto the `vl_01 × cold_us` pool `a_02` had already
+been burning for seven, and it receives **no novelty at all**. Under (c) it would receive some.
+`ν_novelty(age_ad, version)` in §3 is loose notation for the same thing, since for every other
+seeded ad the ad and its video pair are the same age.
+
+**Where it shows up in code:** `src/sim/fatigue.ts` → `noveltyKey()`, `noveltyAgesAtT0()`,
+`adNovelty()`, each carrying the reading in its docstring. `npm run sim -- --dry-run` prints the
+per-ad table with an `ad age h` column beside `pair age h`, so the two disagreeing for `a_04` is
+visible in output rather than asserted in a comment.
+
+**Not resolved here:** whether the headline slot should carry novelty at all. §7.1 argues the
+headline wears out *"just slower than video"*, and the symmetric argument would give it a novelty
+window too. §8 does not make that argument and we did not make it for them.

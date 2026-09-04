@@ -16,7 +16,7 @@
 import { derivedId } from './rng.ts';
 import { ADS, type AdFixture } from './fixtures.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
-import { adFatigue, nominalAccrual } from './fatigue.ts';
+import { adFatigue, adNovelty, nominalAccrual, noveltyAgesAtT0 } from './fatigue.ts';
 import { clicksForTick, cpmAccrualCents, isSpendBoundary, spendCents } from './emit.ts';
 import { SPEND_TICK_S } from './params.ts';
 import {
@@ -24,6 +24,7 @@ import {
   clickAndCostPath,
   fatigue,
   localMidnightAtOrBefore,
+  noveltySection,
   type DryRunOptions,
 } from './dry-run.ts';
 import { BASE_IMPR_PER_DAY } from './params.ts';
@@ -59,6 +60,15 @@ const AD = ((id: string): AdFixture => {
  * replaces this constant with a polled figure; until then a live run's fatigue is frozen, not wrong.
  */
 const PHI_AD = adFatigue(AD_ID, nominalAccrual()).phi_ad;
+
+/**
+ * §8's ν for `a_12`, frozen at `T0` — and here the freeze is FORCED, not chosen. ν feeds `p_ctr`,
+ * `p_ctr` decides the tick's click count, and a click's `event_id` is derived: a ν that moved with
+ * wall-clock time would re-derive the same `event_id` with a different click population after a
+ * restart, which is `duplicate_conflicting` rather than `duplicate_identical`. The cost is 0.0023
+ * of ν over ten minutes at §8's 18 h constant, and `a_12` is seven days old so it is ~1.00 anyway.
+ */
+const NU = adNovelty(AD_ID, noveltyAgesAtT0());
 
 /** §15.1: 1 s, one batched POST per tick, 1× wall clock. */
 const TICK_MS = 1_000;
@@ -126,7 +136,7 @@ function eventsForTick(tick: number): Signal[] {
 
   // §10's clicks. The `event_id` carries a `'c'` part so a click and an impression at the same
   // (tick, index) cannot collide — parts are NUL-joined, so no other part sequence can produce it.
-  const clicks = clicksForTick(SEED, AD, tick, count, PHI_AD);
+  const clicks = clicksForTick(SEED, AD, tick, count, { phiAd: PHI_AD, nu: NU });
   for (const click of clicks) {
     events.push({
       event_id: derivedId(SEED, 'eid', AD_ID, tick, 'c', click.index),
@@ -287,6 +297,7 @@ const dry = dryRunOptions(process.argv.slice(2));
 if (dry !== null) {
   const started = Date.now();
   fatigue();
+  noveltySection();
   clickAndCostPath(dry, arrivalProcess(dry));
   console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
   process.exit(0);
@@ -295,7 +306,8 @@ if (dry !== null) {
 console.log(
   `[sim] ${AD_ID} on ${AD.channel} at ${BASE_IMPR_PER_DAY[AD_ID]}/day nominal → ${INGEST_URL}` +
     ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week, NegBinomial(λ, α=8)` +
-    ` · §10 clicks at p_ctr with φ_ad ${PHI_AD.toFixed(4)} (D56), CPM spend every ${SPEND_TICK_S}s` +
+    ` · §10 clicks at p_ctr with φ_ad ${PHI_AD.toFixed(4)} · ν ${NU.toFixed(4)} (D56),` +
+    ` CPM spend every ${SPEND_TICK_S}s` +
     ` · replaying the last ${CATCHUP_S}s`,
 );
 

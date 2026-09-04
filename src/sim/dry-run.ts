@@ -22,12 +22,17 @@ import {
   DOW_VOLUME,
   FATIGUE,
   NOISE,
+  NOVELTY,
   SPEND_TICK_S,
   TEMPERATURE,
 } from './params.ts';
 import {
   adFatigue,
+  adNovelty,
   nominalAccrual,
+  novelty,
+  noveltyAgesAtT0,
+  noveltyKey,
   pairKey,
   phi,
   pool,
@@ -129,8 +134,8 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   console.log(
     `\n=== B25 · §3 arrival process · §4 diurnal and day of week ===\n` +
       `${hours} h from ${localStamp(fromMs)} ${ACCOUNT_TZ} · seed '${seed}'\n` +
-      `ν (B28) ρ (B32) m_channel·m_ad (B30) held at 1.00 — this is λ's shape, not its final level.\n` +
-      `φ is NOT applied: whether fatigue multiplies λ or only p_ctr is open — DECISION #56.\n`,
+      `ρ_pacing (B32) and m_channel·m_ad (B30) held at 1.00 — this is λ's shape.\n` +
+      `φ and ν are NOT applied and never will be — D56 puts both in p_ctr only.\n`,
   );
 
   console.log(
@@ -147,7 +152,9 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   // B27's tallies ride along on B25's single pass: one simulation, two sections. Running the
   // window twice would double a 24-hour dry run's ~25 s for numbers taken from the same draws.
   const accrual = nominalAccrual();
+  const ages = noveltyAgesAtT0();
   const phiByAd = new Map(ADS.map((a) => [a.ad_id, adFatigue(a.ad_id, accrual).phi_ad]));
+  const nuByAd = new Map(ADS.map((a) => [a.ad_id, adNovelty(a.ad_id, ages)]));
   const tally = new Map(ADS.map((a) => [a.ad_id, emptyTally()]));
   const intervalAccrual = new Map(ADS.map((a) => [a.ad_id, 0]));
   let dSum = 0;
@@ -163,6 +170,7 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
       if (bucket === undefined) continue;
       const own = tally.get(ad.ad_id);
       const phiAd = phiByAd.get(ad.ad_id) ?? 1;
+      const nu = nuByAd.get(ad.ad_id) ?? 1;
       if (own === undefined) continue;
 
       for (let s = 0; s < 3_600; s++) {
@@ -177,7 +185,7 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
 
         // §10, B27. φ enters here and not in λ above — D56.
         own.impressions += n;
-        const clicks = clicksForTick(seed, ad, tick, n, phiAd);
+        const clicks = clicksForTick(seed, ad, tick, n, { phiAd, nu });
         own.clicks += clicks.length;
         for (const click of clicks) own.clickCostCents += click.cost_cents;
 
@@ -272,6 +280,7 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
       `(${DAY_NAMES[localWeekday(fromMs + 43_200_000)]}) = ${Math.round(nominal)}\n` +
       `  expected/nominal ${(totalExpected / nominal).toFixed(4)}  ` +
       `· mean d_c over the window ${(dSum / dCount).toFixed(4)}\n` +
+
       `  w_dow, §4.2: ` +
       DAY_NAMES.map((d, i) => `${d} ${DOW_VOLUME[i]?.toFixed(2)}`).join('  '),
   );
@@ -388,6 +397,7 @@ export function fatigue(): void {
  */
 export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally>): void {
   const accrual = nominalAccrual();
+  const ages = noveltyAgesAtT0();
   const middayMs = opts.fromMs + 43_200_000;
   const dowCvr = DOW_CVR[localWeekday(middayMs)] ?? 1;
   const dowAov = DOW_ORDER_VALUE[localWeekday(middayMs)] ?? 1;
@@ -402,7 +412,8 @@ export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally
   console.log(
     `  ${'ad'.padEnd(6)} ${'channel'.padEnd(13)} ${pad('impr', 8)} ${pad('clicks', 7)} ` +
       `${pad('CTR', 8)} ${pad('exp CTR', 8)} ${pad('r/e', 6)}  ${pad('conv', 5)} ${pad('CVR', 7)} ` +
-      `${pad('exp CVR', 8)} ${pad('r/e', 6)}  ${pad('CPC¢', 7)} ${pad('exp mean', 8)} ${pad('r/e', 6)}`,
+      `${pad('exp CVR', 8)} ${pad('r/e', 6)}  ${pad('CPC¢', 7)} ${pad('exp mean', 8)} ${pad('r/e', 6)}` +
+      `  ${pad('ν', 6)}`,
   );
 
   for (const ad of ADS) {
@@ -414,8 +425,12 @@ export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally
     if (row === undefined) continue;
 
     const phiAd = adFatigue(ad.ad_id, accrual).phi_ad;
+    // ν belongs in the expected column, not just in the draw: leaving it out made `a_07` and
+    // `a_08` — the two youngest pairs, and the only ones with novelty left — read 8-16% "hot"
+    // against their own model.
+    const nu = adNovelty(ad.ad_id, ages);
     const ctr = t.clicks / t.impressions;
-    const expCtr = pCtr(ad, phiAd);
+    const expCtr = pCtr(ad, phiAd, nu);
     const cvr = t.clicks === 0 ? 0 : t.conversions / t.clicks;
     const expCvr = pCvr(ad, middayMs);
     // Blended across the pricing mix, as D52's baseline blends it: only the CPC share is charged.
@@ -437,7 +452,7 @@ export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally
         `${pad((cvr * 100).toFixed(2) + '%', 7)} ${pad((expCvr * 100).toFixed(2) + '%', 8)} ` +
         `${pad(t.conversions === 0 ? '—' : (cvr / expCvr).toFixed(3), 6)}  ` +
         `${pad(cpc.toFixed(2), 7)} ${pad(expCpc.toFixed(2), 8)} ` +
-        `${pad(t.clicks === 0 ? '—' : (cpc / expCpc).toFixed(3), 6)}`,
+        `${pad(t.clicks === 0 ? '—' : (cpc / expCpc).toFixed(3), 6)}  ${pad(nu.toFixed(4), 6)}`,
     );
   }
 
@@ -485,4 +500,48 @@ export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally
         `the distribution behaving, not a bug.`,
     );
   }
+}
+
+/**
+ * §8's novelty, per ad. Small, and it prints because §8's two worked examples are the check:
+ * `a_07` at ν ≈ 1.06 and `a_01` at 1.00 — *"the two ends of a creative's life on screen at the
+ * same moment"*.
+ *
+ * The `pair age` column is what makes the model's actual claim visible: `a_04` is four days old as
+ * an AD but launched onto a pool `a_02` had already been burning for seven, so it gets no novelty
+ * at all. §8: a version bump gets a fresh window, *"a reused pair does not"*.
+ */
+export function noveltySection(): void {
+  const ages = noveltyAgesAtT0();
+  const accrual = nominalAccrual();
+
+  console.log(
+    `\n=== B28 · §8 novelty at launch ===\n` +
+      `ν(age_h) = 1 + ${NOVELTY.peak} * exp(-age_h / ${NOVELTY.timeConstantHours}) · CTR only, never λ (D56)\n` +
+      `Keyed by (lineage, VERSION, audience) first exposure — NOT by ad age, so a reused pair gets none.\n` +
+      `The video slot only: §8 states no slot composition and its own a_07 ≈ 1.06 is the video pair.\n`,
+  );
+  console.log(
+    `  ${'ad'.padEnd(6)} ${'novelty key'.padEnd(30)} ${pad('ad age h', 9)} ${pad('pair age h', 11)} ` +
+      `${pad('ν', 7)} ${pad('φ_ad', 7)} ${pad('ν·φ_ad', 8)}  note`,
+  );
+  for (const ad of ADS) {
+    const video = COMPONENTS.find((c) => c.component_id === ad.video_id);
+    if (video === undefined) continue;
+    const key = noveltyKey(video.lineage_id, video.version, ad.audience_id);
+    const pairAge = ages.get(key) ?? 0;
+    const nu = adNovelty(ad.ad_id, ages);
+    const phiAd = adFatigue(ad.ad_id, accrual).phi_ad;
+    const note =
+      ad.live_days * 24 < pairAge ? `launched onto a pair already ${pairAge / 24} d old` : '';
+    console.log(
+      `  ${ad.ad_id.padEnd(6)} ${`${video.lineage_id} v${video.version} x ${ad.audience_id}`.padEnd(30)} ` +
+        `${pad(ad.live_days * 24, 9)} ${pad(pairAge, 11)} ${pad(nu.toFixed(4), 7)} ` +
+        `${pad(phiAd.toFixed(4), 7)} ${pad((nu * phiAd).toFixed(4), 8)}  ${note}`,
+    );
+  }
+  console.log(
+    `\n  §8's decay, for reference: ` +
+      [0, 1, 6, 18, 24, 48, 96].map((h) => `${h}h ${novelty(h).toFixed(3)}`).join('  '),
+  );
 }

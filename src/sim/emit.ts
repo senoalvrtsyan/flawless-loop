@@ -48,13 +48,15 @@ function temperatureOf(audienceId: string): { ctr: number; cvr: number; cpcMult:
  * result that is identical in distribution. It also makes the κ → ∞ limit visibly Binomial, which
  * is the sanity check a reader will want.
  *
- * **What κ does at a 1-second tick: nothing measurable.** The urn's overdispersion enters through
- * `(n−1)/(κ+1)`, so at `n = 1` it is exactly zero and at `n = 2` it is 0.5%. Per-tick `N` across
- * the seeded portfolio is 0–3, so §10's `κ = 200` is very nearly a no-op as written, and §12's
- * *"the rate is uncertain, not just the count"* is not delivered at this granularity — the rate
- * would have to persist across a window for that. §10 is implemented as written; the dispersion
- * behaviour is **B30**'s chunk and its verify ("variance/mean grows with λ") is where this belongs.
- * Recorded in `BUILD_PLAN.md` §14 because it is invisible: nothing errors, κ simply does nothing.
+ * **Now used for CONVERSIONS only.** The click path moved to a per-minute rate at D57 (see
+ * `clicksForTick`), because the urn's overdispersion enters through `(n−1)/(κ+1)` — exactly zero at
+ * `n = 1` — and per-tick counts are 0–3, so κ did nothing at all.
+ *
+ * **κ = 60 is still inert for conversions, and moving it would not help.** A conversion draw is
+ * over one tick's CLICKS, which is 0 or 1 for every seeded ad; but even lifted to the minute the
+ * count stays 0–1, so persisting the rate across a minute changes nothing measurable. It would take
+ * an hour-wide window to give κ = 60 any effect, and that is a further modelling decision about
+ * where cohort-rate uncertainty lives, not a fix. Stated as a limit in `BUILD_PLAN.md` §14.
  */
 export function betaBinomial(
   seed: string,
@@ -140,14 +142,21 @@ export type ClickDraw = { click_id: string; cost_cents: number; index: number };
  * `m_channel` is held at 1.0 — **B30** — so the demand coupling that §12 attaches to CPC
  * (*"competition raises price and volume pressure together"*) is absent by name, not by omission.
  */
+export type ClickFactors = {
+  /** §7's `φ_ad` (B26). */
+  phiAd: number;
+  /** §8's `ν` (B28). 1.0 means "no novelty left", which is what an old pair genuinely has. */
+  nu?: number;
+};
+
 export function clicksForTick(
   seed: string,
   ad: AdFixture,
   tick: number,
   impressions: number,
-  phiAd: number,
-  nu = 1,
+  factors: ClickFactors,
 ): ClickDraw[] {
+  const { phiAd, nu = 1 } = factors;
   const count = betaBinomial(
     seed,
     'ctr',
@@ -162,13 +171,9 @@ export function clicksForTick(
   const clicks: ClickDraw[] = [];
   for (let i = 0; i < count; i++) {
     const onCpcShare = draw(seed, 'cpc', ad.ad_id, tick, 'share', i) < channel.cpcShare;
+    const median = channel.cpcBaseCents * cpcMult;
     const cost = onCpcShare
-      ? Math.max(
-          1,
-          Math.round(
-            logNormal(seed, 'cpc', [ad.ad_id, tick, i], channel.cpcBaseCents * cpcMult, NOISE.cpcSigma),
-          ),
-        )
+      ? Math.max(1, Math.round(logNormal(seed, 'cpc', [ad.ad_id, tick, i], median, NOISE.cpcSigma)))
       : 0;
     clicks.push({
       // E3/G17: a `click_id` distinct from the `event_id`, derived so a conversion can reference it
