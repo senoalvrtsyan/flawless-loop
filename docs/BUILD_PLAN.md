@@ -582,6 +582,19 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   catch it**, because the rollup's counts are correct. `apply()` raises it via `MAX(...)` on every
   path today; every future path must too.
 
+- **The emitter's tick index must be an ABSOLUTE unix second, never a counter since boot** (found
+  at B11). Derived ids are what let the simulator hold no durable state (`SIMULATOR.md` §14,
+  `DESIGN.md` §3.3), but the property only holds if the **whole body** is derivable: a per-process
+  counter re-derives the same `event_id` after a restart with a **different `ts`**, and a matching
+  id carrying a differing body is `duplicate_conflicting`, not `duplicate_identical`. §5.1 step 4
+  surfaces that as a **platform correction** — so the emitter would manufacture a misbehaviour on
+  the one channel we keep precisely because it is rare, and it would look like the feature working.
+  Measured with the absolute form across three restarts: 39 `duplicate_identical`, **0
+  conflicting**. Same family, same chunk: **a failed ingest POST is held and coalesced into the
+  next tick, never swallowed** (DESIGN §11 backpressure point 1) — a batch dropped on the floor is
+  indistinguishable from the 0.2% emitter-side loss §13 injects on purpose, which is the one
+  failure the app has no way to see (§6).
+
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.
 - **If a chunk reveals the design is wrong, stop coding and reopen the design doc.** Do not patch

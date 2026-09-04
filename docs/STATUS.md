@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1 all but closed · 11 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stages 0 and 1 CLOSED · 12 / 64 chunks**
 
 ---
 
@@ -13,21 +13,23 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 document is provisional.
 
 **Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stage 0 (B01–B03) is
-closed** — the store. **Stage 1 (B04–B11) is seven chunks of eight**: B04–B10b are in, and
-**the walking skeleton is complete except for its event source**. End to end, today:
+closed** — the store. **Stage 1 (B04–B11) is closed as of B11** — **the walking skeleton runs end
+to end with no `curl` in it.** Today, from `npm run dev` and nothing else:
 
-`POST /api/ingest` stamps, validates, dedupes, persists and rolls up an event in one transaction ·
-`GET /api/snapshot` returns that bucket's row for a minute-aligned window plus a cursor, in one
-read transaction · `GET /api/stream` pushes the **current absolute row** of every touched bucket on
-a 250 ms tick, and replays from a cursor on connect · a React page on **:5173** renders one
-server-computed number that **moves without a refresh**, survives a refresh, and survives a restart
-of both processes.
+a **separate simulator process** (D32) emits impressions for `a_12` on a 1 s tick at 1× wall clock,
+ids and bodies **derived** from a keyed RNG · `POST /api/ingest` stamps, validates, dedupes,
+persists and rolls up each event in one transaction · `GET /api/snapshot` returns a bucket row for
+a minute-aligned window plus a cursor, in one read transaction · `GET /api/stream` pushes the
+**current absolute row** of every touched bucket on a 250 ms tick, and replays from a cursor on
+connect · a React page on **:5173** renders one server-computed number that **climbs on its own
+without a refresh**, survives a refresh, and survives a restart of all three processes.
 
-**Only B11 remains in stage 1**: replace `curl` with the simulator process. Eleven commits, one per
-chunk, each approved before it landed.
+Twelve commits, one per chunk, each approved before it landed. **Stage 2 (B12–B24) is next**: the
+full write path — fold, generations, all four signal kinds, attribution, orphans, restatement —
+verified by `curl` and `sqlite3` only, ending with the P14 agreement sweep.
 
-**No decision blocks anything from here to B35.** For the first time since Phase 0 the path is
-clear. D44/D45 are *deferred* (**F4**) and come back at the stage 3 → 4 seam; see "What is open".
+**No decision blocks anything from B12 to B35.** D44/D45 are *deferred* (**F4**) and come back at
+the stage 3 → 4 seam; see "What is open", which also carries the two unratified B11 assumptions.
 
 **One caveat on `DESIGN.md`.** It was approved at the Phase 2 close and has since been **corrected
 in one place and extended in two** by Phase 3 — read it *with* the "What Phase 3 changed in
@@ -54,7 +56,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`migrations/002_projections.sql`** | B03. `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios`. |
 | **`src/server/http.ts`** | B04/B09. `createRouter()` (method+pathname match, 404, handler error → 500), `sendJson()`, `readBody()`, `openSse()` — plus **`comment()`** (B09: a keepalive that dispatches no event and does not move `Last-Event-ID`). D42: no framework. |
 | **`src/server/index.ts`** | B04/B05. One `DatabaseSync` for the process; refuses to boot on an unmigrated store; `GET /api/health` (log position), `POST /api/ingest`; clean close on SIGINT/SIGTERM. Port **8787**, `PORT` overrides. |
-| **`scripts/dev.mjs`** | B04/B08. **Three** OS processes: server, simulator (D32), and Vite on :5173. A crash in any tears the rest down; a **clean** exit does not — which is what lets the empty B11 simulator placeholder return immediately, and B11 must not change that. |
+| **`scripts/dev.mjs`** | B04/B08. **Three** OS processes: server, simulator (D32), and Vite on :5173. A crash in any tears the rest down; a **clean** exit does not. **Unchanged by B11** — the simulator now runs forever instead of returning immediately, so that tolerance is no longer exercised, but it is what keeps `npm run dev` alive if the emitter is ever stopped alone. |
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
 | **`src/server/ingest.ts`** | B05/B09. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
 | **`src/server/stream.ts`** | B09/B10a. **273 lines — B44 splits it** (§14/B44 row). `createStream(db)` — the process-wide dirty set (coalesced by `Map`), the **250 ms** flush tick, `subscribe`/`markDirty`/`shutdown`/`size`. **One frame per tick** carrying every touched bucket as an absolute row; `id:` = high-water `ingest_seq`. Plus B10a: `readCursor()` = `max(?cursor, Last-Event-ID)` validated as `/^\d+$/` on the RAW string, the store replay (`bucketsSinceReader`, `LIMIT 2001`), and the three `resnapshot` conditions. **Subscribes before replaying** — duplicates are free, gaps are not. |
@@ -64,14 +66,16 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/web/store.ts`** | B10b. The render cache. `createStore` / `applyRows` / `inWindow` / `latestBucket` / `bucketKey`. **The merge is an ASSIGNMENT keyed by `(ad_id, minute_start)`, never an addition** — absolute rows (D30) — and **out-of-window rows are dropped**, because the replay is unwindowed while the snapshot is windowed. |
 | **`src/web/stream.ts`** | B10b. `subscribe(cursor, handlers)` → `EventSource('/api/stream?cursor=N')`. **`?cursor=` is mandatory (D47)**: `EventSource` cannot set a header, so without it every refresh drops the snapshot-to-subscribe gap. |
 | **`src/server/apply.ts`** | B06. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert. Impressions only; B16/B18 widen it. |
-| **`src/sim/index.ts`** | B01 placeholder, still empty — B11 fills it. Exits cleanly, which the dev runner tolerates by design. |
+| **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
+| **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. |
 
 ## How to run what exists
 
 ```
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
-npm run dev           # THREE processes: server :8787, Vite client :5173, sim (empty until B11)
+npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
+npm run sim           # the simulator alone, against an already-running server
 npm run typecheck     # tsc --noEmit, must be clean
 npm test              # node --test — no test files yet (D43), exits 0
 
@@ -88,7 +92,19 @@ curl -s "localhost:8787/api/snapshot?from=$F&to=$TO"    # buckets + as_of_ingest
 curl -sN "localhost:8787/api/stream?cursor=0"           # ready frame, then absolute rows per tick
 curl -sN -H 'Last-Event-ID: 999999' localhost:8787/api/stream    # resnapshot cursor_ahead_of_log
 sqlite3 data/loop.sqlite "SELECT ad_id,minute_start,impressions,max_ingest_seq FROM rollup_minute ORDER BY max_ingest_seq;"
+sqlite3 data/loop.sqlite "SELECT disposition, COUNT(*) FROM signal_deliveries GROUP BY 1;"
+#   -> restart the sim within 60s: duplicate_identical rises, impressions do NOT
 ```
+
+**The simulator's knobs** (B11, all env vars, all with defaults): `SIM_SEED` (`'flawless-loop'`),
+`SIM_INGEST_URL` (defaults to `http://localhost:${PORT ?? 8787}/api/ingest`, so moving `PORT` moves
+both processes). It emits **`a_12` only**, impressions only, at a **constant 0.2315/s**
+(20,000/day, `SIMULATOR.md` §2.3) — ~14 a minute. **On boot it re-emits the last 60 s**, which is
+what makes the restart check above work and why a fresh store is never empty.
+
+**A pause does not stop emission yet.** `GET /api/sim/world` is **B29**; until then the emitter has
+no way to learn an ad's status and emits regardless. That is correct for a build with no `ads`
+projection, and it is the one part of HR3 that stage 1 does not yet demonstrate.
 
 **In dev, `StrictMode` runs every effect twice**, so ONE browser tab produces two
 `GET /api/snapshot` calls and `stream_subscribers: 2`. Harmless — absolute rows, identical frames —
@@ -109,7 +125,7 @@ empty. `node:sqlite` prints an `ExperimentalWarning` on every run — that is **
 
 ## The build plan in one paragraph
 
-Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B09 done) is the walking skeleton and the whole
+Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, done) is the walking skeleton and the whole
 point of the ordering**: one simulated event, persisted, aggregated, transported over SSE, on screen,
 surviving a refresh *and* a restart of both processes — impressions only, one hard-coded ad, before
 any breadth. Stage 2 (B12–B24) is the full write path — fold, generations, all four signal kinds,
@@ -165,7 +181,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B11 to B35.**
+**Nothing blocks any chunk from B12 to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -182,15 +198,23 @@ obligations come with that, both of which bite silently if dropped, and both are
    installed, nothing hand-rolled that pre-empts the choice. A chunk needing styling before B36 uses
    unstyled HTML and says so.
 
+**Two unratified assumptions from B11**, both labelled in `src/sim/index.ts`, both blocking nothing
+now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by drift:
+
+| What | Current value | Needs sign-off before |
+|---|---|---|
+| The world **seed** — §14 fixes the *formula*, no document fixes a **value**, and it is the first term of `(seed + decision log + scenario log) → world` | `SIM_SEED ?? 'flawless-loop'`, a code constant | **B34**, where the seed path makes it load-bearing for reproducibility. The live alternative is a row in the store, so a forked run is recorded rather than remembered |
+| The emitter's **boot catch-up window** — forced to exist by B11's own restart property and §16's *"it re-reads and resumes"*, but its **length** is written nowhere | `CATCHUP_S = 60`, one `rollup_minute` bucket (D28) | **B34**, where §15.3(b)'s `T0` seam makes the start `max(now − CATCHUP_S, T0)`, and **B29**, where `GET /api/sim/world` could carry a server-derived resume position and remove the duplicates entirely |
+
 ## Build progress
 
 | | |
 |---|---|
-| **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
-| **Last completed chunk** | **B10b** — the client subscribes, merges absolute rows, reconnects. Commit `9b15738`. |
-| **Next chunk** | **B10b** — the client subscribes: `EventSource` with **`?cursor=<as_of_ingest_seq>`** (D47 — it cannot set a header), merge absolute rows by `(ad_id, minute_start)`, **drop out-of-window rows** (the replay is unwindowed, the snapshot is windowed), handle `resnapshot` by returning to step 1. Files `src/web/stream.ts`, `src/web/store.ts`. |
+| **Current stage** | **Stage 2 — the full write path (B12–B24)**, not started. Stage 1 closed at B11. |
+| **Last completed chunk** | **B11** — the simulator as a separate process: keyed RNG (`splitmix64`, named streams), `a_12` at a constant 20,000/day, 1 s tick, batched POST, held-and-retried on failure. Commit `b63a16f`. |
+| **Next chunk** | **B12** — `DecisionBody` types and `fold()`: one pure function, exhaustive over the six actions, including the unreachable `archived` branch written to explain itself. Files `src/shared/decisions.ts`, `src/server/fold.ts`. **The first chunk that owes automated tests (D43), and it has three named targets, not one** — see "What is owed". |
 | **In flight** | nothing |
-| **Chunks ticked** | **11 / 64** (B01–B09, B10a, B10b) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **12 / 64** (B01–B09, B10a, B10b, B11) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -204,8 +228,8 @@ verification on every chunk — expect that and make the steps reproducible.
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** The last two were found during Phase 5,
-against the real store, and are not in any design document.
+plan. **Each produces wrong or slow output with no error.** Twelve now — the Phase 5 ones were
+found against the real store and are in no design document.
 
 - **Nothing writes a projection except `apply()`** (D7). `ads`, `config_generations`,
   `conversion_attribution`, `rollup_minute`. A chunk that writes one directly breaks the single
@@ -240,6 +264,15 @@ against the real store, and are not in any design document.
   `Number.isInteger` inspects the output and passes `0x3`, `+2`, `2.0`, `' '`. And a **present-but-
   empty** cursor read as *absent* → go live with no replay, which is the exact gap B10a exists to
   close. `/^\d+$/` on the raw string; absent is the only path to "go live".
+- **The emitter's tick index must be an ABSOLUTE unix second, never a counter since boot** (B11).
+  Derived ids are what let the simulator hold no durable state (§14, DESIGN §3.3) — but the **body**
+  has to be derivable too. A per-process counter re-derives the same `event_id` on restart with a
+  **different `ts`**, and a matching id with a differing body is `duplicate_conflicting`, which
+  §5.1 step 4 surfaces as a **platform correction** — a fabricated misbehaviour on the one channel
+  we keep precisely because it is rare. Measured with the absolute form: 14 `duplicate_identical`,
+  **0 conflicting**. Same family: **a failed ingest POST must be held and retried, never
+  swallowed** — a dropped batch is indistinguishable from the 0.2% emitter-side loss §13 injects on
+  purpose, which is the one failure the app cannot see (DESIGN §6).
 - **B24's agreement sweep must be a single whole-log pass**, not `replay()` called per bucket. The
   obvious implementation is O(buckets × N): 4 seconds becomes hours.
 - **Settlement is evaluated at the arriving event's `received_at`, never at wall-clock `now`**
@@ -318,6 +351,14 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   a wrong answer is invisible"*): `isCanonicalIso` (B05), **`readCursor` (B10a — `Number('1e3')` is
   1000, and a present-but-empty cursor read as absent; both were silent)**, and whatever B12 itself
   needs for the fold. `readCursor` is exported for this reason.
+- **B11's two assumptions owe a decision** — the seed's home and the catch-up window's length. Both
+  are in "What is open" with the chunk each must be answered before (**B34**, **B29**). They are
+  labelled in `src/sim/index.ts` so the code and this file cannot drift apart on them.
+- **`src/sim/rng.ts` is deliberately NOT in D43's test surface**, and the reason is on the record so
+  a later chunk does not add it by reflex: its wrongness is **not** invisible. A biased `draw()`
+  shows up as a rate that misses `SIMULATOR.md` §21's measured tables, which is what **B35's**
+  calibration check reads, and it was measured directly at B11 (1M keys). If a chunk wants a test
+  here anyway, it owes the D43 argument.
 - **B44 also owes the `stream.ts` split** — 273 lines holding two concerns (the flush loop, and
   resume/cursor parsing). Agreed with Seno to land it with B44's caps, not as a drive-by.
 - **B34 owes a flush guard, measured by Seno at B09**: the **seeder must not call
@@ -365,6 +406,12 @@ reproducible with the commands in "How to run what exists".
 | **B10a** — Seno's independent re-run: `?cursor=2` → seqs 3,4,5 · `max()` both ways · the 2000/2001 boundary (638,952 B then `too_many_rows`) · `cursor_ahead_of_log` · duplicated-header and `Infinity` rejections · resnapshot-then-live-frame · D7 · typecheck | **passes** |
 | **B10b** — the SHIPPED client modules driven headlessly (10 assertions): double-apply is idempotent · merge assigns, never accumulates · a restatement is the same key reassigned · **out-of-window rows dropped** · half-open window · `ready` frame · a live POST moves the number with no refetch · the target bucket climbs by exactly the 2 events posted · no spurious resnapshot · `cursor_ahead_of_log` drives a client resnapshot | **passes** |
 | **B10b** — **D47's gap, both directions**: an event ingested with no subscriber attached is **replayed** on subscribe with `?cursor=`, and is **not delivered at all** without it | **passes** |
+| **B11** — boot catch-up emits **14 events for 60 s** against 13.9 expected; rollup impressions == raw `COUNT(*)` on **every** bucket (14/14, 20/20, 12/12); `COUNT(DISTINCT event_id)` in deliveries == `signals` rows (46 == 46) after 39 duplicate deliveries | **passes** |
+| **B11** — **restart within 60 s**: 18 re-derived events → **14 `duplicate_identical`, 0 `duplicate_conflicting`**, and the 4 seconds the killed process never reached accepted. Impressions did **not** move on the duplicates | **passes** |
+| **B11** — live path with no `curl` anywhere: SSE absolute rows **10 → 11 → 12**, one frame per sim tick; the duplicate-heavy boot batch produced no bucket movement | **passes** |
+| **B11** — **server down 6 s, then up**: 21 → 23 events held and coalesced, **all sent on recovery**, `ingest reachable again` logged once, the sim process never exited (a crash here would take `npm run dev` down with it) | **passes** |
+| **B11** — the keyed RNG over **1M keys**: mean **0.499982**, all ten deciles within 0.6%, `P(u < 0.231481)` = **0.231249**; `derivedId` gave **400,000/400,000 distinct** ids over `(tick, i)`. This is why the 20-impression minute above is variance (1.87σ on a Bernoulli), not a rate bug | **measured** |
+| **B11** — D32/D7: `grep` finds no `node:sqlite`, `openDb`, `INSERT` or `UPDATE` anywhere in `src/sim` — the emitter reaches the store only over HTTP | **passes** |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that
@@ -372,33 +419,39 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B11, build it, report, wait.** Nothing needs deciding first.
+**Announce B12, build it, report, wait.** Nothing needs deciding first.
 
-**B11 closes stage 1** — the simulator as a separate OS process, replacing `curl` as the event
-source. Read **`SIMULATOR.md` §14 and §15.1** and **`DESIGN.md` §11** before writing it. Scope from
-the plan row, and no wider: 1 s tick, keyed RNG (`splitmix64`, named streams), **a constant
-impression rate for one hard-coded ad**, batched POST. Files `src/sim/index.ts`, `src/sim/rng.ts`.
+**B12 opens stage 2** — the full write path, verified by `curl` and `sqlite3` only, no UI beyond
+stage 1's single number until B36. Read **`DESIGN.md` §7 and §2.3** before writing it. Scope from
+the plan row and no wider: `DecisionBody` types and **`fold()` — one pure function, exhaustive over
+the six actions**, including the **unreachable `archived` branch written to explain itself** (F1).
+Files `src/shared/decisions.ts`, `src/server/fold.ts`.
 
 Three things that are already true and constrain it:
 
-- **`src/sim/index.ts` is an empty B01 placeholder that exits cleanly**, and `scripts/dev.mjs`
-  tolerates a clean child exit by design. Filling it in must not change the runner.
-- **Event ids are DERIVED, not remembered** — that is the plan row's own verification: kill and
-  restart the simulator and the re-emitted events must dedupe as `duplicate_identical`. This is
-  what makes the emitter hold no durable state (§3.3).
-- **`ts` must be in the past or at `now`.** I10 clamps a future `ts` to `received_at`, so a
-  simulator running its clock ahead would collapse every event into the current minute.
+- **B12 is the first chunk that owes automated tests, and it owes three targets, not one** (D43,
+  and the criterion is *"tests only where a wrong answer is invisible"*): `isCanonicalIso` (owed
+  from B05 — loosened, the event is accepted, `ts_effective` silently takes the later instant, and
+  **B24's sweep re-derives from that same column and agrees with itself**), `readCursor` (owed from
+  B10a, exported for this reason), and the fold itself. `npm test` is `node --test` with no test
+  files yet, so this chunk creates that surface.
+- **`fold()` must stay pure and must not write anything.** D7: `ads` and `config_generations` are
+  projections and `apply()` is their only writer. The fold decides *what* the config becomes; B13
+  is what persists it.
+- **Widening `SUPPORTED` is not part of this chunk.** `ingest()` still accepts `impression` only;
+  click + spend land at **B16**, conversion at **B18** (the B16 split — see "Plan edits" above).
 
-Verify: `npm run dev`, then the browser number climbs at the expected rate with no refresh; kill and
-restart the simulator and watch the dispositions.
+Verify: `node --test` on a fixture sequence folding to the expected config, and the `archived`
+branch present, unreachable and commented.
 
-**After B11, stage 1 is closed and stage 2 (B12–B24) begins** — the full write path, verified by
-`curl` and `sqlite3` only. B12 is the fold, and it is the first chunk that owes automated tests
-(D43); see "What is owed" for the three targets that have accumulated.
+**Two things to know about the ground B12 stands on.** The simulator now emits continuously, so a
+store is never quiet while you work — `npm run sim`'s log is the fastest read on whether ingest is
+healthy. And **nothing yet stops emitting on a pause**: `GET /api/sim/world` is B29, so HR3's
+*"pausing `a_12` stops its events"* is demonstrated end to end only from that chunk on.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
-1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5. **In progress, 3/62.**
+1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5. **In progress, 12/64** — stages 0 and 1 closed.
 2. **Phase 6 — packaging:** README, demo script, the "life of one event" trace, the AI artifact.
    These are `BUILD_PLAN.md` stage 7 (B57–B62) rather than a separate effort.
 
