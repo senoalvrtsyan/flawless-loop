@@ -20,7 +20,8 @@ import { fold, precondition, type FoldErrorCode, type FoldState } from './fold.t
 // function declarations used only at call time, so neither module observes the other
 // half-initialised. The alternative — attribution resolved by the caller — is the one
 // the doc comment on apply() rules out.
-import { resolveAttribution, settledAt } from './attribute.ts';
+import { resolveAttribution } from './attribute.ts';
+import { settledAt } from './settlement.ts';
 // B20a: one implementation of the timestamp invariant. Re-exported because `attribute.ts`,
 // `seed-world.ts` and the tests import `floorMinute` from here — a move, not a re-plumbing.
 import { floorMinute } from '../shared/time.ts';

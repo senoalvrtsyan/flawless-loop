@@ -17,7 +17,7 @@ import { openDb } from './db.ts';
 import { migrate } from './migrate.ts';
 import { ingest } from './ingest.ts';
 import { applyDecision } from './apply.ts';
-import { settledAt } from './attribute.ts';
+import { settledAt } from './settlement.ts';
 import { ACTOR } from '../shared/decisions.ts';
 
 /** Sep 1, the day the clicks happen. `NOW` is Sep 5 — four days later, well past the 72 h horizon. */

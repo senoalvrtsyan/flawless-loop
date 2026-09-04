@@ -14,6 +14,7 @@ import { readTx } from './db.ts';
 // side rejects, and both halves now live in one file so the asymmetry is legible instead of
 // looking like two modules disagreeing.
 import { HAS_EXPLICIT_OFFSET, ceilToMinute, floorToMinute } from '../shared/time.ts';
+import { bucketState, type SettlementState } from './settlement.ts';
 import type { BucketKey } from './apply.ts';
 
 /**
@@ -39,6 +40,16 @@ export type BucketRow = {
   restated_at: string | null;
   restatement_count: number;
   max_ingest_seq: number; // the per-bucket as-of stamp (D31)
+  /**
+   * **Derived at read, never stored** (B21) — `live` / `settled` / `restated`, §5.4's vocabulary.
+   *
+   * Not a column: whether a bucket has aged past the horizon is a question about the read clock,
+   * and a stored answer would change without an event and make `/api/verify` diverge on a correct
+   * store. It rides on the row rather than being computed on the client so that the snapshot and
+   * the SSE frame cannot disagree about the same bucket, and so that D30 holds — the client
+   * renders what the server computed.
+   */
+  state: SettlementState;
 };
 
 /** The resolved window. `ads: null` means the whole portfolio (DESIGN §2.4's second access path). */
@@ -138,6 +149,22 @@ export function parseSnapshotQuery(params: URLSearchParams): ParsedQuery {
   return { ok: true, query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads } };
 }
 
+/**
+ * The stored row, before its state is derived. `BucketRow` minus the one field that is not a
+ * column — named so that a reader can see the SELECT below returns exactly the columns and nothing
+ * more, and so that forgetting `withState()` is a type error rather than a missing badge.
+ */
+type StoredBucket = Omit<BucketRow, 'state'>;
+
+/**
+ * Stamp the settlement state onto rows as they leave the store — **the single place it happens**,
+ * so the snapshot, the SSE flush tick and the resume replay cannot label the same bucket three
+ * ways. `at` is the read moment for all three.
+ */
+function withState(rows: StoredBucket[], at: string): BucketRow[] {
+  return rows.map((row) => ({ ...row, state: bucketState(row, at) }));
+}
+
 const BUCKET_COLUMNS = `
   ad_id, minute_start, impressions, clicks, click_cost_cents, spend_cents,
   conversions, value_cents, provisional_conversions, provisional_value_cents,
@@ -174,7 +201,12 @@ export function bucketReader(db: DatabaseSync): (key: BucketKey) => BucketRow | 
   const stmt = db.prepare(
     `SELECT ${BUCKET_COLUMNS} FROM rollup_minute WHERE ad_id = ? AND minute_start = ?`,
   );
-  return (key) => stmt.get(key.ad_id, key.minute_start) as unknown as BucketRow | undefined;
+  return (key) => {
+    const row = stmt.get(key.ad_id, key.minute_start) as unknown as StoredBucket | undefined;
+    // The read clock is taken HERE rather than passed in, so the flush tick and the resume cannot
+    // ship a row without a state — `stream.ts` needs no knowledge of settlement to carry it.
+    return row === undefined ? undefined : withState([row], new Date().toISOString())[0];
+  };
 }
 
 /**
@@ -198,7 +230,8 @@ export function bucketsSinceReader(db: DatabaseSync): (cursor: number, limit: nu
   const stmt = db.prepare(
     `SELECT ${BUCKET_COLUMNS} FROM rollup_minute WHERE max_ingest_seq > ? LIMIT ?`,
   );
-  return (cursor, limit) => stmt.all(cursor, limit) as unknown as BucketRow[];
+  return (cursor, limit) =>
+    withState(stmt.all(cursor, limit) as unknown as StoredBucket[], new Date().toISOString());
 }
 
 export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
@@ -218,8 +251,11 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
       query.ads === null
         ? allAds.all(query.from, query.to)
         : query.ads.flatMap((ad) => perAd.all(ad, query.from, query.to))
-    ) as unknown as BucketRow[];
+    ) as unknown as StoredBucket[];
 
-    return { query, buckets, as_of_ingest_seq: seq.seq };
+    // One instant for the whole snapshot: two buckets in one response must not be judged against
+    // two different clocks, or a window straddling the horizon can come back internally
+    // inconsistent — the earlier row `settled` and a later one `live`.
+    return { query, buckets: withState(buckets, new Date().toISOString()), as_of_ingest_seq: seq.seq };
   });
 }

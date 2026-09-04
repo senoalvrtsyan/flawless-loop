@@ -17,7 +17,8 @@ import { openDb } from './db.ts';
 import { migrate } from './migrate.ts';
 import { ingest } from './ingest.ts';
 import { applyDecision } from './apply.ts';
-import { HORIZON_MS, attributionStateAt, orphanTally } from './attribute.ts';
+import { attributionStateAt, orphanTally } from './attribute.ts';
+import { HORIZON_MS } from '../shared/config.ts';
 import { ACTOR } from '../shared/decisions.ts';
 
 const T = (m: number): string => new Date(Date.UTC(2026, 8, 4, 12, m)).toISOString();

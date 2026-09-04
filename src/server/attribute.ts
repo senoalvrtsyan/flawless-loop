@@ -13,7 +13,12 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 import { floorMinute } from '../shared/time.ts';
-import { MINUTE_MS } from '../shared/time.ts';
+// B21: the horizon and the settlement test live in one place now — `settledAt()` is the read
+// side's and `apply()`'s single answer to "had this bucket settled", and expiry below is the same
+// question asked of a parked conversion. Two copies would be a conversion that reads expired in
+// one panel and provisional in another.
+import { HORIZON_MS } from '../shared/config.ts';
+import { settledAt } from './settlement.ts';
 
 /**
  * `conversion_attribution.state`.
@@ -129,32 +134,6 @@ export function resolveAttribution(
 // ---------------------------------------------------------------------------------------------
 // B19 — expiry, derived. D54, D13, DESIGN.md §5.2, §5.4.
 // ---------------------------------------------------------------------------------------------
-
-/**
- * The lateness horizon — 72 h (**D13**), displayed and adjustable.
- *
- * **B21 moves this into `src/shared/config.ts`** with the `America/New_York` account timezone, so
- * that the horizon and the day boundary sit in one place. It lives here for two chunks only
- * because B19 needs the number before B21 exists, and a literal `72 * 3600e3` inlined at a call
- * site is how two of them come to disagree.
- */
-export const HORIZON_MS = 72 * 60 * 60 * 1000;
-
-/**
- * Was bucket `B` already settled when an event arriving at `at` touched it? **D38, §5.4.**
- *
- * `at` is the arriving event's `received_at`, NEVER wall-clock `now`. The question a restatement
- * flag answers is *"was this bucket settled when this event arrived"*; for a live event the two
- * are the same, and they diverge exactly once and expensively — during the seed, where `now` is
- * boot time and the wall-clock form would stamp `restated_at` on every backfilled event landing in
- * a bucket older than 72 h (SIMULATOR §15.3(c)).
- *
- * A bucket closes at `minute_start + 60 s`; the horizon runs from there. Strictly greater than, so
- * a bucket is live for the full horizon and settles the instant after.
- */
-export function settledAt(minute_start: string, at: string, horizon_ms: number = HORIZON_MS): boolean {
-  return Date.parse(at) - (Date.parse(minute_start) + MINUTE_MS) > horizon_ms;
-}
 
 /**
  * What we say about a conversion AT A GIVEN INSTANT — §5.2's third state, computed.
