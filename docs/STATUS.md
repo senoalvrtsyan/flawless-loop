@@ -12,86 +12,48 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 **Phases 0–4 are closed.** Design is complete and the build is ordered. Nothing in any design
 document is provisional.
 
-**Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stage 0 (B01–B03) is
-closed** — the store. **Stage 1 (B04–B11) is closed as of B11** — **the walking skeleton runs end
-to end with no `curl` in it.** Today, from `npm run dev` and nothing else:
+**Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stages 0, 1 and 2 are
+CLOSED** — the store (B01–B03), the walking skeleton (B04–B11), and the whole server-side model
+(B12–B24). What that means concretely, in one paragraph rather than gate by gate:
 
-a **separate simulator process** (D32) emits impressions for `a_12` on a 1 s tick at 1× wall clock,
-ids and bodies **derived** from a keyed RNG · `POST /api/ingest` stamps, validates, dedupes,
-persists and rolls up each event in one transaction · `GET /api/snapshot` returns a bucket row for
-a minute-aligned window plus a cursor, in one read transaction · `GET /api/stream` pushes the
-**current absolute row** of every touched bucket on a 250 ms tick, and replays from a cursor on
-connect · a React page on **:5173** renders one server-computed number that **climbs on its own
-without a refresh**, survives a refresh, and survives a restart of all three processes.
+`npm run dev` starts three processes. A **separate simulator process** (D32) emits over
+`POST /api/ingest`, which stamps, validates, dedupes, persists and rolls up each event in one
+transaction. Four signal kinds are real; six levers are real; **config is a fold over the decision
+log** (D7) with `config_generations` carrying a half-open `[valid_from, valid_to)` chain;
+click-time attribution credits a conversion to **its click's minute** (D27-B) and a late click
+**promotes** a provisional orphan and decrements where it was; settlement marks a bucket
+`restated_at` at the arriving event's `received_at` (not wall clock); `GET /api/snapshot` and
+`GET /api/stream` serve absolute per-minute rows with an idempotent cursor (D30/D47);
+`GET /api/verify` rebuilds every projection from the logs into `TEMP` shadows and diffs them (D55),
+and `npm run agree` re-derives `rollup_minute` from raw in one ordered pass. A React page on
+**:5173** renders a server-computed number that climbs on its own, survives a refresh, and survives
+a restart of all three processes. **76 tests.**
 
-**Stage 2 (B12–B24) is running.** Its first gate, **G1 = B12 + B13 + B14, is closed** — the first
-group approved as a group under D48. **Config is now real**: a lever pulled over HTTP folds the
-decision log, opens a config generation and writes the `ads` projection in one transaction, and the
-whole `ads` row is a function of the log. On top of the walking skeleton, today:
+**STAGE 3 IS RUNNING, and B25–B31b are closed.** `SIMULATOR.md`'s model is now the emitter's model:
+§3's λ with §4's per-channel shape of the day and day-of-week, §12's two log-AR(1) demand factors
+with `E[m] = 1`, drawn as `NegBinomial(λ, α = 8)`; §7's fatigue and §8's novelty entering `p_ctr`
+and never λ (**D56**); §10's clicks at a rate drawn once a minute so `κ = 200` is real (**D57**),
+their CPC blended across §5's pricing mix and coupled to `m_channel^0.6`; §11's conversion-lag
+schedule keyed by `click_id`; and I1's 60 s CPM `spend` delta.
 
-`POST /api/decisions` takes one of six actions, refuses a stale `from_cents`/`from_id` (I13), refuses
-a lever the ad's status does not admit, and returns the new state from *inside* the write
-transaction · `GET /api/decisions` returns the log in fold order · `config_generations` carries a
-half-open `[valid_from, valid_to)` chain with exactly one open generation per ad and no gap between
-consecutive ones · `npm test` exists and runs **31 tests** (D43's three owed targets, plus B13's
-eight against a real store).
+**HR3 is satisfied as of B31b.** The emitter polls `GET /api/sim/world` at 1 Hz and emits for every
+ad the fold says is `live`, with that ad's current config, φ recomputed from the signal log and ν
+aged from the pair's first exposure. Verified live: pausing `a_12` stops its events within one tick
+while eleven ads keep emitting, and resume brings it back in ~6 s. The simulator holds no durable
+state of its own (D40-A) — without a successful poll it emits nothing at all.
 
-**G2 = B15 + B16 + B17 is closed too.** **The world exists and three of the four signal kinds are
-real.** `npm run seed` builds SIMULATOR §2's world — 16 components, 4 audiences, and **12 ads that
-exist only as a fold over 24 backdated decisions** — and `ingest()` now accepts impressions, clicks
-and spend, each landing additively in its own `rollup_minute` column. Attribution resolves a
-conversion to its click, its click's minute (D27-B) and the generation live at that click (D14),
-though nothing calls it yet.
+**What stage 3 has left: B32 (budget pacing), B33 (injected misbehaviours), B34 (the 7-day backfill)
+and B35 (the `T0` seam).** B34 and B35 are single-gated and carry the owed list below. Until B34
+there is no seeded history, so φ ≈ 1.0 and ν sits near its peak — correct for a store where nothing
+has been burned yet, and the reason §7.2's table is not yet the live check.
 
-**G3 = B18 + B19 is closed.** **The fourth signal kind is real, and the late conversion lands where
-the design says it lands.** `ingest()` now accepts all four of the brief's kinds. A conversion is
-credited at **its click's minute, on its click's ad** (D27-B, I8/G30) — verified end to end against
-a seeded store: a click at 07:18 and a conversion at 09:47 produce **one** rollup row, at 07:18,
-with `max_ingest_seq` raised to the conversion's seq. An unattributable conversion is credited
-**provisionally at its own minute**, in the `provisional_*` columns, never in the settled ones
-(D16). **D54:** `orphan_expired` is derived at read by `attributionStateAt()` and never stored —
-`orphanTally()` gives the same store two different answers three days apart with no write between
-them. `npm test` runs **50 tests**.
+**How stage 3 is verified, and it has not changed:** `SIMULATOR.md` is the spec and is complete to
+the parameter, so each chunk is a comparison against a table already in that document rather than a
+judgement. **Read the table before writing the chunk; do not invent a constant** — a missing one is
+a gap to raise (three became D56, D57 and `BRIEF_GAPS.md` §H). Every chunk adds `--dry-run` output
+rather than a screen, and emission stays live throughout.
 
-**G4 = B20 alone is closed — restatement works, which is the flagship path.** A withheld click
-released four days late **promotes** its parked conversion: the provisional bucket is decremented
-and **stamped `restated_at` with a `restatement_count` of 1**, the click's bucket takes the settled
-credit, both carry the click's `ingest_seq`, and the attribution row is rewritten in full to the
-click's ad and the generation live at the click. `writeRollup()` is now the single place
-`rollup_minute` is written, and `apply()` **coalesces deltas by bucket** so a bucket is written once
-per event — §5.4 bumps the counter per *bucket*, not per write. Settlement is clocked at the
-delivery's `received_at` (D38), so the seeded week opens with no spurious restatements. `npm test`
-runs **58 tests**.
-
-**G5 = B20a + B21 + B22 + B23 is closed — the store can now be checked against its own logs.**
-The timestamp invariant lives in **one** file (`src/shared/time.ts`), and B20a changed no behaviour
-— the 58 tests that predated it pass unchanged. Every read row carries a settlement state,
-`live` / `settled` / `restated`, derived at read by one function so the snapshot, the flush tick and
-the resume cannot disagree. **`GET /api/verify`** rebuilds all four projections from the logs
-through the real `apply()` into `TEMP` shadows (**D55**) and diffs them: the seeded world plus a
-handful of events verifies clean in **5 ms**, and a hand-`UPDATE`d bucket comes back **409** naming
-the ad, the minute, the column and both values. **`replay()`** recomputes a bucket range from raw
-`signals` alone, over a log prefix, and agrees with the maintained rollup. `npm test` runs
-**76 tests**.
-
-**STAGE 2 IS CLOSED. G6 = B24 closed it, and with it the traceability claim is now checkable two
-independent ways.** `npm run agree` recomputes every bucket from raw `signals` **without** `apply()`
-and diffs the maintained rollups — measured at **0.88–1.71 s** over 357,540 events and 56,160
-buckets, 0 mismatches, and it names its own limits on every run. `/api/verify` (3.6 s on the same
-store) replays through the real `apply()` and diffs all four projections. **Neither subsumes the
-other**: the sweep catches the code being wrong, verify catches the store having drifted from the
-code. Two of the sweep's blind spots are recorded in §14 rather than papered over.
-
-**The whole server-side model is now real.** Four signal kinds, six levers, config as a fold, click-
-time attribution, orphans, restatement, settlement, and both checks — all verified by `curl` and
-`sqlite3`, with no UI beyond stage 1's single climbing number.
-
-**Stage 3 (B25–B35) is next: the simulator.** `SIMULATOR.md` is the spec and is complete to the
-parameter, so each chunk is a comparison against a table already in that document rather than a
-judgement. Every chunk adds `--dry-run` output rather than a screen, and emission stays live
-throughout — the stage-1 number keeps moving.
-
-**No decision blocks anything from B18 to B35.** D44/D45 are *deferred* (**F4**) and come back at
+**No decision blocks anything from B32 to B35.** D44/D45 are *deferred* (**F4**) and come back at
 the stage 3 → 4 seam; see "What is open", which also carries the two unratified B11 assumptions.
 
 **One caveat on `DESIGN.md`.** It was approved at the Phase 2 close and has since been **corrected
