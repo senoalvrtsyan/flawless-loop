@@ -224,17 +224,15 @@ The docs are the memory; the conversation is scratch space.
   anything in flight) — then tell the human it is safe to `/clear`.
 - `docs/STATUS.md` must be sufficient, together with this file, to resume cold.
   Write it for someone with no memory of the conversation. That someone is you.
-- **At every phase close, refresh `docs/CHEATSHEET.md` alongside `STATUS.md`.**
-  One page, hard limit — it must fit on one screen. Exactly three tables and no
-  prose: (1) every ratified decision — what we chose, a one-sentence reason,
-  what it forecloses; (2) the root-cause gaps, one line each; (3) the ordered
-  cut line — item and reason only. Expand every reference inline (a plan item,
-  a finding id, a level) so it is readable without opening another file.
-- **The two files do not overlap. Do not restate anything from `STATUS.md` in
-  the cheatsheet.** `CHEATSHEET.md` is what Seno revises from — the decisions and
-  their defences, at a glance. `STATUS.md` is what you resume from — where we
-  are, what is open, what is owed, what is next. Anything about in-flight work,
-  gates or next actions belongs in `STATUS.md` only.
+- **`docs/CHEATSHEET.md` is DROPPED** (Seno, 2026-09-04, at the B36 gate). It is
+  no longer written, refreshed or owed at any gate, and the file is deleted —
+  recoverable with `git show e989336:docs/CHEATSHEET.md` if it is ever wanted.
+  It had fallen fifteen decisions behind, and a stale revise-from sheet in a repo
+  that is going to be read is worse than none: `DECISIONS.md`'s index table is
+  already the one-line-each view of every ratified decision, and it cannot go
+  stale because it is written in the same pass that ratifies. Nothing else
+  changes — `STATUS.md` is still refreshed every 3–4 chunks and at every phase
+  close, and it remains the file that must be sufficient to resume cold.
 - Never rely on something being "earlier in the conversation".
 - Keep documents append-friendly and skimmable: short sections, stable
   headings, no walls of prose.

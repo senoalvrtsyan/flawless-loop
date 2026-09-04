@@ -100,7 +100,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. **And §H (new, B25/B26): contradictions in our OWN design docs** — H1 the recovery half-life, H2 `spend`'s missing fee parameter. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
 | `docs/DECISIONS.md` | Ratified only — **D1–D56, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
-| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale: its header still says "11 / 64 chunks", and D41–D43, F4, U8–U9 and D48–D56 are all missing.** Nine decisions behind, and its one-page hard limit will bind when they are added. See "What is owed". |
+| ~~`docs/CHEATSHEET.md`~~ | **DROPPED** by Seno at the B36 gate, 2026-09-04, and deleted. Not owed at any gate. `DECISIONS.md`'s index table is the one-line-each view now, and it cannot go stale. Recover with `git show e989336:docs/CHEATSHEET.md`. |
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
@@ -330,7 +330,7 @@ screen, stage 7 (B57–B62) packaging.
 ## What is ratified
 
 Full entries with rationale, consequences and what each forecloses are in `docs/DECISIONS.md`; the
-one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind).
+one-line-each version is `DECISIONS.md`'s own index table (`CHEATSHEET.md` was dropped, 2026-09-04).
 
 - **D1–D14, T1, D26, F1, F2** — scope, model and storage.
 - **D27–D34, D20, D22** — the Phase 2 design decisions and their residues.
@@ -705,11 +705,7 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
-- **`docs/CHEATSHEET.md` is one pass behind.** It does not yet carry D41–D43, F4, U8–U9, D46, D47
-  or **D48–D50**. §9 scopes its refresh to **phase** closes, and a stage is not a phase — so this is
-  correct, not neglected. It gets refreshed at the Phase 5 close, or sooner if Seno wants to revise
-  from it. **D48–D50 are process, not design**, so they belong in table 1 only if a decision's
-  defence is wanted for them; the demo is defended from the design decisions.
+- **`docs/CHEATSHEET.md` is DROPPED and deleted** (Seno, 2026-09-04). Nothing is owed for it at any gate. `DECISIONS.md`'s index table is the revise-from view.
 - **`docs/DEMO.md` does not exist yet and is owed from the B36 group onward** (D50). Every stage-4
   and stage-5 group appends its walkthrough steps as it lands **and says so in its report** — a
   running document nobody reports on is a running document that quietly stops. B61 is then the final

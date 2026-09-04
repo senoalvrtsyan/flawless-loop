@@ -1641,7 +1641,7 @@ prose, half-life = 5 d; (c) raise it as a decision.
 
 **What we did — (b), corrected in place, argued rather than assumed.** Four places state the
 quantity — §21 (*"recovery half-life τ_rec 5 days"*), D35's ratified rationale (*"idle recovery on a
-5-day half-life"*), `CHEATSHEET.md` and `OPEN_QUESTIONS.md` — against one place that states the
+5-day half-life"*), `CHEATSHEET.md` (since dropped) and `OPEN_QUESTIONS.md` — against one place that states the
 notation. A notation slip in one formula does not outweigh the ratified quantity repeated in four,
 so this was a transcription error to fix and not an open choice: (c) was rejected on that ground.
 §7.1 now reads `F ← F · 2^(−Δt_idle / 5 days)`.

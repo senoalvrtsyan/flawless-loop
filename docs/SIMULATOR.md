@@ -306,7 +306,7 @@ undefined rather than bad.
 
 **The recovery line is written as a half-life, corrected at B26.** It previously read
 `F ← F · exp(−Δt_idle/τ)` with `τ = 5-day half-life`, which as a formula is a 5-day *time constant*
-— a half-life of 3.47 d, and a different number. §21, D35's ratified rationale, `CHEATSHEET.md` and
+— a half-life of 3.47 d, and a different number. §21 and D35's ratified rationale and
 `BRIEF_GAPS.md` all state a **5-day half-life**, so the notation was the error and `2^(−Δt/5 d)` is
 what is implemented. `BRIEF_GAPS.md` §S carries the entry.
 

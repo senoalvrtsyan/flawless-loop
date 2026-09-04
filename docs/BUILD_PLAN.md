@@ -7,8 +7,8 @@ begins on Seno's explicit instruction, and **five decisions block chunk B01** �
 
 **Reading order.** `CLAUDE.md` → `docs/STATUS.md` → this file → the one design section a chunk cites.
 Scope of record is `docs/SCOPE.md` (P1–P17). Architecture is `docs/DESIGN.md`. Mock data is
-`docs/SIMULATOR.md`. Ratified rationale is `docs/DECISIONS.md`; the one-page version is
-`docs/CHEATSHEET.md`.
+`docs/SIMULATOR.md`. Ratified rationale is `docs/DECISIONS.md`; its index table at
+the top is the one-line-each view (`CHEATSHEET.md` was dropped, 2026-09-04).
 
 ---
 
@@ -400,7 +400,7 @@ surfaces on top of it, plus D1's one read-only Workbench screen.
 | [ ] | **B59** | README part 2 — the misbehaviour table verbatim, the named limits (retractions, emitter loss, gap detection, USD-only, audience overlap, **`payload_json` is a re-serialisation, not the received bytes** — B05), and the extensions register E1–E15 / I1–I19 assembled from `BRIEF_GAPS.md` | `README.md` | Every row in D§6 present; every extension has a justification row; retractions named as **breaking**, not hidden | D§6, §12 | **HR4** |
 | [ ] | **B60** | README part 3 — the **life of one event** with real ids captured from a real run, the component-performance query run against real data with its output, and the copy-on-write defence with its honest scope note | `README.md` | Every id in the trace resolves in the running app; the SQL runs and returns the printed rows | D§9, §10.4, §8 | **HR5** |
 | [ ] | **B61** | Demo script: the **final ordered pass** over `docs/DEMO.md`, including the **refresh test and the restart test** as written steps a stranger can follow. **D50: the document is written incrementally from the B36 group onward** — every stage-4/5 group appends its steps as it lands and says so in its report — so this chunk is a tidy-up, not a write-from-nothing | `docs/DEMO.md` | Follow it cold, start to finish, on a clean clone, and time it | — | **HR1** |
-| [ ] | **B62** | AI process artifact: export sessions 04–06 to `docs/ai-sessions/`; final `STATUS.md` and `CHEATSHEET.md` refresh | `docs/ai-sessions/`, `docs/STATUS.md`, `docs/CHEATSHEET.md` | Six captures, one per phase; the cheatsheet still fits on one screen | `CLAUDE.md` §9 | — |
+| [ ] | **B62** | AI process artifact: export sessions 04–06 to `docs/ai-sessions/`; final `STATUS.md` refresh. **No cheatsheet** — `CHEATSHEET.md` was dropped 2026-09-04 | `docs/ai-sessions/`, `docs/STATUS.md` | Six captures, one per phase; `STATUS.md` alone plus `CLAUDE.md` resumes the repo cold | `CLAUDE.md` §9 | — |
 
 > ### ▶ Demo checkpoint 7 — *"shippable"*
 >
