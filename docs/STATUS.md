@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, the number is pushed · 9 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, resume works · 10 / 64 chunks**
 
 ---
 
@@ -143,7 +143,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B10a to B35.**
+**Nothing blocks any chunk from B10b to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -165,10 +165,10 @@ obligations come with that, both of which bite silently if dropped, and both are
 | | |
 |---|---|
 | **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
-| **Last completed chunk** | **B09** — SSE `GET /api/stream`, the live push (happy path). |
-| **Next chunk** | **B10a** — server-side SSE resume: read `Last-Event-ID`, replay from the store, `resnapshot` when the cursor is too old. File `src/server/stream.ts`. Spec `DESIGN.md` §3.1, §5.5. **Resume is a store query (`max_ingest_seq > cursor`), never a replay of buffered frames** — see the traps list. Verify with `curl -N -H 'Last-Event-ID: <n>'` and diff the replayed rows against `sqlite3`. |
+| **Last completed chunk** | **B10a** — server-side SSE resume, `max(?cursor, Last-Event-ID)`, `resnapshot` at 2,000 rows (D47). |
+| **Next chunk** | **B10b** — the client subscribes: `EventSource` with **`?cursor=<as_of_ingest_seq>`** (D47 — it cannot set a header), merge absolute rows by `(ad_id, minute_start)`, **drop out-of-window rows** (the replay is unwindowed, the snapshot is windowed), handle `resnapshot` by returning to step 1. Files `src/web/stream.ts`, `src/web/store.ts`. |
 | **In flight** | nothing |
-| **Chunks ticked** | **9 / 64** (B01–B09) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **10 / 64** (B01–B09, B10a) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -209,6 +209,15 @@ against the real store, and are not in any design document.
   makes that safe, *not* the snapshot: the snapshot precedes the subscribe, so it cannot cover the
   gap. Built from memory instead, the bucket it loses is a **late conversion restating an old minute
   that never moves again** — wrong on screen, forever, no error.
+- **`max_ingest_seq` is the resume contract** (B10a). A projection write that changes a bucket
+  without raising it is invisible to every resuming client — **B18's restatement touching only
+  `restated_at`** is the concrete case — and **B24's sweep will not catch it** because the counts
+  are right. Every future `apply()` path must raise it.
+- **Validate a cursor's INPUT, not the parsed result** (B10a, found by Seno). `Number('1e3')` is
+  1000, so `?cursor=1e3` replayed as `?cursor=1000` and silently skipped 1,000 buckets;
+  `Number.isInteger` inspects the output and passes `0x3`, `+2`, `2.0`, `' '`. And a **present-but-
+  empty** cursor read as *absent* → go live with no replay, which is the exact gap B10a exists to
+  close. `/^\d+$/` on the raw string; absent is the only path to "go live".
 - **B24's agreement sweep must be a single whole-log pass**, not `replay()` called per bucket. The
   obvious implementation is O(buckets × N): 4 seconds becomes hours.
 - **Settlement is evaluated at the arriving event's `received_at`, never at wall-clock `now`**
@@ -323,6 +332,9 @@ reproducible with the commands in "How to run what exists".
 | **B09** — 3 events in one batch → **one** frame, **2** rows, `a_12` coalesced to `impressions:2`; repeated POSTs gave **3 → 4 → 5** (absolute, never a repeated delta); ids monotonic; a **duplicate produced no frame**; 20 s idle gave 0 bucket frames, 2 keepalive comments, **0** `id:` lines; two subscribers, one **through Vite's proxy**, identical frames | **passes** |
 | **B09** — shutdown with a subscriber attached: port released in **14 ms**. Isolated repro of the counterfactual: with the response left open, `server.close()`'s callback had **not fired after 1000 ms** | **measured** |
 | **B09** — Seno's independent run: coalescing across batches in one tick · duplicate/rejected/mixed batches · the **old-minute restatement frame** · `ready` and keepalive carry no `id:` · subscriber accounting · D7 · shutdown **23 ms with 4 subscribers** | **passes** |
+| **B10a** — `?cursor=14` replays exactly seqs 15/16/17 (matches `sqlite3`); `max()` correct both directions; no cursor and caught-up send `ready` only; `Last-Event-ID: 500` → `cursor_ahead_of_log`; **2000 dirty buckets replay (638,934 B) and 2001 → `too_many_rows`**; resume works through Vite's proxy; shutdown 16 ms mid-replay; D7 grep clean | **passes** |
+| **B10a** — the cursor-coercion hazards Seno found, after the `/^\d+$/` fix: `1e3`, `0x3`, `+2`, `2.0`, `%20`, `''` and an empty `Last-Event-ID` all → `cursor_not_a_number`; `007` → 7, same 6 rows as `?cursor=7` | **passes** |
+| **B10a** — Seno's independent re-run: `?cursor=2` → seqs 3,4,5 · `max()` both ways · the 2000/2001 boundary (638,952 B then `too_many_rows`) · `cursor_ahead_of_log` · duplicated-header and `Infinity` rejections · resnapshot-then-live-frame · D7 · typecheck | **passes** |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that

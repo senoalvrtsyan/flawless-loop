@@ -92,10 +92,10 @@ const routes: readonly Route[] = [
   {
     method: 'GET',
     path: '/api/stream',
-    handler: (_req, res) => {
-      // Never returns: the response becomes a long-lived SSE stream (DESIGN §3.1 step 2-4).
-      // B09 is the happy path — `Last-Event-ID` resume and the `resnapshot` frame are B10.
-      stream.subscribe(res);
+    handler: (req, res, url) => {
+      // Never returns: the response becomes a long-lived SSE stream (DESIGN §3.1 steps 2-4).
+      // B10a added resume — the cursor is `max(?cursor=N, Last-Event-ID)` per D47.
+      stream.subscribe(req, res, url);
     },
   },
   {

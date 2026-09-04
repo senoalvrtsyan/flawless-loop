@@ -185,6 +185,30 @@ export function bucketReader(db: DatabaseSync): (key: BucketKey) => BucketRow | 
   return (key) => stmt.get(key.ad_id, key.minute_start) as unknown as BucketRow | undefined;
 }
 
+/**
+ * The SSE resume read — §3.1 step 3, via B10a: every bucket touched by a signal with
+ * `ingest_seq > cursor`, as its CURRENT absolute row, capped at `limit` rows.
+ *
+ * Here rather than in `stream.ts` for the same reason as `bucketReader` above: one place knows how
+ * a bucket row is read, so the resume, the flush and the snapshot cannot drift into three shapes.
+ *
+ * **A store query, never a replay of buffered frames** (BUILD_PLAN §14). `max_ingest_seq` has no
+ * index, so this is a full scan of `rollup_minute` — correct **once per connect**, and exactly why
+ * it cannot be the per-tick mechanism. **No `ORDER BY` on purpose:** the client merges by
+ * `(ad_id, minute_start)` so order is irrelevant, and without one SQLite may stop scanning as soon
+ * as it has `limit` rows — bailing earliest in the expensive case, which is the case that ends in
+ * `resnapshot` anyway.
+ *
+ * Caller passes `limit = RESNAPSHOT_ROWS + 1` and treats a full result as "too many" (D47), so the
+ * count costs no extra pass.
+ */
+export function bucketsSinceReader(db: DatabaseSync): (cursor: number, limit: number) => BucketRow[] {
+  const stmt = db.prepare(
+    `SELECT ${BUCKET_COLUMNS} FROM rollup_minute WHERE max_ingest_seq > ? LIMIT ?`,
+  );
+  return (cursor, limit) => stmt.all(cursor, limit) as unknown as BucketRow[];
+}
+
 export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
   const perAd = db.prepare(SELECT_ONE_AD);
   const allAds = db.prepare(SELECT_ALL_ADS);
