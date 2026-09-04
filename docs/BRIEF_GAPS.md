@@ -184,6 +184,27 @@ component-reuse story is the whole Workbench premise and it gets stronger with f
 two — "this image appears in nine ads" is the same query. If budget is tight, B is defensible
 but must be called out, because it leaves the library visibly inconsistent.
 
+**What we did: B — argued for A, built B, and this is the call-out the recommendation asked for.**
+Not re-decided at B46; **settled structurally at Phase 2** and only made visible now.
+`DESIGN.md` §2.3's `DecisionBody` types `swap_component` with `slot: "video" | "headline"`, and the
+`ads` projection carries two slot columns — so the two extra kinds have had no slot to go in since
+the schema was ratified. B46 is simply the first chunk where a human can *see* it: the swap picker
+filters the library by slot name, so four videos and six headlines are offerable and the two
+`body_copy` and two `image` components are returned by the endpoint and pickable in nothing.
+
+**Measured, and it is the seeded store's real shape**: sixteen components across four kinds
+(`body_copy` ×2, `headline` ×6, `image` ×2, `video` ×4 — one of them, `v_05`, a v2 recut of `v_04`).
+The first version of `components.test.ts` asserted the library held only the two swappable kinds;
+that was true of its fixture and false of the store, and the test now asserts the property the
+console actually depends on — filtering by slot yields exactly the swappable rows and nothing leaks
+in. Reinstating option A is still a schema change plus a slot enum plus two simulator terms, and
+nothing built so far forecloses it.
+
+**Where it shows up in code:** `src/server/components.ts` (returns every kind — B56's Workbench
+screen reads the whole library), `src/server/components.test.ts` (the filter property),
+`src/web/Console.tsx` (`components.filter((c) => c.kind === slot)`), `src/shared/decisions.ts`
+(`ComponentSlot`).
+
 ---
 
 ### G07 — No constraint binds a slot to a component kind · UI · D
