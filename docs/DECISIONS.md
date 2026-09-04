@@ -107,6 +107,7 @@ level — and not a severity.
 | D43 | Test runner, and what gets a test at all | **ACCEPTED — A** (`node:test`, four pure functions) | 2026-09-04 |
 | D44, D45 | Chart rendering · styling | **DEFERRED to stage 4** (B36/B37) — see F4 | 2026-09-04 |
 | F4 | D44/D45 are deferred, not open | **DECIDED** | 2026-09-04 |
+| U8, U9 | Store path `data/loop.sqlite` · `ExperimentalWarning` left visible | **ACCEPTED** — ratified at B02 | 2026-09-04 |
 
 ---
 
@@ -2091,3 +2092,51 @@ open"* — and this is that instruction.
 Both questions are answered better at B36 than at B01, because by then the data volumes and the
 settlement-state legibility problem are concrete rather than predicted — and neither blocks a single
 chunk in between, so deferring costs nothing and buys information.
+
+---
+
+## U8, U9 — RATIFIED AT B02
+
+**Status:** ACCEPTED · **Date:** 2026-09-04 · **Not new decisions** — two Phase 5 assumptions,
+raised in the B02 report and disposed of in one sentence.
+
+**Wording of record.**
+
+> "Both nodded. Record them, don't re-raise them."
+
+**"Don't re-raise them" is itself the disposition and is why this entry exists.** Both were labelled
+`ASSUMPTION (unratified)` and would otherwise be re-surfaced by the chunk that depends on them —
+B57 for U8. They are now settled, and a later chunk that wants to change either is opening a new
+decision, not answering an old one.
+
+| # | Assumption | Was owed before | Status |
+|---|---|---|---|
+| **U8** | The store lives at `data/loop.sqlite`, overridable with `DB_PATH`. No design document specifies a path. | B57 (the one-command run) | **RATIFIED** |
+| **U9** | `node:sqlite`'s `ExperimentalWarning` is **not** suppressed. It prints on every run, including the demo. | any packaging chunk that touches process flags | **RATIFIED** |
+
+### U8 — the store path
+
+`src/server/db.ts` exports `DB_PATH`; server, simulator and migration runner all import it, so
+there is one definition and they cannot disagree. Covered by `.gitignore` (`*.sqlite` and its WAL
+and SHM sidecars). **Consequence:** deleting `data/` is the supported reset, and `npm run db:migrate`
+rebuilds from empty — which is also how a reviewer starts clean.
+
+**Forecloses.** Nothing. One constant, one env var.
+
+### U9 — the experimental warning stays visible
+
+**Why it is not noise.** D8 chose `node:sqlite` over `better-sqlite3` on a *no new dependency*
+argument, and its flip condition is written into D8 rather than left as a later judgement call. The
+warning is the standing evidence that the trade-off was made with open eyes; suppressing it would
+make the demo quieter and the defence weaker, and a reviewer who spots a hidden `--disable-warning`
+flag learns something worse than a reviewer who reads the warning.
+
+**Consequence:** B57's `npm start` output carries the warning, and the README says why in one line
+rather than leaving it to look like an oversight.
+
+**Forecloses.** Nothing — one flag, reversible at any time. But per the wording of record it is not
+re-raised: a chunk wanting it quiet must argue the case anew.
+
+**How I'd defend this in review.** The store's location and the driver's experimental status are
+both things a reviewer will notice within a minute of cloning; each is written down with its reason
+rather than discovered.

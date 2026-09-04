@@ -1262,6 +1262,8 @@ block current work; all need sign-off before Phase 2 closes.
 | U5 | Decisions are exactly-once and locally originated, idempotent on `decision_id` (G45). | the lever write path is built |
 | U6 | Money fields are non-negative integers, enforced at ingest (G49). | the ingest boundary is built |
 | U7 | `Decision.ts` is request time; effects are immediate; backdating is rejected (G23). | the fold is built |
+| U8 | The store lives at `data/loop.sqlite`, overridable with `DB_PATH` (no design doc specifies a path). | **RATIFIED 2026-09-04 at B02** — `DECISIONS.md` § U8, U9 |
+| U9 | `node:sqlite`'s `ExperimentalWarning` is not suppressed; it prints on every run, demo included. | **RATIFIED 2026-09-04 at B02** — `DECISIONS.md` § U8, U9 |
 
 ---
 

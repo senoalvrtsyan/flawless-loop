@@ -85,7 +85,7 @@ Three chunks. The store exists and executes; nothing reads or writes it yet.
 |---|---|---|---|---|---|---|
 | [x] | **B01** | Repo scaffold: strict TS, Node 24 floor pinned, empty entry points, `dev`/`typecheck` scripts | `package.json`, `.nvmrc`, `tsconfig.json`, `.gitignore` | `node -v` ≥ 24; `npm run typecheck` clean; `engines` and `.nvmrc` both say 24 | D§2 (D8) | — |
 | [x] | **B02** | DB module: open, the four pragmas, the ~10-line transaction wrapper; migration runner; `001_logs.sql` — `components`, `audiences`, `signal_deliveries`, `signals`, `decisions` | `src/server/db.ts`, `src/server/migrate.ts`, `migrations/001_logs.sql` | `npm run db:migrate` on an empty file; `PRAGMA journal_mode` returns `wal`; `.schema` matches D§2.1–2.3; insert a `ts` of 2099 and read `ts_effective` back clamped | D§2, 2.1–2.3 | **HR1 HR6 HR8** |
-| [ ] | **B03** | `002_projections.sql` — `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios` | `migrations/002_projections.sql` | `.schema`; hand-run the `ON CONFLICT DO UPDATE` upsert against `rollup_minute` twice and see one row | D§2.4 | **HR6** |
+| [x] | **B03** | `002_projections.sql` — `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios` | `migrations/002_projections.sql` | `.schema`; hand-run the `ON CONFLICT DO UPDATE` upsert against `rollup_minute` twice and see one row | D§2.4 | **HR6** |
 
 **Why the schema lands whole and early.** It is ratified, and it was executed on this machine
 during Phase 2 (`STATUS.md` § "What was verified") — `STRICT`, the generated `ts_effective` column,
@@ -417,6 +417,22 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   **B05's validation (U6) must check JavaScript types itself and must not lean on `STRICT`** —
   STRICT catches only the genuinely unconvertible (`'not-an-int'` into an INTEGER column, which it
   does reject).
+- **A partial index is only used if the query spells its predicate literally.** Found at B03 against
+  20k rows. `ix_attr_unresolved` is `ON conversion_attribution(state) WHERE state <> 'resolved'`.
+  SQLite's implication prover is syntactic, not semantic, so:
+
+  | Query form | Plan |
+  |---|---|
+  | `WHERE state = 'orphan_provisional'` | **SCAN** — full table, index unused |
+  | `WHERE state IN ('orphan_provisional','orphan_expired')` | **SCAN** — full table, index unused |
+  | `WHERE state <> 'resolved'` | SCAN **USING INDEX ix_attr_unresolved** |
+  | `WHERE state <> 'resolved' AND state = 'orphan_provisional'` | **SEARCH** using the index — best |
+
+  The natural phrasing is the first one, and `conversion_attribution` holds **every** conversion at
+  final size. It does not error; it just gets slower as the store grows, which reads as "the demo
+  feels laggy". **Every orphan query carries `state <> 'resolved'` as a term**, even when a more
+  specific equality follows it. Nothing in the DDL changes — `DESIGN.md` §2.4's index is correct;
+  this is a rule about how it is queried.
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.
 - **If a chunk reveals the design is wrong, stop coding and reopen the design doc.** Do not patch
