@@ -21,6 +21,14 @@ import { ACTOR } from '../shared/decisions.ts';
 
 const T = (m: number): string => new Date(Date.UTC(2026, 8, 4, 12, m)).toISOString();
 
+/**
+ * B34a's log prefix, past every row the fixture writes. The tests below are about PLACEMENT — the
+ * click's minute, the click's ad, the generation — so they ask the question at the end of the log,
+ * which is where the live path always asks it. The prefix itself has its own test at the bottom,
+ * and its end-to-end consequence is `verify.test.ts`'s rebuild case.
+ */
+const AS_OF = Number.MAX_SAFE_INTEGER;
+
 /** A store with two live ads, each with a real generation chain, and one click on each. */
 function world(t: { after: (fn: () => void) => void }): DatabaseSync {
   const dir = mkdtempSync(join(tmpdir(), 'loop-attr-'));
@@ -68,7 +76,7 @@ const conversion = (over: Partial<ConversionFacts> = {}): ConversionFacts => ({
 });
 
 test('D27-B: a resolved conversion is credited to its CLICK\'s minute, not its own', (t) => {
-  const a = resolveAttribution(world(t), conversion(), T(59));
+  const a = resolveAttribution(world(t), conversion(), T(59), AS_OF);
   assert.equal(a.state, 'resolved');
   assert.equal(a.click_event_id, 'e_click_early');
   assert.equal(a.credited_minute, T(10), 'credited at the conversion\'s own minute — CPA(T) is now two unrelated populations');
@@ -77,8 +85,10 @@ test('D27-B: a resolved conversion is credited to its CLICK\'s minute, not its o
 
 test('D14: the generation is the one covering the CLICK, across a swap', (t) => {
   const db = world(t);
-  const early = resolveAttribution(db, conversion({ attributed_click_id: 'c_early' }), T(59));
-  const late = resolveAttribution(db, conversion({ attributed_click_id: 'c_late' }), T(59));
+  const early = resolveAttribution(
+    db, conversion({ attributed_click_id: 'c_early' }), T(59), AS_OF);
+  const late = resolveAttribution(
+    db, conversion({ attributed_click_id: 'c_late' }), T(59), AS_OF);
   // a_12: gen 1 draft [12:00,12:01) · gen 2 live [12:01,12:20) · gen 3 live+v_05 [12:20,∞)
   assert.equal(early.credited_generation_id, 'g_a_12_002');
   assert.equal(late.credited_generation_id, 'g_a_12_003');
@@ -87,18 +97,19 @@ test('D14: the generation is the one covering the CLICK, across a swap', (t) => 
 
 test('I8/G30: the click is authoritative, and a disagreement is COUNTED not reconciled', (t) => {
   // The conversion claims a_05; its click happened on a_12. Revenue follows the click.
-  const a = resolveAttribution(world(t), conversion({ ad_id: 'a_05' }), T(59));
+  const a = resolveAttribution(world(t), conversion({ ad_id: 'a_05' }), T(59), AS_OF);
   assert.equal(a.credited_ad_id, 'a_12');
   assert.equal(a.ad_id_conflict, 1);
   assert.equal(a.state, 'resolved', 'a conflict is a flag, never a rejection');
 });
 
 test('no conflict is flagged when the two agree', (t) => {
-  assert.equal(resolveAttribution(world(t), conversion(), T(59)).ad_id_conflict, 0);
+  assert.equal(resolveAttribution(world(t), conversion(), T(59), AS_OF).ad_id_conflict, 0);
 });
 
 test('D16: an unmatched conversion is an orphan held at its OWN minute, never dropped', (t) => {
-  const a = resolveAttribution(world(t), conversion({ attributed_click_id: 'c_nope' }), T(59));
+  const a = resolveAttribution(
+    world(t), conversion({ attributed_click_id: 'c_nope' }), T(59), AS_OF);
   assert.equal(a.state, 'orphan_provisional');
   assert.equal(a.click_event_id, null);
   assert.equal(a.credited_minute, T(58));
@@ -108,7 +119,8 @@ test('D16: an unmatched conversion is an orphan held at its OWN minute, never dr
 });
 
 test('a click on another ad is not borrowed: click_id is the only key', (t) => {
-  const a = resolveAttribution(world(t), conversion({ attributed_click_id: 'c_other' }), T(59));
+  const a = resolveAttribution(
+    world(t), conversion({ attributed_click_id: 'c_other' }), T(59), AS_OF);
   assert.equal(a.credited_ad_id, 'a_05');
   assert.equal(a.ad_id_conflict, 1);
   assert.equal(a.credited_generation_id, 'g_a_05_002');
@@ -127,8 +139,33 @@ test('generationAt: half-open windows, and no generation before the ad existed',
 
 test('D7: this module writes nothing — the projection is untouched', (t) => {
   const db = world(t);
-  resolveAttribution(db, conversion(), T(59));
-  resolveAttribution(db, conversion({ attributed_click_id: 'c_nope' }), T(59));
+  resolveAttribution(db, conversion(), T(59), AS_OF);
+  resolveAttribution(db, conversion({ attributed_click_id: 'c_nope' }), T(59), AS_OF);
   const rows = (db.prepare('SELECT COUNT(*) AS c FROM conversion_attribution').get() as { c: number }).c;
   assert.equal(rows, 0, 'attribute.ts wrote a projection — apply() is its only writer (D7)');
+});
+
+// ---------------------------------------------------------------------------------------------
+// B34a — the log prefix. BUILD_PLAN.md §14's first B34 trap, at the unit that owns it.
+// ---------------------------------------------------------------------------------------------
+
+test('B34a: a click ABOVE the prefix does not exist yet — the conversion is an orphan', (t) => {
+  const db = world(t);
+  // The fixture ingests three clicks in one batch, so `c_late` is the second row in the log.
+  const late = (db.prepare(
+    "SELECT ingest_seq AS n FROM signals WHERE click_id = 'c_late' AND kind = 'click'",
+  ).get() as { n: number }).n;
+
+  const before = resolveAttribution(
+    db, conversion({ attributed_click_id: 'c_late' }), T(59), late - 1);
+  assert.equal(before.state, 'orphan_provisional',
+    'the rebuild resolved a conversion against a click that had not arrived — the B22 defect');
+  assert.equal(before.credited_minute, T(58), 'an orphan is held at its OWN minute');
+  assert.equal(before.resolved_at, null);
+
+  // One position later the same question has a different, also-correct answer. That is the whole
+  // property: attribution is a function of the log PREFIX, not of the table.
+  const at = resolveAttribution(db, conversion({ attributed_click_id: 'c_late' }), T(59), late);
+  assert.equal(at.state, 'resolved');
+  assert.equal(at.credited_minute, T(30), 'the click\'s minute, D27-B');
 });

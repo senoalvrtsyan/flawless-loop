@@ -183,3 +183,64 @@ test('an empty store verifies clean rather than throwing', (t) => {
   assert.equal(result.ok, true);
   assert.equal(result.log_position.ingest_seq, 0);
 });
+
+// ---------------------------------------------------------------------------------------------
+// B34a — the regression test for BUILD_PLAN.md §14's first B34 trap.
+//
+// `world()` above already holds an orphan, and it is NOT enough: `cv2`'s click never arrives, so
+// an unbounded rebuild reproduces that orphan correctly and the defect stays invisible. What
+// exposes it is a PROMOTED orphan — a conversion that was an orphan for a while and then stopped
+// being one. Live, the store passes through both states and records the second. Rebuilt without a
+// prefix bound, the click is already in `signals` when the conversion replays, so the rebuild
+// jumps straight to `resolved`, never restates a bucket, and stamps `resolved_at` at the
+// conversion's own arrival instead of the promoting click's.
+//
+// This is the shape B34's seeded week produced 1,337 times and no earlier store produced once.
+// ---------------------------------------------------------------------------------------------
+
+test('B34a: a PROMOTED orphan rebuilds identically — attribution reads a log prefix', (t) => {
+  const db = world(t);
+  const T = (m: number): string => new Date(Date.UTC(2026, 8, 1, 12, m)).toISOString();
+  // Four days late, so the bucket the conversion LEAVES has already settled (D13's 72 h) and the
+  // promotion restates it. That exercises `restated_at` and `restatement_count` as well as
+  // `resolved_at` — all three are columns the unbounded rebuild gets wrong, because a rebuild that
+  // never creates an orphan also never restates anything.
+  const LATE = T(35 + 4 * 24 * 60);
+
+  // The §13 "orphan released" shape: the click happened at 12:35 but was withheld, so the
+  // conversion it earned arrives first and is parked. Ingest order is arrival order.
+  ingest(db, [
+    { event_id: 'cv3', ts: T(42), ad_id: 'a_12', event: 'conversion',
+      attributed_click_id: 'ck9', value_cents: 2_100 },
+  ], 'live', () => T(52));
+  ingest(db, [
+    { event_id: 'k9', ts: T(35), ad_id: 'a_12', event: 'click', click_id: 'ck9', cost_cents: 58 },
+  ], 'live', () => LATE);
+
+  // Pin the live state first, or a rebuild that reproduces the WRONG thing consistently would
+  // still pass: the point is that the store passed through the orphan and came out the far side.
+  const row = db.prepare('SELECT * FROM conversion_attribution WHERE event_id = ?').get('cv3') as
+    { state: string; credited_minute: string; resolved_at: string | null };
+  assert.equal(row.state, 'resolved', 'the late click did not promote its conversion');
+  assert.equal(row.credited_minute, T(35), 'D27-B: the CLICK\'s minute');
+  assert.equal(row.resolved_at, LATE, 'resolved at the PROMOTING CLICK\'s arrival, not its own');
+
+  // The bucket it left: emptied of its provisional credit, and RESTATED, because by the time the
+  // click turned up that minute had long since settled (§5.4).
+  const left = db.prepare(`SELECT provisional_conversions AS prov, restated_at AS restated_at,
+    restatement_count AS n FROM rollup_minute WHERE ad_id = ? AND minute_start = ?`)
+    .get('a_12', T(42)) as { prov: number; restated_at: string | null; n: number };
+  assert.equal(left.prov, 0, 'the provisional credit was never taken back out');
+  assert.equal(left.restated_at, LATE, 'restated at the ARRIVING event\'s clock — D38');
+  assert.ok(left.n > 0, 'the promotion restated no bucket — nothing here is being tested');
+
+  // And the bucket it joined.
+  const joined = db.prepare(
+    'SELECT conversions AS c, value_cents AS v FROM rollup_minute WHERE ad_id = ? AND minute_start = ?',
+  ).get('a_12', T(35)) as { c: number; v: number };
+  assert.equal(joined.c, 1, 'the conversion never arrived in its click\'s bucket');
+  assert.equal(joined.v, 2_100);
+
+  const result = verify(db);
+  assert.equal(result.ok, true, JSON.stringify(result.divergence));
+});

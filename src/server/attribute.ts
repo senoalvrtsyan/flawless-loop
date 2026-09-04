@@ -80,18 +80,36 @@ export function generationAt(db: DatabaseSync, ad_id: string, at: string): strin
  * `resolved_at` is the CALLER's clock — during the seed it is the event's own `received_at`, for
  * the same reason `apply()`'s `applied_at` is (B06): a rebuild clock would write a different
  * value into every row and `/api/verify` would report divergence on a correct store.
+ *
+ * ** `as_of_ingest_seq` IS THE LOG PREFIX THIS ANSWER IS TRUE AT, AND IT IS REQUIRED (B34a). **
+ * A signal is attributed against the log as of its OWN arrival, never against the whole table.
+ * `replay.ts` (B23) states the same rule for the other check path and says why:
+ *
+ *   "The prefix is taken with `ingest_seq <= as_of` on BOTH reads — the events being counted and
+ *    the clicks used to attribute them."
+ *
+ * Live the bound excludes nothing — `apply()` runs inside the transaction that allocated the
+ * signal's own `ingest_seq`, so no higher one exists yet. It bites only in `/api/verify`'s
+ * rebuild, which walks the log in `ingest_seq` order against a `signals` table that is ALREADY
+ * COMPLETE: unbounded, every conversion there found the click that had not yet arrived, the
+ * rebuild could not produce an orphan at all, and verify reported divergence on a correct store
+ * (`BUILD_PLAN.md` §14, found at B34, latent in B22 since it shipped). There is no default,
+ * because a caller that does not know its log position does not know enough to attribute.
  */
 export function resolveAttribution(
   db: DatabaseSync,
   conversion: ConversionFacts,
   resolved_at: string,
+  as_of_ingest_seq: number,
 ): Attribution {
   // `kind = 'click'` is spelled literally because `ux_signals_click_id` is a PARTIAL index with
   // exactly that predicate — without the term SQLite full-scans `signals`, correctly and slowly
-  // (the B03 finding, in the other direction).
+  // (the B03 finding, in the other direction). The prefix term is a filter over the one row that
+  // index returns, so it costs nothing and does not displace the lookup.
   const click = db.prepare(`
-    SELECT event_id, ad_id, ts_effective FROM signals WHERE click_id = ? AND kind = 'click'
-  `).get(conversion.attributed_click_id) as
+    SELECT event_id, ad_id, ts_effective FROM signals
+     WHERE click_id = ? AND kind = 'click' AND ingest_seq <= ?
+  `).get(conversion.attributed_click_id, as_of_ingest_seq) as
     { event_id: string; ad_id: string; ts_effective: string } | undefined;
 
   if (click === undefined) {

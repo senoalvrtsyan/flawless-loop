@@ -216,6 +216,7 @@ throughout; the stage-1 number keeps moving.
 | [x] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
 | [x] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
 | [x] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'`. **Owed from B09: the seeder must NOT call `stream.markDirty()`** — measured, one batch across 20,000 minutes gave a **6.20 MiB** frame and a **142 ms** event-loop stall; ~17 MiB / ~400 ms at 56,160 seeded buckets | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
+| [x] | **B34a** | **Attribution reads a log PREFIX, not the whole log.** `resolveAttribution()` takes a REQUIRED `as_of_ingest_seq` and bounds its click lookup with `ingest_seq <= ?`; `apply()` supplies `signal.ingest_seq` at both call sites — the conversion branch, and `promoteOrphans()`, where the prefix is the CLICK's seq because the parked conversion's own prefix is precisely the one its click does not exist in. Fixes §14's first B34 trap: unbounded, the rebuild resolved every conversion against clicks that had not yet arrived, could not produce an orphan at all, and reported divergence on a correct store. `replay.ts` (B23) states the rule for the other check path and is the spec. **The tempting wrong fix — dropping `resolved_at` from `DIFFED` — is not taken.** `verify.ts` is untouched: `apply()` already held the prefix | `src/server/attribute.ts`, `src/server/apply.ts`, `src/server/attribute.test.ts`, `src/server/verify.test.ts` | On a store holding a PROMOTED orphan, `GET /api/verify` goes 409 → **200** — measured on a 1-day scratch seed (360,740 signals, 49 conversions promoted by a later-arriving click): pre-fix `conversion_attribution.resolved_at` diverges, post-fix every hash matches. `npm run agree` still OK. Two new tests, both of which fail without the bound | D§7, §10.2; D55 | **HR4 HR5** |
 | [ ] | **B35** | The `T0` handover seam: anything whose `received_at` falls after the seed boundary is **not** seeded but handed to the live emitter; progress printing during the seed | `src/sim/seed-history.ts`, `src/sim/index.ts` | Boot on an empty DB: the seed prints progress and finishes in ~28 s (B06 measurement; ~12 s was §18.4's
 narrower benchmark), then conversions from before `T0` keep arriving live for minutes afterwards — a real in-flight population, not a manufactured one | S§15.3(b) | **HR4 HR7** |
 
@@ -513,15 +514,21 @@ remains unspent, and step 4 is unchanged.
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
 
-- **`/api/verify`'s rebuild is ORDER-BLIND for attribution, and it reports divergence on a correct
-  store** (found at B34; latent in **B22** since it shipped). `verify.ts` replays
-  `FROM main.signals ORDER BY ingest_seq`, but `apply()` calls `resolveAttribution(db, …)`, which
-  reads the **whole** `signals` table with no prefix bound — so every conversion in the rebuild
-  resolves against clicks that had not yet arrived, and the rebuild **cannot produce an orphan at
-  all**. Unobservable until a store contained one, which is B34. Measured: `resolved_at` live
-  `16:34:02.841` (the promoting click's arrival) against rebuilt `16:30:14.254` (the conversion's
-  own). **`replay.ts` (B23) bounds the prefix on BOTH reads and says why** — that comment is the
-  spec for the fix. The tempting wrong fix is to drop `resolved_at` from the diff.
+- **Attribution must read a log PREFIX, not the whole table — FIXED at B34a, and the hazard stays
+  here** (found at B34; latent in **B22** since it shipped). `verify.ts` replays
+  `FROM main.signals ORDER BY ingest_seq`, but `apply()` called `resolveAttribution(db, …)`, which
+  read the **whole** `signals` table with no prefix bound — so every conversion in the rebuild
+  resolved against clicks that had not yet arrived, the rebuild **could not produce an orphan at
+  all**, and `/api/verify` reported divergence on a correct store. Unobservable until a store
+  contained one, which is B34. Measured on a 1-day scratch seed: pre-fix
+  `conversion_attribution.resolved_at` live `20:02:45.642` (the promoting click's arrival) against
+  rebuilt `20:02:07.905` (the conversion's own); post-fix every hash matches. **`replay.ts` (B23)
+  bounds the prefix on BOTH reads and says why** — that comment was the spec.
+  **What stays dangerous:** `resolveAttribution()`'s `as_of_ingest_seq` has NO default, on purpose.
+  A future caller that reaches for one — or that hands down the parked conversion's seq instead of
+  the promoting CLICK's inside `promoteOrphans()` — restores the defect exactly, and the tempting
+  wrong fix then is to drop `resolved_at` from `DIFFED`. Both new tests in `verify.test.ts` /
+  `attribute.test.ts` fail if it comes back.
 - **The out-of-order check must use a window function, not a self-join** (B33 → B34).
   `JOIN signals a, signals b ON a.ingest_seq < b.ingest_seq AND a.ts > b.ts` is quadratic: fine on
   2,700 rows, and it never returns on 1.58M. Use

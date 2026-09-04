@@ -40,6 +40,11 @@ import type { AdConfig, Decision, DecisionBody } from '../shared/decisions.ts';
  */
 export type AppliedSignal = {
   event_id: string;
+  /**
+   * Two jobs: `rollup_minute.max_ingest_seq`, and — since **B34a** — the log prefix attribution is
+   * resolved against. It is the replay position, which live is simply "now" and in a rebuild is
+   * how far through the log we are.
+   */
   ingest_seq: number;
   ts_effective: string;
   ad_id: string;
@@ -251,10 +256,14 @@ function writeRollup(
  * The click's own `signals` row is already written when this runs (ingest inserts, then applies),
  * so `resolveAttribution()` re-derives each conversion against the real store and cannot disagree
  * with what a rebuild would decide.
+ *
+ * B34a: the prefix handed down is the CLICK's `ingest_seq`, not the conversion's — the conversion
+ * arrived first and by its own prefix its click does not exist, which is precisely why it was
+ * parked. The prefix is the replay position, not the parked event's age.
  */
 function promoteOrphans(
   db: DatabaseSync,
-  click: { click_id: string },
+  click: { click_id: string; ingest_seq: number },
   at: string,
   moves: Moves,
 ): void {
@@ -267,7 +276,7 @@ function promoteOrphans(
     const next = resolveAttribution(db, {
       event_id: row.event_id, ad_id: row.ad_id, ts_effective: row.ts_effective,
       attributed_click_id: click.click_id,
-    }, at);
+    }, at, click.ingest_seq);
 
     prepared(db, UPDATE_ATTRIBUTION).run(
       next.state, next.click_event_id, next.credited_ad_id, next.credited_minute,
@@ -319,7 +328,8 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
       // §5.2: the click that finally arrives settles every conversion parked on it. Added to the
       // same map as the click's own credit, so a promotion landing in the click's own minute is
       // one movement of one bucket and not two.
-      promoteOrphans(db, { click_id: signal.click_id }, applied_at, moves);
+      promoteOrphans(db, { click_id: signal.click_id, ingest_seq: signal.ingest_seq },
+        applied_at, moves);
       break;
     case 'spend':
       // I1: a DELTA for one 60 s interval, not a running total. Summing a cumulative series here
@@ -332,12 +342,15 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
       // the placement over the prefix it is replaying. Resolved at the ingest boundary instead, it
       // would have to exist a second time in the replay — two implementations of the one rule the
       // sweep is meant to be checking.
+      // B34a: `signal.ingest_seq` is the log prefix this attribution is true at. Live it excludes
+      // nothing — we are inside the transaction that allocated it — but in a rebuild it is what
+      // stops a conversion from resolving against a click that had not yet arrived.
       const attribution = resolveAttribution(db, {
         event_id: signal.event_id,
         ad_id: signal.ad_id,
         ts_effective: signal.ts_effective,
         attributed_click_id: signal.attributed_click_id,
-      }, applied_at);
+      }, applied_at, signal.ingest_seq);
 
       prepared(db, INSERT_ATTRIBUTION).run(
         attribution.event_id, attribution.state, attribution.click_event_id,

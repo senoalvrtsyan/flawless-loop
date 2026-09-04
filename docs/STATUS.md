@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · stage 3 · B34 CLOSED — THE WORLD HAS A PAST · 37 / 65 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · stage 3 · B34a CLOSED — VERIFY IS TRUSTWORTHY AGAIN · 38 / 66 chunks**
 
 ---
 
@@ -57,11 +57,12 @@ the live check now, and it holds**. D16's orphan path is real for the first time
 8 provisional). It also landed **D60** (the seed lives in the store), **D61** (60 s ratified) and
 **D62** (conversion is a per-click Bernoulli keyed by `click_id`).
 
-**One thing is broken and it is NOT the store: `/api/verify` returns 409.** `verify.ts` rebuilds in
-`ingest_seq` order but resolves attribution against the WHOLE `signals` table, so it can never
-produce an orphan and reports divergence on a correct store. Latent in **B22** since it shipped and
-unobservable until a store contained an orphan. **This is the first thing to fix** — see
-"Next action".
+**B34a fixed the thing B34 exposed.** `/api/verify` returned 409 on a correct store because
+`verify.ts` rebuilds in `ingest_seq` order while `apply()` resolved attribution against the WHOLE
+`signals` table — so the rebuild could never produce an orphan. `resolveAttribution()` now takes a
+**required** `as_of_ingest_seq` and `apply()` hands it `signal.ingest_seq` (in `promoteOrphans()`,
+the CLICK's). Measured on a 1-day scratch seed of 360,740 signals with 49 promoted orphans:
+**409 → 200**, `npm run agree` still OK, **78 tests**. `verify.ts` itself was not touched.
 
 **What stage 3 has left: B35 (the `T0` seam)**, single-gated.
 
@@ -468,16 +469,18 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 plan. **Each produces wrong or slow output with no error.** Twenty-eight now — the Phase 5 ones were
 found against the real store and are in no design document.
 
-**The newest (B34), and the first is a live defect rather than a hazard:**
+**The newest (B34), and the first was a live defect — FIXED at B34a, kept here as the hazard:**
 
-- **`/api/verify` reports divergence on a CORRECT store, and the store is not wrong.** `verify.ts`
-  replays `FROM main.signals ORDER BY ingest_seq`, but `apply()` calls `resolveAttribution(db, …)`
-  which reads the **whole** `signals` table with no prefix bound — so every conversion in the
-  rebuild resolves against clicks that had not yet arrived, and the rebuild **cannot produce an
-  orphan at all**. Latent in B22 since it shipped; unobservable until a store held an orphan, which
-  is B34. Measured: `resolved_at` live `16:34:02.841` vs rebuilt `16:30:14.254`.
-  **`replay.ts` (B23) bounds the prefix on BOTH reads and its comment is the spec for the fix.**
-  The tempting wrong fix is to drop `resolved_at` from the diff.
+- **Attribution must read a log PREFIX, not the whole table.** `verify.ts` replays
+  `FROM main.signals ORDER BY ingest_seq`, but `apply()` called `resolveAttribution(db, …)` which
+  read the **whole** `signals` table with no prefix bound — so every conversion in the rebuild
+  resolved against clicks that had not yet arrived, the rebuild **could not produce an orphan at
+  all**, and `/api/verify` said 409 on a correct store. Latent in B22 since it shipped; unobservable
+  until a store held an orphan, which is B34. **B34a bounds it**: `as_of_ingest_seq` is REQUIRED and
+  has no default, and inside `promoteOrphans()` it is the promoting CLICK's seq. What stays
+  dangerous is giving it a default, or handing down the parked conversion's seq — either restores
+  the defect, and the tempting wrong fix is then to drop `resolved_at` from the diff. Two tests fail
+  if it comes back.
 - **The out-of-order check must use a window function, not a self-join.** The B33 form
   (`JOIN signals a, signals b ON a.ingest_seq < b.ingest_seq AND a.ts > b.ts`) is quadratic — fine
   on 2,700 rows, never returns on 1.58M. Use `LAG(received_at) OVER (ORDER BY ingest_seq)`.
@@ -842,21 +845,19 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Next is the `/api/verify` prefix fix, and it is not yet a numbered chunk** — Seno decides whether
-it becomes B34a or displaces something. It should come before **B35**, because B35's `T0` seam check
-leans on verify being trustworthy, and today verify says 409 on a correct store.
+**Next is B35, the `T0` handover seam — the last chunk of stage 3, single-gated.**
 
-**The fix, in one paragraph so it need not be re-derived:** `verify.ts` rebuilds by walking
-`FROM main.signals ORDER BY ingest_seq` and calling `apply(db, …)` per row. `apply()` resolves
-attribution through `resolveAttribution(db, ev, at)` in `attribute.ts`, which queries `signals` for
-the click **with no upper bound on `ingest_seq`**. During a rebuild that table is already complete,
-so a conversion whose click arrived later still finds it, no orphan is ever created, and
-`resolved_at` is stamped at the conversion's own arrival instead of the promoting click's. The fix
-threads a prefix bound (`ingest_seq <= current`) through `attribute.ts` → `apply.ts` → `verify.ts`.
-**`replay.ts` (B23) already does exactly this and its comment states the rule:** *"The prefix is
-taken with `ingest_seq <= as_of` on BOTH reads — the events being counted and the clicks used to
-attribute them."* Note `apply()` is also the live writer, so the bound must be optional and default
-to unbounded, or the live path changes behaviour.
+**B34a is closed and verify is trustworthy again**, which is what B35's seam check leans on.
+`resolveAttribution()` now takes a **required** `as_of_ingest_seq`; `apply()` passes
+`signal.ingest_seq`, and inside `promoteOrphans()` that is the promoting CLICK's seq rather than the
+parked conversion's — the conversion's own prefix is precisely the one its click does not exist in.
+There is no default and there must not be one: a caller that does not know its log position does not
+know enough to attribute. The live path was NOT changed by this — `apply()` runs inside the
+transaction that allocated the signal's own `ingest_seq`, so no higher one exists to exclude, and
+the 76 pre-existing tests (including `conversion.test.ts` and `restate.test.ts`, which assert exact
+`resolved_at` values through the live path) pass unmodified. **`generationAt()` is deliberately left
+unbounded**: generation windows are keyed on the decision's own `ts`, not on arrival, so it resolves
+identically either way — noted rather than fixed.
 
 **What B34 established, so a cold resume does not re-derive it:**
 
@@ -873,7 +874,8 @@ to unbounded, or the live path changes behaviour.
 - **10 buckets carry `restated_at` from frame one**, and D16's orphan path is real: **1,337
   resolved, 8 `orphan_provisional`**. B33's two orphan injectors fire for the first time — 75
   released, 98 never delivered.
-- **`npm run agree` is OK in 3.8 s** on the seeded store. **`/api/verify` is 409** — see above.
+- **`npm run agree` is OK in 3.8 s** on the seeded store. `/api/verify` was 409 there; **B34a fixed
+  it** and the 7-day store has not been rebuilt since (a 1-day scratch seed carried the check).
 - **The emitter continues on top of the seeded week**, adopting the seed from the world with no
   `SIM_SEED` in its environment, and `source` distinguishes the two populations.
 
