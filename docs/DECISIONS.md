@@ -113,6 +113,7 @@ level — and not a severity.
 | D48 | Approval granularity: chunk-gated or group-gated | **ACCEPTED — B** (group-gated, chunk-committed, five solo) — **amends `CLAUDE.md` §5** | 2026-09-04 |
 | D49 | Take §12's cut line now, or hold it | **ACCEPTED — C** (hold to the B36 gate; nothing cut) | 2026-09-04 |
 | D50 | Where the demo script sits in the order | **ACCEPTED — B** (B61 runs as `docs/DEMO.md` from B36) | 2026-09-04 |
+| D51 | `create_ad`'s `created_at` — client-supplied or derived from the decision's `ts` | **ACCEPTED — B** (derived) | 2026-09-04 |
 
 ---
 
@@ -2516,3 +2517,59 @@ Nothing. B61 still exists as a chunk and still owns the final ordered pass.
 
 The deliverable that teaches someone the app is worth more written while the app is being built than
 recalled afterwards — and it is the one artifact whose accuracy decays if it is written last.
+
+---
+
+## DECISION #51 — `create_ad`'s `created_at`: supplied or derived
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Ratified at:** the G1 gate (B12–B14)
+**Relates to:** U7, E7 (G03), `DESIGN.md` §2.3, the §Appendix derivation rule
+
+### Question
+
+`DESIGN.md` §2.3 types `create_ad`'s payload as `Omit<AdConfig, "status" | "launched_at">`, which
+leaves `created_at` (E7) as a field the client sends. U7 already makes `Decision.ts` request time,
+so the same event would carry two timestamps, free to disagree, with the log holding the
+authoritative one and the projection holding the other.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Follow the literal `Omit` — the client supplies `created_at` | Rejected — two timestamps for one event, and the Appendix says nothing derived is written by hand |
+| **B** | **Omit `created_at` too; the fold takes it from the decision's `ts`** | **CHOSEN** |
+
+### Rationale — Seno's words
+
+> "created_at derived: approved"
+
+Ratifying the recommendation as put at the G1 announcement: the Appendix's *"nothing that is
+derived is written by hand"* and U7's request-time `ts` together make one timestamp the only
+defensible answer, and deriving it means the `ads` row and the log row cannot drift.
+
+### Consequences
+
+1. `AdInitial` is `Omit<AdConfig, 'status' | 'launched_at' | 'created_at'>` in
+   `src/shared/decisions.ts`.
+2. `POST /api/decisions` **rejects** `initial.created_at` with `400
+   initial.created_at_is_derived_from_ts` rather than ignoring it — a silently dropped field is
+   how a client comes to believe it set something.
+3. **B15's seeder cannot backdate an ad's creation.** Twelve `create_ad` decisions all carry the
+   seeder's own `ts`, and `created_at` follows it. If the seeded world needs ads that were created
+   at different points in the backfilled week, that is a property of the decision `ts` the seeder
+   writes, not a separate field — which is the correct place for it, and B34's `T0` seam is where
+   it becomes visible.
+4. `DESIGN.md` §2.3's `DecisionBody` sketch is now one field wider than the code. The code is
+   right; the sketch is annotated in `src/shared/decisions.ts` at the point of divergence.
+
+### What it forecloses
+
+Nothing structurally — reinstating a client-supplied `created_at` is one field on `AdInitial` and
+one removed rejection. What it does foreclose is a *disagreement* between `decisions.ts` and
+`ads.created_at`, which is the point.
+
+### How I'd defend this in review
+
+Every other derived value in this build comes from a log; `created_at` was the one field the given
+contract would have let a client assert. Deriving it means the whole `ads` row is a function of the
+decision log, with no exceptions to explain.

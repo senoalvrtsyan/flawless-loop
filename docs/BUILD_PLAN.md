@@ -620,6 +620,17 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   indistinguishable from the 0.2% emitter-side loss §13 injects on purpose, which is the one
   failure the app has no way to see (§6).
 
+- **Every projection id must be a FUNCTION of data the rebuild also has** (found at B13). The
+  concrete case is `config_generations.generation_id`, minted as `g_${ad_id}_${seq_in_ad}` padded
+  to three digits. A `randomUUID()` there typechecks, reads as normal practice, and passes every
+  hand check — and then **B22's rebuild produces the same generations with different ids, so B24's
+  row-by-row diff reports total divergence on a perfectly correct store**. The tempting fix at that
+  point is to drop the id column from the diff, which quietly removes the check that the rebuild
+  reproduces the *same* generations rather than merely the same number of them. Same rule for every
+  id a projection invents from here: `(ad_id, seq_in_ad)` is already `UNIQUE`, so the derivation is
+  free. `DESIGN.md` §10.4 writes the id `g_a12_004` in prose; the code keeps `ad_id` verbatim
+  (`g_a_12_004`) because stripping the underscore can collide (`a_12` and `a1_2`).
+
 - **The gate is the GROUP, not the chunk** (**D48**, at the B11 close). 3–5 related chunks per
   gate, never crossing a stage boundary; one report with a **per-chunk** verification block; one
   "ok"; still **one commit and one tick per chunk**. **Single-gated regardless: B20, B24, B34,
