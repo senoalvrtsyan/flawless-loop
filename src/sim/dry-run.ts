@@ -12,8 +12,19 @@
 // (B27) appended below it.
 
 import { ACCOUNT_TZ } from '../shared/config.ts';
-import { ADS, COMPONENTS } from './fixtures.ts';
-import { BASE_IMPR_PER_DAY, DIURNAL, DOW_VOLUME, FATIGUE } from './params.ts';
+import { ADS, AUDIENCES, COMPONENTS } from './fixtures.ts';
+import {
+  BASE_IMPR_PER_DAY,
+  CHANNEL,
+  DIURNAL,
+  DOW_CVR,
+  DOW_ORDER_VALUE,
+  DOW_VOLUME,
+  FATIGUE,
+  NOISE,
+  SPEND_TICK_S,
+  TEMPERATURE,
+} from './params.ts';
 import {
   adFatigue,
   nominalAccrual,
@@ -25,6 +36,16 @@ import {
   versionAdjusted,
 } from './fatigue.ts';
 import { diurnal, dowVolume, localHour, localMs, localWeekday, lambdaPerSecond, negBinomial } from './rate.ts';
+import {
+  betaBinomial,
+  clicksForTick,
+  cpmAccrualCents,
+  isSpendBoundary,
+  orderValueCents,
+  pCtr,
+  pCvr,
+  spendCents,
+} from './emit.ts';
 import type { Channel } from '../shared/decisions.ts';
 
 export type DryRunOptions = { seed: string; hours: number; fromMs: number };
@@ -78,14 +99,38 @@ export function localMidnightAtOrBefore(ms: number): number {
  * indices live emission would use. The two agreeing to within a percent or two over an hour is the
  * whole check: a systematic gap means the rate equation and the draw disagree about λ.
  */
-export function arrivalProcess(opts: DryRunOptions): void {
+export type AdTally = {
+  impressions: number;
+  clicks: number;
+  clickCostCents: number;
+  conversions: number;
+  orderValueCents: number;
+  /** Unrounded CPM accrual, against which the emitted integer cents are checked. */
+  cpmAccruedCents: number;
+  spendCents: number;
+  spendTicks: number;
+};
+
+const emptyTally = (): AdTally => ({
+  impressions: 0,
+  clicks: 0,
+  clickCostCents: 0,
+  conversions: 0,
+  orderValueCents: 0,
+  cpmAccruedCents: 0,
+  spendCents: 0,
+  spendTicks: 0,
+});
+
+export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   const { seed, hours, fromMs } = opts;
   const startSec = Math.floor(fromMs / 1000);
 
   console.log(
     `\n=== B25 · §3 arrival process · §4 diurnal and day of week ===\n` +
       `${hours} h from ${localStamp(fromMs)} ${ACCOUNT_TZ} · seed '${seed}'\n` +
-      `φ (B26) ν (B28) ρ (B32) m_channel·m_ad (B30) all held at 1.00 — this is λ's shape, not its final level\n`,
+      `ν (B28) ρ (B32) m_channel·m_ad (B30) held at 1.00 — this is λ's shape, not its final level.\n` +
+      `φ is NOT applied: whether fatigue multiplies λ or only p_ctr is open — DECISION #56.\n`,
   );
 
   console.log(
@@ -99,6 +144,12 @@ export function arrivalProcess(opts: DryRunOptions): void {
   const perChannel = new Map<Channel, { expected: number; drawn: number }>(
     CHANNELS.map((c) => [c, { expected: 0, drawn: 0 }]),
   );
+  // B27's tallies ride along on B25's single pass: one simulation, two sections. Running the
+  // window twice would double a 24-hour dry run's ~25 s for numbers taken from the same draws.
+  const accrual = nominalAccrual();
+  const phiByAd = new Map(ADS.map((a) => [a.ad_id, adFatigue(a.ad_id, accrual).phi_ad]));
+  const tally = new Map(ADS.map((a) => [a.ad_id, emptyTally()]));
+  const intervalAccrual = new Map(ADS.map((a) => [a.ad_id, 0]));
   let dSum = 0;
   let dCount = 0;
 
@@ -110,14 +161,55 @@ export function arrivalProcess(opts: DryRunOptions): void {
     for (const ad of ADS) {
       const bucket = perChannel.get(ad.channel);
       if (bucket === undefined) continue;
+      const own = tally.get(ad.ad_id);
+      const phiAd = phiByAd.get(ad.ad_id) ?? 1;
+      if (own === undefined) continue;
+
       for (let s = 0; s < 3_600; s++) {
         const tick = hourStart + s;
-        const lambda = lambdaPerSecond(ad.ad_id, ad.channel, tick * 1000);
+        const atMs = tick * 1000;
+        const lambda = lambdaPerSecond(ad.ad_id, ad.channel, atMs);
         const n = negBinomial(seed, ad.ad_id, tick, lambda);
         hourExpected += lambda;
         hourDrawn += n;
         bucket.expected += lambda;
         bucket.drawn += n;
+
+        // §10, B27. φ enters here and not in λ above — D56.
+        own.impressions += n;
+        const clicks = clicksForTick(seed, ad, tick, n, phiAd);
+        own.clicks += clicks.length;
+        for (const click of clicks) own.clickCostCents += click.cost_cents;
+
+        // Conversions are COUNTED here and emitted nowhere: §10 schedules them (§11, B29). Keyed
+        // on the `cvr` stream by `(ad, tick)`, which is the key B29 will re-derive them from.
+        if (clicks.length > 0) {
+          const converted = betaBinomial(
+            seed,
+            'cvr',
+            [ad.ad_id, tick],
+            clicks.length,
+            pCvr(ad, atMs),
+            NOISE.conversionKappa,
+          );
+          own.conversions += converted;
+          for (let j = 0; j < converted; j++) {
+            own.orderValueCents += orderValueCents(seed, ad, atMs, [ad.ad_id, tick, j]);
+          }
+        }
+
+        // I1's 60 s spend delta, accumulated and flushed exactly as `index.ts` re-derives it.
+        const accrued = cpmAccrualCents(ad, n);
+        own.cpmAccruedCents += accrued;
+        intervalAccrual.set(ad.ad_id, (intervalAccrual.get(ad.ad_id) ?? 0) + accrued);
+        if (isSpendBoundary(tick + 1)) {
+          const cents = spendCents(intervalAccrual.get(ad.ad_id) ?? 0);
+          intervalAccrual.set(ad.ad_id, 0);
+          if (cents > 0) {
+            own.spendCents += cents;
+            own.spendTicks++;
+          }
+        }
       }
     }
 
@@ -183,8 +275,9 @@ export function arrivalProcess(opts: DryRunOptions): void {
       `  w_dow, §4.2: ` +
       DAY_NAMES.map((d, i) => `${d} ${DOW_VOLUME[i]?.toFixed(2)}`).join('  '),
   );
-}
 
+  return tally;
+}
 
 /**
  * §7's fatigue, as §7.2 writes it: per pair, then per ad.
@@ -282,4 +375,114 @@ export function fatigue(): void {
       `${versionAdjusted(fVl04, 2).toFixed(2)} phi ${phi(versionAdjusted(fVl04, 2)).toFixed(4)} — ` +
       `pre-fatigued, which is §7.3's point.`,
   );
+}
+
+/**
+ * §5, §6 and §10: what the impressions turned into. The tallies come from `arrivalProcess`'s
+ * single pass, so these are the same draws the hour rows above counted.
+ *
+ * Every `expected` column is arithmetic on §21's matrices and nothing else — CTR is
+ * `ctr_base(temperature) × ctr_mult(channel) × φ_ad`, CPC is blended across §5's pricing mix
+ * exactly as D52's ratified budget baseline blends it — so a column that disagrees is a
+ * transcription error rather than a judgement call. `realised/expected` is the whole check.
+ */
+export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally>): void {
+  const accrual = nominalAccrual();
+  const middayMs = opts.fromMs + 43_200_000;
+  const dowCvr = DOW_CVR[localWeekday(middayMs)] ?? 1;
+  const dowAov = DOW_ORDER_VALUE[localWeekday(middayMs)] ?? 1;
+
+  console.log(
+    `\n=== B27 · §5 channel · §6 temperature · §10 clicks, cost, order value, spend ===\n` +
+      `φ_ad enters p_ctr and NOT λ (D56). ν held at 1.00 (B28), m_channel at 1.00 (B30), so CPC\n` +
+      `carries no demand coupling yet. Conversions are COUNTED here and emitted nowhere — §11/B29\n` +
+      `schedules them. dow_cvr ${dowCvr.toFixed(2)} · dow_aov ${dowAov.toFixed(2)} at the window's midday.\n`,
+  );
+
+  console.log(
+    `  ${'ad'.padEnd(6)} ${'channel'.padEnd(13)} ${pad('impr', 8)} ${pad('clicks', 7)} ` +
+      `${pad('CTR', 8)} ${pad('exp CTR', 8)} ${pad('r/e', 6)}  ${pad('conv', 5)} ${pad('CVR', 7)} ` +
+      `${pad('exp CVR', 8)} ${pad('r/e', 6)}  ${pad('CPC¢', 7)} ${pad('exp mean', 8)} ${pad('r/e', 6)}`,
+  );
+
+  for (const ad of ADS) {
+    const t = tally.get(ad.ad_id);
+    if (t === undefined || t.impressions === 0) continue;
+    const channel = CHANNEL[ad.channel];
+    const temperature = AUDIENCES.find((a) => a.audience_id === ad.audience_id)?.temperature;
+    const row = temperature === undefined ? undefined : TEMPERATURE[temperature];
+    if (row === undefined) continue;
+
+    const phiAd = adFatigue(ad.ad_id, accrual).phi_ad;
+    const ctr = t.clicks / t.impressions;
+    const expCtr = pCtr(ad, phiAd);
+    const cvr = t.clicks === 0 ? 0 : t.conversions / t.clicks;
+    const expCvr = pCvr(ad, middayMs);
+    // Blended across the pricing mix, as D52's baseline blends it: only the CPC share is charged.
+    // The expected column is the MEAN, so it carries §12's `LogNormal(σ 0.35)` factor of
+    // exp(σ²/2) = 1.0632. Comparing a realised mean against a median would show every channel
+    // running 6% "hot" — a bias in the check, not in the model. Worth stating twice because
+    // **D52's ratified budget baseline omits this factor**, so each ad's true CPC-path spend runs
+    // ~6.3% above the baseline its budget was set against. Budgets sit ~25% above baseline, so
+    // pacing is unaffected and the numbers are left alone — `fixtures.ts` already says a budget is
+    // an account setting, not a measurement.
+    const cpc = t.clicks === 0 ? 0 : t.clickCostCents / t.clicks;
+    const cpcMean = Math.exp(NOISE.cpcSigma ** 2 / 2);
+    const expCpc = channel.cpcShare * channel.cpcBaseCents * row.cpcMult * cpcMean;
+
+    console.log(
+      `  ${ad.ad_id.padEnd(6)} ${ad.channel.padEnd(13)} ${pad(t.impressions, 8)} ${pad(t.clicks, 7)} ` +
+        `${pad((ctr * 100).toFixed(4) + '%', 8)} ${pad((expCtr * 100).toFixed(4) + '%', 8)} ` +
+        `${pad((ctr / expCtr).toFixed(3), 6)}  ${pad(t.conversions, 5)} ` +
+        `${pad((cvr * 100).toFixed(2) + '%', 7)} ${pad((expCvr * 100).toFixed(2) + '%', 8)} ` +
+        `${pad(t.conversions === 0 ? '—' : (cvr / expCvr).toFixed(3), 6)}  ` +
+        `${pad(cpc.toFixed(2), 7)} ${pad(expCpc.toFixed(2), 8)} ` +
+        `${pad(t.clicks === 0 ? '—' : (cpc / expCpc).toFixed(3), 6)}`,
+    );
+  }
+
+  console.log(
+    `\n  §10's spend path — one delta per ${SPEND_TICK_S} s per live ad, CPM accrual only (§H2):\n` +
+      `  ${'ad'.padEnd(6)} ${'mix cpc/cpm'.padEnd(12)} ${pad('¢/impr', 8)} ${pad('accrued¢', 10)} ` +
+      `${pad('emitted¢', 10)} ${pad('e/a', 6)} ${pad('ticks', 6)} ${pad('of', 6)}`,
+  );
+  const expectedTicks = Math.round(opts.hours * (3_600 / SPEND_TICK_S));
+  let accruedAll = 0;
+  let emittedAll = 0;
+  for (const ad of ADS) {
+    const t = tally.get(ad.ad_id);
+    if (t === undefined) continue;
+    const channel = CHANNEL[ad.channel];
+    accruedAll += t.cpmAccruedCents;
+    emittedAll += t.spendCents;
+    console.log(
+      `  ${ad.ad_id.padEnd(6)} ` +
+        `${`${(channel.cpcShare * 100).toFixed(0)}/${((1 - channel.cpcShare) * 100).toFixed(0)}`.padEnd(12)} ` +
+        `${pad(cpmAccrualCents(ad, 1).toFixed(4), 8)} ${pad(t.cpmAccruedCents.toFixed(1), 10)} ` +
+        `${pad(t.spendCents, 10)} ${pad((t.spendCents / Math.max(t.cpmAccruedCents, 1e-9)).toFixed(3), 6)} ` +
+        `${pad(t.spendTicks, 6)} ${pad(expectedTicks, 6)}`,
+    );
+  }
+  console.log(
+    `  portfolio accrued ${accruedAll.toFixed(1)}¢ · emitted ${emittedAll}¢ · ` +
+      `residual ${(emittedAll - accruedAll).toFixed(1)}¢ ` +
+      `(${((emittedAll / accruedAll - 1) * 100).toFixed(2)}%) — the per-interval rounding, ` +
+      `unbiased because the accrual's fractional part moves with the impression count.\n` +
+      `  A tick is skipped, not zeroed, when an interval accrues under half a cent — which is why ` +
+      `low-volume ads show fewer than ${expectedTicks}.`,
+  );
+
+  const orderValues = [...tally.values()].reduce(
+    (acc, t) => ({ conv: acc.conv + t.conversions, cents: acc.cents + t.orderValueCents }),
+    { conv: 0, cents: 0 },
+  );
+  if (orderValues.conv > 0) {
+    console.log(
+      `\n  Order value, §10: LogNormal(median × dow_aov, σ ${NOISE.orderValueSigma}) — ` +
+        `${orderValues.conv} conversions, mean ${(orderValues.cents / orderValues.conv / 100).toFixed(2)} USD.\n` +
+        `  A LogNormal's MEAN sits above its median by exp(σ²/2) = ` +
+        `${Math.exp(NOISE.orderValueSigma ** 2 / 2).toFixed(4)}, so a mean above every §6 median is ` +
+        `the distribution behaving, not a bug.`,
+    );
+  }
 }

@@ -130,3 +130,77 @@ export const FATIGUE = {
   /** §7.3's `r`: `f_effective(new version) = f × (1 − r)`. A recut recovers a third of the pool. */
   versionReset: 0.35,
 } as const;
+
+/**
+ * §5's channel matrix. TikTok earns clicks and does not convert them; Meta feed converts; Snap is
+ * cheap and weak on both.
+ *
+ * `cpcShare` is §5's pricing mix, and it is what makes the brief's **two cost paths** both real.
+ * L79-80 keeps them disjoint — *"`spend` — non-click charges (CPM, fees); disjoint from click costs
+ * — total spend = sum of both"* — so the mix decides where an ad's cost arrives from: on the CPC
+ * share a click carries `cost_cents`, on the CPM share cost accrues per impression and is emitted
+ * as a `spend` delta while those impressions' clicks carry `cost_cents = 0`. A 20/80 channel
+ * therefore exercises the `spend` path almost exclusively and a 70/30 channel the click path, both
+ * in one demo, and *total spend* stays a read-time sum of the two (D10) rather than a third column.
+ *
+ * Money is in **cents**, integer at the boundary: `cpmBaseCents` is the charge per 1,000
+ * impressions, `cpcBaseCents` the charge per click before the temperature multiplier.
+ */
+export const CHANNEL: Readonly<
+  Record<Channel, { ctrMult: number; cvrMult: number; cpcShare: number; cpmBaseCents: number; cpcBaseCents: number }>
+> = {
+  meta_feed: { ctrMult: 1.00, cvrMult: 1.00, cpcShare: 0.70, cpmBaseCents: 650, cpcBaseCents: 62 },
+  meta_reels: { ctrMult: 0.85, cvrMult: 0.90, cpcShare: 0.50, cpmBaseCents: 520, cpcBaseCents: 48 },
+  tiktok_feed: { ctrMult: 1.20, cvrMult: 0.75, cpcShare: 0.30, cpmBaseCents: 410, cpcBaseCents: 35 },
+  snap_stories: { ctrMult: 0.70, cvrMult: 0.65, cpcShare: 0.20, cpmBaseCents: 340, cpcBaseCents: 30 },
+};
+
+/**
+ * §6's temperature matrix. Retargeting costs more per click and is worth it; cold is cheap and
+ * converts badly; order value rises with intent.
+ *
+ * §6 is explicit that there is **no decay-rate column**: the fatigue constant `k` is global and the
+ * *pool* does the work (§7), so retargeting burns out roughly 50× faster than cold as a consequence
+ * of the model rather than as a parameter anyone can dispute.
+ *
+ * `p_fast` — §11's lag mixture weight, which is also keyed by temperature — is deliberately absent
+ * until B29 reads it. This file holds what something reads.
+ */
+export const TEMPERATURE: Readonly<
+  Record<string, { ctr: number; cvr: number; cpcMult: number; orderValueMedianCents: number }>
+> = {
+  cold: { ctr: 0.011, cvr: 0.018, cpcMult: 0.85, orderValueMedianCents: 4_200 },
+  warm: { ctr: 0.024, cvr: 0.055, cpcMult: 1.00, orderValueMedianCents: 5_800 },
+  retargeting: { ctr: 0.042, cvr: 0.150, cpcMult: 1.35, orderValueMedianCents: 7_600 },
+};
+
+/**
+ * §4.2's OTHER two day-of-week curves, indexed like `DOW_VOLUME`. Weekends are quieter *and*
+ * browsier: fewer people convert, and those who do spend slightly more.
+ *
+ * These are separate from `DOW_VOLUME` because §4.2 insists they are two phenomena — collapsing
+ * them into one volume curve would lose the second effect, which is the one that shows up in ROAS
+ * rather than in impressions.
+ */
+export const DOW_CVR: readonly number[] = [0.90, 1.00, 1.00, 1.00, 1.00, 1.00, 0.90];
+export const DOW_ORDER_VALUE: readonly number[] = [1.05, 1.00, 1.00, 1.00, 1.00, 1.00, 1.05];
+
+/**
+ * §12's remaining stochastic parameters — the ones attached to the click and cost path.
+ *
+ * `clickKappa` and `conversionKappa` are BetaBinomial concentrations: the *rate* is uncertain, not
+ * just the count, and the conversion rate is thinner (60 vs 200) so cohort ratios are the noisy
+ * ones. `cpcSigma`'s `m_channel^0.6` coupling is the point of the CPC row — competition raises
+ * price and volume pressure together — and lands with `m_channel` at B30.
+ */
+export const NOISE = {
+  clickKappa: 200,
+  conversionKappa: 60,
+  orderValueSigma: 0.6,
+  cpcSigma: 0.35,
+  /** §12: CPC is multiplied by `m_channel^0.6`. B30 supplies `m_channel`; the exponent lives here. */
+  cpcDemandExponent: 0.6,
+} as const;
+
+/** §21 / **I1**: `spend` is emitted as a delta per 60-second interval per live ad. */
+export const SPEND_TICK_S = 60;

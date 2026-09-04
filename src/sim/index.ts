@@ -12,15 +12,16 @@
 // fatigue (B26), novelty (B28), pacing (B32), the two AR(1) demand factors (B30). Clicks, cost and
 // spend are B27; the conversion schedule B29; the injected misbehaviours B33; the 7-day backfill
 // and the T0 seam B34 and B35.
-//
-// **ASSUMPTION (unratified), pending B26 and B27:** §3's λ as `SIMULATOR.md` writes it also lists
-// `φ_fatigue` and `ν_novelty`. Neither is applied here, because neither is built yet.
 
 import { derivedId } from './rng.ts';
 import { ADS, type AdFixture } from './fixtures.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
+import { adFatigue, nominalAccrual } from './fatigue.ts';
+import { clicksForTick, cpmAccrualCents, isSpendBoundary, spendCents } from './emit.ts';
+import { SPEND_TICK_S } from './params.ts';
 import {
   arrivalProcess,
+  clickAndCostPath,
   fatigue,
   localMidnightAtOrBefore,
   type DryRunOptions,
@@ -46,6 +47,18 @@ const AD = ((id: string): AdFixture => {
   if (found === undefined) throw new Error(`${id} is not in the seeded portfolio — SIMULATOR §2.3`);
   return found;
 })(AD_ID);
+
+/**
+ * §7's `φ_ad` for `a_12`, held constant for the life of the process — and per **D56** it enters
+ * `p_ctr` only, never λ.
+ *
+ * ASSUMPTION (unratified): the accrual is the NOMINAL one at `T0` (`fatigue.ts`), because the
+ * emitter has no `F` of its own until `GET /api/sim/world` recomputes it from the signal log (B31)
+ * and no `T0` until the seeder exists (B34). It blocks nothing and it costs little: `a_12` accrues
+ * 20,000/day into a 96,000 pool, so φ drifts about 1.5% per day and a demo lasts minutes. B31
+ * replaces this constant with a polled figure; until then a live run's fatigue is frozen, not wrong.
+ */
+const PHI_AD = adFatigue(AD_ID, nominalAccrual()).phi_ad;
 
 /** §15.1: 1 s, one batched POST per tick, 1× wall clock. */
 const TICK_MS = 1_000;
@@ -77,34 +90,108 @@ const MAX_PENDING = 10_000;
  * re-derive the same `event_id` with a different `ts` on restart, which is
  * `duplicate_conflicting` — a platform correction (§5.1 step 4) — rather than a duplicate.
  */
-function eventsForTick(tick: number): Signal[] {
-  // §3's λ at this second, then §12's draw. Every other factor defaults to 1.0 inside
+function impressionsForTick(tick: number): number {
+  // §3's λ at this second, then §12's draw. Every remaining factor defaults to 1.0 inside
   // `lambdaPerSecond` and is named on its own plan item; passing nothing is the honest statement
-  // that they are absent, not that they are one.
-  const lambda = lambdaPerSecond(AD_ID, AD.channel, tick * 1_000);
-  const count = negBinomial(SEED, AD_ID, tick, lambda);
+  // that they are absent, not that they are one. **φ and ν are not among them and never will be**
+  // — D56 puts both in `p_ctr` only, because fatigue changes what an impression is worth rather
+  // than how many arrive.
+  //
+  // A pure function of `(ad, tick)`, which is what lets the 60-second `spend` delta below
+  // re-derive an interval's impressions instead of accumulating them.
+  return negBinomial(SEED, AD_ID, tick, lambdaPerSecond(AD_ID, AD.channel, tick * 1_000));
+}
 
+/** Sub-second placement: spread evenly inside the tick's second rather than drawn for it. §14's
+ * list of named streams is closed, and inventing one for jitter would make that list a guess.
+ * Nothing reads sub-second placement yet — D28 buckets by the minute. */
+const spreadMs = (tick: number, i: number, of: number): number =>
+  tick * 1_000 + Math.floor(((i + 0.5) * 1_000) / Math.max(of, 1));
+
+function eventsForTick(tick: number): Signal[] {
+  const count = impressionsForTick(tick);
   const events: Signal[] = [];
+
   for (let i = 0; i < count; i++) {
-    // Spread evenly inside the second rather than drawn for it: §14's list of named streams is
-    // closed, and inventing one for sub-second jitter would make that list a guess. Nothing reads
-    // sub-second placement yet — D28 buckets by the minute.
-    const ms = tick * 1_000 + Math.floor(((i + 0.5) * 1_000) / count);
     events.push({
       event_id: derivedId(SEED, 'eid', AD_ID, tick, i),
       // Always the second that has ALREADY closed, so `ts` is in the past and I10's skew clamp
       // never fires. A simulator running its clock ahead would have every event clamped to
       // `received_at` and collapsed into the current minute.
-      ts: new Date(ms).toISOString(),
+      ts: new Date(spreadMs(tick, i, count)).toISOString(),
       ad_id: AD_ID,
       event: 'impression',
     });
   }
+
+  // §10's clicks. The `event_id` carries a `'c'` part so a click and an impression at the same
+  // (tick, index) cannot collide — parts are NUL-joined, so no other part sequence can produce it.
+  const clicks = clicksForTick(SEED, AD, tick, count, PHI_AD);
+  for (const click of clicks) {
+    events.push({
+      event_id: derivedId(SEED, 'eid', AD_ID, tick, 'c', click.index),
+      ts: new Date(spreadMs(tick, click.index, clicks.length)).toISOString(),
+      ad_id: AD_ID,
+      event: 'click',
+      click_id: click.click_id,
+      cost_cents: click.cost_cents,
+    });
+  }
+
+  // §10 / I1's `spend`: one delta per 60 s per live ad, carrying the CPM accrual of the interval
+  // that has just closed. Unix seconds divisible by 60 are minute boundaries and D28 buckets by
+  // the UTC minute, so `[tick − 60, tick)` is exactly one bucket and the delta lands in it.
+  //
+  // The interval's impressions are RE-DERIVED here rather than accumulated as the ticks went by.
+  // That costs 60 keyed draws a minute and buys the restart property: a re-emitted spend event is
+  // byte-identical, so it lands as `duplicate_identical` rather than as a correction.
+  //
+  // The interval must be one this process actually EMITTED, not merely one it can re-derive. Boot
+  // aligns `FIRST_TICK` down to a boundary, so the first tick generated is itself a boundary — and
+  // the interval it closes lies entirely BEFORE boot. Emitting it billed a full minute of CPM
+  // against zero impressions: found by reading the store, where a bucket held a `spend` row and no
+  // `impression` rows at all. Alignment is what makes this guard lossless: the first interval it
+  // skips is one no process ever emitted, and every later one starts on a tick this process
+  // generated, so a restart re-emits the boundary byte-identically instead of dropping it.
+  if (isSpendBoundary(tick) && tick - SPEND_TICK_S >= FIRST_TICK) {
+    let accrued = 0;
+    for (let t = tick - SPEND_TICK_S; t < tick; t++) accrued += cpmAccrualCents(AD, impressionsForTick(t));
+    const cents = spendCents(accrued);
+    if (cents > 0) {
+      events.push({
+        event_id: derivedId(SEED, 'eid', AD_ID, tick, 's'),
+        ts: new Date((tick - 1) * 1_000).toISOString(),
+        ad_id: AD_ID,
+        event: 'spend',
+        amount_cents: cents,
+      });
+    }
+  }
+
   return events;
 }
 
-/** The last whole second NOT yet generated. Boot starts it in the past; see CATCHUP_S. */
-let nextTick = Math.floor(Date.now() / 1_000) - CATCHUP_S;
+/**
+ * The last whole second NOT yet generated. Boot starts it in the past; see CATCHUP_S — and
+ * **aligned down to a spend interval**, which is what makes the 60 s `spend` delta exact.
+ *
+ * Found at B27 by reading the buckets rather than the code: unaligned, the first interval a process
+ * closes is only partly its own, because `eventsForTick` RE-DERIVES all 60 seconds of an interval's
+ * impressions while only emitting the ones from `nextTick` on. A cold start therefore billed a
+ * whole minute of CPM against a partial minute of impressions — a bucket showing `spend 2` behind
+ * 3 impressions, which is HR5's "any number walks back to the events" failing on the first minute
+ * of every run.
+ *
+ * Aligning fixes it by construction rather than by a guard. Every interval this process closes is
+ * one it generated in full, so spend and impressions agree in the same bucket. The cost is that
+ * catch-up covers 60–119 s instead of exactly 60; re-emitted ticks are byte-identical (§14), so
+ * the extra ones land as `duplicate_identical` and are counted, not lost. The alternative — skip
+ * any interval that starts before boot — silently drops one spend delta when a process dies
+ * mid-interval, and a dropped ingest is the one loss the app has no way to see.
+ */
+const FIRST_TICK =
+  Math.floor((Math.floor(Date.now() / 1_000) - CATCHUP_S) / SPEND_TICK_S) * SPEND_TICK_S;
+let nextTick = FIRST_TICK;
 let pending: Signal[] = [];
 let linkUp = true;
 let busy = false;
@@ -200,7 +287,7 @@ const dry = dryRunOptions(process.argv.slice(2));
 if (dry !== null) {
   const started = Date.now();
   fatigue();
-  arrivalProcess(dry);
+  clickAndCostPath(dry, arrivalProcess(dry));
   console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
   process.exit(0);
 }
@@ -208,6 +295,7 @@ if (dry !== null) {
 console.log(
   `[sim] ${AD_ID} on ${AD.channel} at ${BASE_IMPR_PER_DAY[AD_ID]}/day nominal → ${INGEST_URL}` +
     ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week, NegBinomial(λ, α=8)` +
+    ` · §10 clicks at p_ctr with φ_ad ${PHI_AD.toFixed(4)} (D56), CPM spend every ${SPEND_TICK_S}s` +
     ` · replaying the last ${CATCHUP_S}s`,
 );
 
