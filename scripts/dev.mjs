@@ -6,9 +6,12 @@
 
 import { spawn } from 'node:child_process';
 
+// B08 adds the client. Vite is a dev-time process only (D41): it serves `src/web` on :5173 and
+// proxies `/api` to the server on :8787, so the client uses relative URLs and needs no CORS.
 const PROCS = [
   { name: 'server', entry: 'src/server/index.ts' },
   { name: 'sim', entry: 'src/sim/index.ts' },
+  { name: 'web', entry: 'node_modules/vite/bin/vite.js' },
 ];
 
 const children = [];

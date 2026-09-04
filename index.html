@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  Vite's entry document (B08). Repo root because that is Vite's default root; the client source
+  it pulls in is `src/web/` and nothing else (D41: Vite dev-serves and builds `src/web` alone).
+
+  Deliberately unstyled — no stylesheet, no font, no reset. D45 (styling approach) is DEFERRED
+  until B36 (F4), and BUILD_PLAN.md §2 forbids settling it by drift: "a chunk needing styling
+  before B36 uses unstyled HTML and says so". This says so.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flawless Loop — Signal</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/web/main.tsx"></script>
+  </body>
+</html>
