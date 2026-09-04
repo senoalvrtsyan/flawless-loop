@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D50 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D54 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -116,6 +116,7 @@ level — and not a severity.
 | D51 | `create_ad`'s `created_at` — client-supplied or derived from the decision's `ts` | **ACCEPTED — B** (derived) | 2026-09-04 |
 | D52 | `daily_budget_cents` for the twelve seeded ads | **ACCEPTED — B** (hand-set, grounded in the expected-spend arithmetic; two ads near their cap) | 2026-09-04 |
 | D53 | Does B15 backdate the seeded decisions, and thereby fix `T0`? | **ACCEPTED — B** (backdate; `T0` = seeder boot) | 2026-09-04 |
+| D54 | What writes `orphan_expired`, and against which clock | **ACCEPTED — A** (derived at read; the store holds one unresolved state) | 2026-09-04 |
 
 ---
 
@@ -2711,3 +2712,80 @@ is computed or recorded, it simply cannot re-stamp decisions already written.
 The alternative was not "decide later" — it was "decide later, after three more chunks are built on
 top, and pay for it with a reseed". The only cost of deciding now is a definition B34 was going to
 have to make anyway.
+
+---
+
+# THE G3 PASS — D54
+
+Surfaced at the **G3 announcement**, before any code, because `orphan_expired` is a value the
+schema's CHECK admits and no document named its writer. `DESIGN.md` §5.2 states the state,
+`002_projections.sql` allows it, and `attribute.ts` said "the horizon sweep sets it" — with no
+sweep specified anywhere and no clock chosen for it.
+
+**Wording of record — Seno's words:**
+
+> "54: A, ok"
+
+**The mapping** (`CLAUDE.md` §3): *54: A* ratifies **D54 option A** — expiry is derived at read
+and the store holds one unresolved state. *ok* is the D48 group approval for **G3 = B18 + B19**.
+
+---
+
+## DECISION #54 — What writes `orphan_expired`, and against which clock
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B19 · **Couples to:** B22,
+B24, B44, B49
+**Relates to:** D13, D16, D38, `DESIGN.md` §5.2, §5.4, `BUILD_PLAN.md` §14
+
+### Question
+
+`DESIGN.md` §5.2: *"Still unresolved past the horizon → `state='orphan_expired'`. Retained,
+counted, and displayed as a data-health figure."* The state is named, the CHECK in
+`002_projections.sql` admits it — and **no document says what transitions a row into it, or
+against which clock**. D38 already fixed settlement's clock to the arriving event's `received_at`
+rather than wall-clock `now`; nothing said the same for expiry. In the whole build the only
+consumer is a read-side count: B44's orphan telemetry, and §5.2's *"6 conversions, $890, no
+matching click"*.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **Derive expiry at read; the store holds one unresolved state (`orphan_provisional`) for the row's life** | **CHOSEN** |
+| B | Sweep inside the ingest transaction, clocked by the arriving event's `received_at` (D38's precedent) | Rejected — literal to §5.2, but adds a clock-dependent column to the rebuild that B22 must reproduce and B24 diffs |
+| C | A wall-clock timer sweep | Rejected — non-deterministic under rebuild; `/api/verify` reports divergence on a correct store, and the seed's boot clock expires the whole backfilled week |
+
+The full analysis as presented is in `OPEN_QUESTIONS.md` §B wave 10.
+
+### Consequences
+
+1. **No clock enters a projection.** `conversion_attribution.state` is a pure function of the log,
+   so B22's rebuild reproduces the column for free and B24 cannot report divergence on a correct
+   store. This is the third time this build has chosen against a clock-dependent projection column
+   — `first_written_at` (B06) and D38's `restated_at` were the first two, and both are §14 traps.
+2. **The store holds two states, the UI reads three.** `resolved` and `orphan_provisional` are
+   stored; `orphan_expired` is computed at read as
+   `read_clock − (credited_minute + 60 s) > horizon`. `ix_attr_unresolved` is unaffected — its
+   predicate is `state <> 'resolved'`, which covers the unresolved row whether or not it is past
+   the horizon.
+3. **One promotion path for B20, not two.** A late click promotes an unresolved orphan with no
+   regard for its age, because age is not a stored state it could be in. B20 is §13's hardest
+   chunk and is single-gated; this removes a transition it would otherwise have to get right.
+4. **P16 (B49) rewrites nothing in `conversion_attribution`.** Shortening the horizon changes what
+   the read computes, and re-sweeps rollups only.
+5. **`DESIGN.md` §5.2 is amended** to say the state is derived rather than stored, and the CHECK
+   keeps the value it never holds — documented in place rather than left for a reviewer to grep
+   for a writer that does not exist. `BRIEF_GAPS.md` carries the entry.
+
+### What it forecloses
+
+Per-row expiry provenance — there is no *"declared dead at T"* stamp, and adding one later means
+adding a writer and a clock. Nothing in the plan asks for it: the figure is a count, not a history.
+Recoverable, and additively so — a stored state can be introduced without unpicking a derived one.
+
+### How I'd defend this in review
+
+The only thing that reads this state is a data-health count on one panel. Buying it with a stored
+column would have put a clock inside the one projection family whose freedom from clocks is what
+makes `/api/verify` mean anything — and we have already been bitten twice by exactly that shape.
+Deriving it costs one function and leaves the gate that guards everything after it clean.

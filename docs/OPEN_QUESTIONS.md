@@ -2808,3 +2808,67 @@ the most demo-worthy part and would not be in it yet, so the script needs a revi
 first day the UI is real — so learning the app is reading a document that grows under you, not
 waiting on a chunk that has to complete first. It also shrinks B62's final refresh, which is the
 last thing anyone wants to be writing on demo eve.
+
+---
+
+## Wave 10 — Phase 5 orphan expiry (D54)
+
+**Raised at the G3 announcement, 2026-09-04, and ratified the same day** — `docs/DECISIONS.md`
+§ THE G3 PASS. Preserved here in full because the entry there compresses the options to a line
+each (`CLAUDE.md` §3).
+
+### D54 — What writes `orphan_expired`, and against which clock
+
+**Blocking:** B19's second half. B18 is unaffected and can be built either way.
+
+**Context.** `DESIGN.md` §5.2 names the state — *"Still unresolved past the horizon →
+`state='orphan_expired'`. Retained, counted, and displayed as a data-health figure"* — and
+`002_projections.sql`'s CHECK admits it. But no document says what transitions a row into it, or
+against which clock. `attribute.ts` (B17) said "the horizon sweep sets it"; no sweep is specified
+anywhere. D38 fixed settlement's clock to the arriving event's `received_at` rather than
+wall-clock `now`, and nothing said the same for expiry. The horizon constant itself does not exist
+until B21. In the whole plan the only consumer is a read-side count: B44's orphan telemetry and
+§5.2's *"6 conversions, $890, no matching click"*.
+
+**A) Derive expiry at read; the store holds one unresolved state.** `state` stays
+`orphan_provisional` for the row's life. The read side computes expired as
+`read_clock − (credited_minute + 60 s) > horizon`. Nothing writes the value; `ix_attr_unresolved`
+is unaffected, its predicate being `state <> 'resolved'`.
+*Pros:* no clock enters a projection, so B22's rebuild reproduces the `state` column
+byte-for-byte for free and B24 cannot report divergence on a correct store; P16's horizon
+shortening (B49) rewrites nothing; one unresolved state means one promotion path for B20 instead
+of two.
+*Cons:* contradicts §5.2's literal wording and leaves a CHECK value the store never holds — a
+reviewer greps `orphan_expired`, finds no writer, and needs the §5.2 amendment to make sense of
+it. No "declared dead at T" stamp exists.
+*Forecloses:* per-row expiry provenance. Recoverable — a stored state is additive.
+*Reversal cost:* low.
+
+**B) Sweep inside the ingest transaction, at the arriving event's `received_at`.** Each batch runs
+one UPDATE over `ix_attr_unresolved` promoting eligible orphans, clocked exactly as D38 clocks
+settlement.
+*Pros:* literal to §5.2 and to the CHECK; the state is visible in `sqlite3` with no join;
+deterministic under replay, since it uses event clocks.
+*Cons:* B22/B23's rebuild must re-run the same sweep at the same log positions to reproduce it, so
+one more column can diverge in the gate that guards everything after it; an orphan expires only
+when some later event arrives, so the state lags on a quiet stream; B49 must re-sweep attribution
+as well as rollups.
+*Forecloses:* little. Adds a second unresolved state B20 must handle on promotion.
+*Reversal cost:* low–medium.
+
+**C) A wall-clock timer sweep** (flush tick or an interval), using `Date.now()`.
+*Pros:* simplest to write; the state is always current.
+*Cons:* non-deterministic under rebuild — `/api/verify` reports divergence on a correct store, and
+the tempting fix is to drop the column from the diff. This is the exact trap family already
+recorded twice in `BUILD_PLAN.md` §14 (`first_written_at`, D38's `restated_at`). During the seed a
+boot-time clock expires the whole backfilled week.
+*Forecloses:* the traceability claim, in practice.
+*Reversal cost:* high — it is found at B22, three gates later.
+
+**Recommendation: A.** The only thing that reads this state is a data-health count, and buying it
+costs one derived function instead of a clock inside a projection. For this slice that trade is not
+close: B24 is *"the gate that guards everything after it"* and every column whose value depends on
+when it was written is a way for a correct store to fail it — we have been bitten twice by exactly
+that shape. A also collapses two unresolved states into one before B20, which is §13's hardest
+chunk and is single-gated for that reason. B is the more literal reading of §5.2 and I would not
+argue against it; it just adds rebuild surface to the two chunks that can least afford it.
