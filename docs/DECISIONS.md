@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D63 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D64 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -128,6 +128,7 @@ level — and not a severity.
 | D61 | The emitter's boot catch-up window | **ACCEPTED — A** (60 s ratified; the re-emission is the demonstration) | 2026-09-04 |
 | D62 | The handover contract is one function short (`converted?`) | **ACCEPTED — A** (conversion becomes a per-click Bernoulli keyed by `click_id`) | 2026-09-04 |
 | D63 | Does a paused ad's already-earned conversion still arrive | **ACCEPTED — A** (it arrives; pause is a λ rule, and a conversion is not drawn from λ) | 2026-09-04 |
+| D64 | What a missing bucket draws on the chart | **ACCEPTED — A** (zero inside the ad's life, `null` before `launched_at`) | 2026-09-04 |
 
 ---
 
@@ -3727,3 +3728,55 @@ much as a build one. That is the cost the seam has to weigh.
 The cut line was held twice, against a measured rate rather than a feeling, and the question at the
 next gate was deliberately turned around: with stages 0–3 done in a day, the interesting question
 stopped being what to drop and became whether the cheapest deferred thing is worth adding back.
+
+---
+
+## DECISION #64 — What a missing bucket draws
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** nothing; flagged at B37 and
+answered before its commit · **Relates to:** `DESIGN.md` §4.1 · HR3 · B42 · B46/B47
+
+### Question
+
+`rollup_minute` is sparse: a bucket exists **if and only if** an event landed in it. So a minute
+with no row is ambiguous on a chart — it can be read as *delivered nothing* or as *we have no
+reading*. The two draw differently and the difference is exactly what the pause demo looks like.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **Zero inside the ad's life, `null` before `launched_at`** | **CHOSEN** |
+| B | `null` for every absent minute — a paused ad's line stops rather than falling | Rejected: it reads as missing data at the exact moment the lever is supposed to be seen working |
+
+### Rationale, in Seno's words
+
+> keep the zero-fill
+
+Reasoning of record: a bucket exists iff an event landed in it, so *inside an ad's life* an absent
+minute is not an absence of knowledge — it is a delivered zero, and drawing zero states that. The
+`launched_at` half is the same rule applied honestly in the other direction: before the ad existed,
+zero would be a fabricated data point, so the series does not start. What settles it against B is
+HR3 — **a line falling to zero reads as the lever working; a line that stops reads as the feed
+breaking**, and those are opposite conclusions about the same event.
+
+### Consequences
+
+1. **`toColumns()` fills zero from `launched_at` onward and `null` before it**, and a bucket that
+   exists *before* `launched_at` is still counted rather than dropped — the fold and the log
+   disagreeing is a real condition and hiding it would hide what `/api/verify` exists to surface.
+2. **B42's settlement treatment and B46/B47's lever demo both rest on this.** The pause beat in
+   `docs/DEMO.md` says "the line falls to zero", which is now true by construction.
+3. **`spanGaps: false`** stays set explicitly in `Chart.tsx`: the null/zero distinction only means
+   anything if nulls are not bridged.
+
+### What it forecloses
+
+Nothing. It is one branch in one function, and `BUILD_PLAN.md` §14 carries the reason so a later
+chunk cannot flip it by accident and call it a tidy-up.
+
+### How I'd defend this in review
+
+The store makes the distinction available — a bucket exists iff an event landed in it — so the chart
+draws the distinction the store actually holds, rather than collapsing "nothing happened" and "we do
+not know" into one shape at the moment a reviewer is watching a lever take effect.
