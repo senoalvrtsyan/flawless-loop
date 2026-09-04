@@ -114,6 +114,8 @@ level — and not a severity.
 | D49 | Take §12's cut line now, or hold it | **ACCEPTED — C** (hold to the B36 gate; nothing cut) | 2026-09-04 |
 | D50 | Where the demo script sits in the order | **ACCEPTED — B** (B61 runs as `docs/DEMO.md` from B36) | 2026-09-04 |
 | D51 | `create_ad`'s `created_at` — client-supplied or derived from the decision's `ts` | **ACCEPTED — B** (derived) | 2026-09-04 |
+| D52 | `daily_budget_cents` for the twelve seeded ads | **ACCEPTED — B** (hand-set, grounded in the expected-spend arithmetic; two ads near their cap) | 2026-09-04 |
+| D53 | Does B15 backdate the seeded decisions, and thereby fix `T0`? | **ACCEPTED — B** (backdate; `T0` = seeder boot) | 2026-09-04 |
 
 ---
 
@@ -2573,3 +2575,139 @@ one removed rejection. What it does foreclose is a *disagreement* between `decis
 Every other derived value in this build comes from a log; `created_at` was the one field the given
 contract would have let a client assert. Deriving it means the whole `ads` row is a function of the
 decision log, with no exceptions to explain.
+
+---
+
+# THE G2 PASS — D52, D53
+
+Both were surfaced at the **G2 announcement**, before any code, because both are written into the
+authoritative decision log by B15 and the log is append-only.
+
+**Wording of record — Seno's words, one sentence ratifying both:**
+
+> "52 - B and 53 - B"
+
+**The mapping, recorded explicitly rather than restated in each entry** (`CLAUDE.md` §3): *52 - B*
+ratifies **D52 option B** — hand-set budgets grounded in the expected-spend arithmetic, with two
+ads deliberately placed near their cap. *53 - B* ratifies **D53 option B** — B15 backdates the
+seeded `create_ad` / `launch` decisions to `T0 − live_days`, fixing `T0` as the seeder's boot
+instant.
+
+---
+
+## DECISION #52 — `daily_budget_cents` for the twelve seeded ads
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Blocks:** B15
+**Relates to:** D26 consequence 3, I3/P11, `SIMULATOR.md` §9, §21
+
+### Question
+
+`SIMULATOR.md` §9 makes budget a **pacing multiplier**: delivery is unaffected until 90% of
+`daily_budget_cents` and slides to zero at 105%. §2.3 gives each of the twelve ads an
+impressions/day figure but **no budget**, and §21's parameter appendix has no per-ad budget table.
+It cannot be deferred — it is a `create_ad` payload field, the log is append-only, and a wrong
+value can only be corrected by twelve `set_budget` decisions polluting the seeded log.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Derived by formula: expected daily spend × a headroom % | Rejected — every ad lands at the same point on the pacing curve, so ρ ≈ 1 everywhere and §9 is **inert in the seeded world**; the headroom % is a chosen number wearing a formula's clothes |
+| **B** | **Hand-set round numbers, grounded in A's arithmetic, with two ads near their cap** | **CHOSEN** |
+| C | One uniform budget for all twelve | Rejected — a_08 (65k impr/day) would throttle hard while a_09 (5k) never approaches its cap: an accident, not a design, and it reads as one |
+
+### What was chosen, and the arithmetic behind it
+
+Expected daily spend is computed per ad from §21 and written into `src/sim/fixtures.ts` beside each
+row, so every budget is defensible individually rather than uniformly:
+
+```
+clicks/day  = impressions/day x ctr_base(temperature) x ctr_mult(channel)      [phi = nu = 1]
+cpm charge  = impressions/day x cpm_share(channel) / 1000 x cpm_base(channel)
+cpc charge  = clicks/day x cpc_share(channel) x cpc_base(channel) x cpc_mult(temperature)
+baseline    = cpm charge + cpc charge
+```
+
+The channel's **CPC/CPM split** is read as *the fraction of impressions bought on each basis*. That
+reading is self-checking: applied to impressions it reproduces the stated split **in money** to
+within a few points on all four channels (meta_feed 68/32 against a stated 70/30; tiktok_feed 29/71
+against 30/70). The alternative reading — the split as a money ratio applied to a single base —
+disagrees with the CPM and CPC bases by a factor of ~2.6 and is therefore not what §21 means.
+
+Ten ads are set to a round number **~25% above** their baseline, so pacing is inert for them and
+delivery is budget-unconstrained. **Two are set close to or below it:**
+
+- **`a_08`** — §2.3's "gate-boundary ad", the highest-volume ad with no fatigue story of its own.
+  Budget **$950/day** against a ~$890 baseline: `a` reaches ~0.94 by day end, so `ρ_terminal` is
+  visibly biting in the evening.
+- **`a_12`** — the brief's own pause target. Budget **$90/day** against a ~$120 baseline, so it
+  throttles in the evening peak and a `set_budget` raise **releases it inside one tick**. That is
+  D26 consequence 3's second closable decision, demonstrated on the one ad the brief names.
+
+### Consequences
+
+1. **Two ads' impression volumes will land below §2.3's stated impressions/day**, because pacing
+   throttles them. That is the model working, not a calibration miss — but §18.3's ladder placement
+   for `a_08` was computed at its unthrottled rate, so **B35's calibration check must expect the
+   throttled figure for `a_08` and `a_12`** or it will report a false failure.
+2. Budgets are ours, not the brief's. They belong in `BRIEF_GAPS.md` § Extensions as a row.
+3. `a_12` being budget-constrained does not weaken the pause demo — a throttled ad still emits.
+
+### What it forecloses
+
+Nothing. A budget is one `set_budget` decision away at any time, which is the point of the lever.
+
+### How I'd defend this in review
+
+A pacing model that never fires in the data you ship is a model you cannot be shown to have built.
+Two ads near their cap cost two numbers and turn §9 from code into something visible on frame one.
+
+---
+
+## DECISION #53 — Does B15 backdate the seeded decisions, and thereby fix `T0`?
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Blocks:** B15 · **Couples to:** B34
+**Relates to:** U7, D14, D51, `SIMULATOR.md` §2.3, §15.2, §15.3
+
+### Question
+
+`SIMULATOR.md` §2.3 staggers the launches — *"three ads have seven days of history, the rest one to
+six"* — and §15.2 backfills seven days of events. But `launched_at` and every `config_generations`
+window come from the **decision's `ts`**, and U7 makes `ts` request time. If B15 stamps all
+twenty-four decisions at seeder boot, every backfilled click sits **before** any generation's
+`valid_from`, so D14's `credited_generation_id` is `NULL` for 100% of the seeded window. The log is
+append-only, so B34 cannot repair it afterwards.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Stamp everything at seeder boot | Rejected — D14 is dead on the seeded window, §2.3's stagger becomes decorative, and the reversal cost is a full reseed discovered at B37 |
+| **B** | **Backdate: `launch.ts = T0 − live_days`, `create_ad.ts` one minute earlier, `T0` = seeder boot** | **CHOSEN** |
+| C | B15 creates at boot; B34 reseeds from scratch | Rejected — B15's own output is thrown away, so B15 verifies nothing that survives, and there are two seeders to keep in step |
+
+### Consequences
+
+1. **The seeder is a privileged writer that can backdate, and U7 still holds.** U7 constrains
+   `POST /api/decisions`, where `ts` is server-assigned and a wire `ts` is a 400. The seeder calls
+   `applyDecision()` **in process**, which takes `ts` as an argument. This is exactly the
+   consequence **D51** already recorded. The README must say so plainly rather than leave a reader
+   to find a backdated log and infer that the endpoint allows it.
+2. **`T0` is defined one chunk earlier than B34**, which now inherits it rather than choosing it.
+   `T0` is **recoverable from the log** — the seven-day ads' `launch.ts` plus seven days — so it
+   needs no new column, and B34 owes only the decision of whether to make that explicit.
+3. `create_ad` one minute before `launch` means every ad carries a one-minute `draft` generation.
+   That is real history, not noise: it is the interval during which the config existed and served
+   nothing, and D5 says draft edits are not in the log precisely because that interval is free.
+4. Attribution across a config change is demonstrable on seeded data from B18 onward.
+
+### What it forecloses
+
+Nothing that B34 needs. It fixes the *stamping*, not the derivation: B34 may still choose how `T0`
+is computed or recorded, it simply cannot re-stamp decisions already written.
+
+### How I'd defend this in review
+
+The alternative was not "decide later" — it was "decide later, after three more chunks are built on
+top, and pay for it with a reseed". The only cost of deciding now is a definition B34 was going to
+have to make anyway.
