@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "db:migrate": "node src/server/migrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
   },

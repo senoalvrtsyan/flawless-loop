@@ -84,7 +84,7 @@ Three chunks. The store exists and executes; nothing reads or writes it yet.
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
 | [x] | **B01** | Repo scaffold: strict TS, Node 24 floor pinned, empty entry points, `dev`/`typecheck` scripts | `package.json`, `.nvmrc`, `tsconfig.json`, `.gitignore` | `node -v` ≥ 24; `npm run typecheck` clean; `engines` and `.nvmrc` both say 24 | D§2 (D8) | — |
-| [ ] | **B02** | DB module: open, the four pragmas, the ~10-line transaction wrapper; migration runner; `001_logs.sql` — `components`, `audiences`, `signal_deliveries`, `signals`, `decisions` | `src/server/db.ts`, `src/server/migrate.ts`, `migrations/001_logs.sql` | `npm run db:migrate` on an empty file; `PRAGMA journal_mode` returns `wal`; `.schema` matches D§2.1–2.3; insert a `ts` of 2099 and read `ts_effective` back clamped | D§2, 2.1–2.3 | **HR1 HR6 HR8** |
+| [x] | **B02** | DB module: open, the four pragmas, the ~10-line transaction wrapper; migration runner; `001_logs.sql` — `components`, `audiences`, `signal_deliveries`, `signals`, `decisions` | `src/server/db.ts`, `src/server/migrate.ts`, `migrations/001_logs.sql` | `npm run db:migrate` on an empty file; `PRAGMA journal_mode` returns `wal`; `.schema` matches D§2.1–2.3; insert a `ts` of 2099 and read `ts_effective` back clamped | D§2, 2.1–2.3 | **HR1 HR6 HR8** |
 | [ ] | **B03** | `002_projections.sql` — `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios` | `migrations/002_projections.sql` | `.schema`; hand-run the `ON CONFLICT DO UPDATE` upsert against `rollup_minute` twice and see one row | D§2.4 | **HR6** |
 
 **Why the schema lands whole and early.** It is ratified, and it was executed on this machine
@@ -409,6 +409,14 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   and is quadratic: seconds become hours.
 - **Settlement is evaluated at the arriving event's `received_at`**, never at wall-clock `now`.
   The wall-clock form stamps tens of thousands of spurious restatements during the seed.
+- **`STRICT` does not type-check the way the name suggests, and the gap is silent.** Found at B02
+  against the real store: binding the JS number `12` into `signals.ad_id` (`TEXT`) is *accepted* and
+  stored as the string **`'12.0'`** — STRICT converts across affinity where the conversion is
+  lossless, and `node:sqlite` binds a JS number as REAL. So an `ad_id` or `event_id` arriving as a
+  JSON number becomes a plausible-looking string that matches nothing, with no error at any layer.
+  **B05's validation (U6) must check JavaScript types itself and must not lean on `STRICT`** —
+  STRICT catches only the genuinely unconvertible (`'not-an-int'` into an INTEGER column, which it
+  does reject).
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.
 - **If a chunk reveals the design is wrong, stop coding and reopen the design doc.** Do not patch
