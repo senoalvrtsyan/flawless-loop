@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D64 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D67 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -129,6 +129,9 @@ level — and not a severity.
 | D62 | The handover contract is one function short (`converted?`) | **ACCEPTED — A** (conversion becomes a per-click Bernoulli keyed by `click_id`) | 2026-09-04 |
 | D63 | Does a paused ad's already-earned conversion still arrive | **ACCEPTED — A** (it arrives; pause is a λ rule, and a conversion is not drawn from λ) | 2026-09-04 |
 | D64 | What a missing bucket draws on the chart | **ACCEPTED — A** (zero inside the ad's life, `null` before `launched_at`) | 2026-09-04 |
+| D65 | Does the live viewport advance its leading edge | **ACCEPTED — C** (the client rolls the window and the stream fills it; the server's window stays on screen as "anchored at") | 2026-09-04 |
+| D66 | Where the headline window totals come from, and how they stay current | **ACCEPTED — C** (server-computed, re-asked over `?include=totals`, carrying `as_of_ingest_seq` and the resolved window) | 2026-09-04 |
+| D67 | How D20's bar is tested, and how the ladder resolves across a selection | **ACCEPTED — B at >50% of non-empty points, with (i)** (per-point suppression; coarsest rung the selection needs; dropped ads named) | 2026-09-04 |
 
 ---
 
@@ -3780,3 +3783,274 @@ chunk cannot flip it by accident and call it a tidy-up.
 The store makes the distinction available — a bucket exists iff an event landed in it — so the chart
 draws the distinction the store actually holds, rather than collapsing "nothing happened" and "we do
 not know" into one shape at the moment a reviewer is watching a lever take effect.
+
+---
+
+# THE G11 PASS — D65, D66, D67
+
+**Date:** 2026-09-04. Presented at the **G11 announcement**, before the first line of B38, because
+all three shape what that chunk's client half renders and the third settles a constant `D20` left
+unstated. Full option analysis as presented is in the group announcement; the measurements each
+option was priced against are reproduced in the entries below, because they are what made the
+recommendations more than preferences.
+
+**Wording of record — one sentence ratifying all three:**
+
+> "#65 C (keep the "anchored at" label, and snap with shared/time.ts's existing helpers), #66 C on
+> ?include=totals (carrying as_of_ingest_seq and the resolved window), #67 B at >50% of non-empty
+> points with (i) (gated count and reason always on screen, dropped ads named) — and yes, copy
+> /tmp/b34.sqlite to data/loop.sqlite rather than reseeding, verifying it once afterwards; G11
+> approved as announced."
+
+| Decision | Chosen | The amendment carried in that sentence |
+|---|---|---|
+| **D65** | **C** — client-side rolling window | the server's window stays visible as an **"anchored at"** label, and the client snaps with **`shared/time.ts`'s existing helpers** rather than its own arithmetic |
+| **D66** | **C** — `?include=totals` | the response carries **`as_of_ingest_seq` and the resolved window**, not bare numbers |
+| **D67** | **B at >50%**, with **(i)** | the **gated count and its reason are always on screen**, and ads dropped to counts are **named** |
+
+Also ratified in the same sentence, and not a design decision: **`/tmp/b34.sqlite` is copied to
+`data/loop.sqlite` rather than reseeding**, verified once afterwards. Measured after the copy:
+`npm run agree` **OK in 4.0 s** over 1,583,709 events and 71,440 buckets, and `/api/verify` **200
+in 12.2 s** with all four projections hash-matched (12 ads, 24 generations, 1,345 attributions,
+71,440 buckets). That is the **first clean `/api/verify` on the full seven-day store** — it was 409
+when B34 wrote it, B34a fixed the cause, and only a one-day scratch seed had carried the check
+until now.
+
+---
+
+## DECISION #65 — Does the live viewport advance its leading edge?
+
+**Status:** ACCEPTED — **option C, with Seno's two amendments** · **Date:** 2026-09-04 ·
+**Blocked:** B38, B39, B40 · **Shapes:** B42, B43, B45, B46, B47
+
+### Question
+
+`DESIGN.md` §3.1 specifies snapshot-then-stream and says nothing about the window moving. The
+window is fixed at fetch time (`to = ceilToMinute(now)`), the SSE replay is unwindowed, and
+`store.ts` drops rows outside the window so a "last hour" view cannot silently widen into last
+Tuesday. So does the leading edge advance, and if so, who moves it?
+
+**Measured before the options were written**, with the shipped `store.ts` against a real server:
+
+```
+window the server resolved: 17:52:00.000Z .. 17:58:00.000Z
+same-minute row  17:57:00.000Z  inWindow=true    <- expected true
+(waited 38s for the window's end minute to pass)
+rows now existing at or past the window's end: 1
+  a_12 17:58:00.000Z impressions=1 inWindow=false <- expected FALSE
+applyRows(store, thoseRows) changed the store: false
+```
+
+**The surface was live for at most the tail of the current minute**, plus restatements of
+in-window buckets forever. B10b's "the number climbs on its own" and B37's chart were both verified
+inside that first minute, which is why it had never shown up.
+
+### Options as presented
+
+- **A)** Leave the window fixed; state it as a limit. Zero code; the centrepiece looks frozen after
+  60 s and B39/B40 become demo-by-refresh.
+- **B)** Re-snapshot on a 60 s tick — §3.1 step 1 again, which is already the refresh path.
+  **Measured: 24,109,546 bytes / 70,980 buckets / 449 ms** per tick on the 7-day window, for
+  buckets the client already holds.
+- **C)** Roll the window client-side, fed by the stream. Newly included minutes are always in the
+  **future** at snapshot time, so nothing can be missed — every event in them arrives as an
+  absolute row.
+
+### Chosen
+
+**C**, with two amendments in Seno's sentence: the server's resolved window stays on screen as an
+**"anchored at"** label beside the client's current one, and the client's snapping uses
+**`shared/time.ts`'s existing helpers** (`floorToMinute` / `ceilToMinute`) rather than arithmetic
+of its own.
+
+### Rationale — Seno's words
+
+> "#65 C (keep the "anchored at" label, and snap with shared/time.ts's existing helpers)"
+
+The amendments are the whole content of the choice. The label is what keeps C from quietly
+discarding the property B10b was built on — the client displayed the **server's** window, byte for
+byte — by making the anchor visible instead of implicit. And the helper reuse is the answer to C's
+one real cost: a rolling frame has to snap its own bounds, and a second implementation of
+`floorMinute` is exactly the divergence `B20a` collapsed four copies to prevent. `shared/time.ts`
+already carries the read side's canonicalising half, so the client takes it rather than writing a
+fifth copy.
+
+### Consequences
+
+1. **`store.ts` grows the roll**, and it is the one file that changes: bounds advance on a minute
+   tick, buckets that fall off the back are evicted, and `inWindow` is unchanged in form — it is
+   the same predicate against moving bounds.
+2. **The window label is now two facts, not one**: the client's current `[from, to)` and the
+   server's `anchored at`. A reviewer can see how far the frame has walked from its anchor.
+3. **A refresh re-anchors.** §3.1 step 1 is untouched, so the fixed-window behaviour is still what
+   a cold start produces, and nothing about the resume contract (D47) moves.
+4. **It composes with D66.** A rolling window makes the server's totals stale *by construction*, so
+   the totals must be re-asked against the client's current bounds — which is what D66-C does.
+5. **Memory stays bounded**, which the fixed window never guaranteed: on a 7-day view the store
+   would otherwise accumulate restated buckets indefinitely.
+
+### What it forecloses
+
+Nothing identified. The predicate is one comparison and the roll is one timer; reverting to A is
+deleting both.
+
+### How I'd defend this in review
+
+The stream was already unwindowed, which is exactly what makes a moving frame correct rather than
+lossy — minutes only ever leave the window, and the minutes that enter it are future minutes whose
+every event the stream delivers as an absolute row; so the client can walk its frame forward with
+one predicate, and the anchor stays on screen so nobody has to guess how far it walked.
+
+---
+
+## DECISION #66 — Where the headline window totals come from, and how they stay current
+
+**Status:** ACCEPTED — **option C, with Seno's amendment** · **Date:** 2026-09-04 ·
+**Blocked:** B38 · **Shapes:** B51, B52, B53
+
+### Question
+
+**D46** settled *who* computes a displayed total: the server computes and signs totals and ratios,
+and the client may re-bucket under the server's descriptor but never invent a number. D46 did not
+settle how a server-computed total stays current between snapshots — and its own rationale is the
+reason to ask, because the argument that killed option B there was *"none of A/B/C answers the live
+path"*. Under D65 the question is forced: a rolling window makes a snapshot-time total describe a
+window that has since moved.
+
+**Measured:** the totals `SUM` over all 70,980 buckets grouped by ad is **20 ms**. Only the bucket
+payload is expensive (24 MB at 7 days).
+
+### Options as presented
+
+- **A)** Snapshot only, as-of stamped. Strictly D46; the biggest numbers on screen are frozen, and
+  under D65-C frozen against a window that moved — mislabelled rather than merely stale.
+- **B)** The client recomputes totals from the merged live rows. Ten lines, always current — and an
+  **undescribed** headline number, which is precisely what B52's `<Metric>` is built to refuse.
+- **C)** Server totals on their own cheap read: `?include=totals` serves them **without** buckets,
+  the client re-asks on a debounce when the stream moves it.
+
+### Chosen
+
+**C**, on `?include=totals` — and by Seno's amendment the response **carries `as_of_ingest_seq` and
+the resolved window**, not bare numbers.
+
+### Rationale — Seno's words
+
+> "#66 C on ?include=totals (carrying as_of_ingest_seq and the resolved window)"
+
+The amendment is what makes C a *descriptor-shaped* answer rather than a faster way to fetch three
+floats. A total with no window and no log position is exactly the number D34's quarantine exists to
+refuse; carrying both means B51 has only to sign what is already there, and a reviewer comparing
+the headline to the chart can see the two are answers to the same question at nearly the same log
+position rather than assuming it.
+
+### Consequences
+
+1. **`snapshot.ts` grows `totals`**, computed in the same read transaction as the buckets — counts
+   summed in SQL, the division after (**D10** unchanged, and no ratio is stored anywhere).
+2. **`?include=totals` is the second `include` parameter in the codebase**, and it follows B35a's
+   `?include=pending` precedent deliberately: one endpoint, one read transaction, opt-in payload.
+3. **`src/web/metrics.ts` is formatting and re-bucketing only** — D46's words. It never originates a
+   headline figure.
+4. **The totals lag the chart's cursor by up to the debounce**, and that is legible only because
+   both carry `as_of_ingest_seq`. This is the amendment paying for itself.
+5. **B51/B52 inherit the shape.** Signing a total means signing a `{ window, as_of, metric }` that
+   already exists, rather than inventing the envelope at B51.
+
+### What it forecloses
+
+Nothing identified. The read is additive and opt-in; deleting the debounce leaves option A.
+
+### How I'd defend this in review
+
+The server keeps every division, which is what makes any number on screen walk back to raw events —
+and because the totals read is 20 ms and carries no buckets, keeping the server as the only
+arithmetic did not cost the live behaviour that made the client-side shortcut tempting.
+
+---
+
+## DECISION #67 — How D20's bar is tested, and how the ladder resolves across a selection
+
+**Status:** ACCEPTED — **option B at >50% of non-empty points, with selection rule (i)** ·
+**Date:** 2026-09-04 · **Blocked:** B39 · **Shapes:** B40, B41, B45
+
+### Question
+
+**D20** fixes the bars (≥ 500 impressions for CTR, ≥ 10 **conversions** for CPA/ROAS), the ladder
+(minute → 5 min → 15 min → hour, then **stop** and show counts with the reason stated) and says the
+chart *"picks the smallest bucket size at which its points clear the bar"*. It does not say what
+*"its points clear"* means when some clear and others do not — and `SIMULATOR.md` §18.3 tabulates
+rungs *"at peak / at trough"*, which is a statement about points, not windows. Separately a chart
+has one x axis while §18.3 gives different ads different rungs, so a multi-ad selection needs a
+rule of its own.
+
+**Measured on the seeded week, and this is what made the fork real:**
+
+- `a_08` hourly conversions: **9 of 25 hours ≥ 10**; peak hours 23, 20, 18, 17, 15, 12, 12, 12;
+  **mean 7**.
+- **No ad's mean hourly conversions clear 10** anywhere in the week.
+- `a_01` CTR: 15-min points average **770** (clears), 5-min average **257** (fails) — §18.3's
+  15-min rung, reproduced from realised counts.
+
+### Options as presented
+
+- **A)** Every point must clear. Measured consequence: CPA/ROAS undrawable on any window spanning a
+  quiet hour, so D20's hourly branch never fires on camera; and it forecloses B45's *"≥3 gated
+  points per window"*, which presumes gated points exist.
+- **B)** **Majority of the window's non-empty points must clear; the rest are gapped.** Reproduces
+  §18.3's table on the real store, both branches.
+- **C)** At least one point must clear. Measured consequence: picks 5-min CTR for `a_01` where
+  §18.3 says 15 min, then gaps most of the series — a chart of holes reads as broken data rather
+  than as a gate.
+
+Selection rule: **(i)** one chart granularity = the coarsest rung the drawable selected ads need,
+ads that cannot clear at the hour dropped to counts and named · **(ii)** ratio metrics chart one ad
+at a time.
+
+### Chosen
+
+**B at `> 50%` of non-empty points, with (i)** — and by Seno's amendment the **gated count and its
+reason are always on screen**, and **ads dropped to counts are named**.
+
+### Rationale — Seno's words
+
+> "#67 B at >50% of non-empty points with (i) (gated count and reason always on screen, dropped ads
+> named)"
+
+`> 50%` is the constant this decision ratifies, and D20 did not state it: the bar itself is a
+statement about evidence and stays fixed, so what bends is the resolution, and the share of points
+that must clear before a rung is admissible is the missing third parameter. The amendment is the
+part that keeps B honest — a series drawn at the hour with sixteen of twenty-four points silently
+absent is a chart that has quietly become something else, which is the exact failure D20's cap was
+added to prevent. Saying *"hour · 7 of 24 points gated, under 10 conversions"* on the surface, and
+naming the ads that never cleared, is what makes the mechanism visible rather than inferable.
+
+### Consequences
+
+1. **`src/web/gate.ts` owns three things**: the two bars, the four-rung ladder with its cap, and the
+   `> 50%` admissibility test. Nothing else may hold a copy of a bar.
+2. **A gated point draws no ratio and is counted.** The count and its reason are surface elements,
+   not a tooltip — that is the amendment, and B45's fatigue flag reads the same gated-point count.
+3. **Selection rule (i) means one granularity per chart**, chosen as the coarsest rung the drawable
+   ads need; a never-clearing ad does not drag the chart down, it is named as counts-only.
+4. **It answers the check B34 owed** (D56 consequence 5): the rung is chosen from **realised**
+   counts, and at peak `a_08` clears with 12–23 conversions against a bar of 10 — so α = 8's
+   overdispersion does not silently cancel the demo moment. Over a 24-hour window CPA sits at
+   counts for every ad, which is honest and is stated rather than tuned around.
+5. **`> 50%` is now a §14 trap in waiting**: a rung chosen against *all* points or *any* point looks
+   like a tidy-up and changes which of D20's two branches fires. The constant lives in one place
+   with this entry cited.
+
+### What it forecloses
+
+Sub-minute ratios and confidence intervals were already foreclosed by D20. This adds nothing —
+`> 50%` is one comparison, and moving it is a one-line change with a measurable effect, which is
+the opposite of a foreclosure.
+
+### How I'd defend this in review
+
+D20's bar is a statement about how much evidence a single plotted point carries, so it has to be
+tested per point; the majority test is what turns that into a rung the whole series can be drawn at,
+and the gated-point count on the surface is what keeps the gaps from being mistaken for missing
+data — every part of it reproduces the rung table `SIMULATOR.md` §18.3 predicted, measured against
+realised counts rather than the expectations that table was computed from.
