@@ -13,7 +13,8 @@
     "seed": "node src/sim/seed-world.ts",
     "sim": "node src/sim/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --test",
+    "agree": "node scripts/agree.ts"
   },
   "dependencies": {
     "react": "^19.2.0",
