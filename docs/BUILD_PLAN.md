@@ -53,19 +53,27 @@ whole claim; check it before cutting anything not on the list.
 
 ## 2 — Blocking decisions before B01
 
-**Five decisions are blocking and none of them is a design decision I may take** (`CLAUDE.md` §3).
-Full option analysis in `docs/OPEN_QUESTIONS.md` § Wave 7; recommendations are there, not here.
+**Three of the five are ratified; two remain open.** Full option analysis in
+`docs/OPEN_QUESTIONS.md` § Wave 7; the ratified entries are in `docs/DECISIONS.md` § Wave 7.
 
-| # | Question | Blocks | Recommendation |
+| # | Question | Blocks | Status |
 |---|---|---|---|
-| **D41** | Repo layout and build toolchain — how does React get built and served | **B01** — nothing starts | Single package, three entry points; Vite for the client only |
-| **D42** | HTTP server: `node:http` or a framework | **B04** | `node:http` — the D8 argument again |
-| **D43** | Test runner, and what gets an automated test at all | **B12** (the fold) | `node:test`, no runner dependency; tests on the fold, attribution, restatement and the lag math only |
-| **D44** | Chart rendering: library or hand-rolled SVG | **B37** — stage 4 | uPlot, wrapped behind the descriptor-bearing component |
-| **D45** | Styling approach | **B36** | Plain CSS, one stylesheet, no framework — §7 of `CLAUDE.md` says do not spend here |
+| **D41** | Repo layout and build toolchain — how does React get built and served | **B01** — nothing starts | **ACCEPTED — A**, 2026-09-04. Single package, three entry points; Vite for the client only |
+| **D42** | HTTP server: `node:http` or a framework | **B04** | **ACCEPTED — A**, 2026-09-04. `node:http` + a ~40-line router |
+| **D43** | Test runner, and what gets an automated test at all | **B12** (the fold) | **ACCEPTED — A**, 2026-09-04. `node:test`, no runner dependency; tests on the fold, attribution, restatement and the lag math only |
+| **D44** | Chart rendering: library or hand-rolled SVG | **B37** — stage 4 | **DEFERRED**, 2026-09-04 (**F4**). Recommendation on the table: uPlot, wrapped behind the descriptor-bearing component |
+| **D45** | Styling approach | **B36** | **DEFERRED**, 2026-09-04 (**F4**). Recommendation on the table: plain CSS, one stylesheet, no framework |
 
-**Nothing in stages 0–3 is blocked by D44 or D45**, so those two can be answered later without
-holding up the build. D41–D43 are needed before the first commit.
+**No decision blocks any chunk from B01 to B35.** D44 and D45 are **deferred, not open** (**F4**):
+they are deliberately not being asked yet, because they are answered better at B36 — with the data
+volumes and the settlement-state legibility problem concrete — than they would be now.
+
+**Two obligations come with the deferral, and both bite silently if dropped:**
+
+1. **The chunk before B36 re-raises both.** A deferral nobody re-opens is a forgotten decision.
+2. **Nothing between here and B36 may settle either by drift** — no chart or styling library
+   installed, nothing hand-rolled that pre-empts the choice. A stage-0–3 chunk needing any styling
+   uses unstyled HTML and says so.
 
 ---
 
@@ -75,7 +83,7 @@ Three chunks. The store exists and executes; nothing reads or writes it yet.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
-| [ ] | **B01** | Repo scaffold: strict TS, Node 24 floor pinned, empty entry points, `dev`/`typecheck` scripts | `package.json`, `.nvmrc`, `tsconfig.json`, `.gitignore` | `node -v` ≥ 24; `npm run typecheck` clean; `engines` and `.nvmrc` both say 24 | D§2 (D8) | — |
+| [x] | **B01** | Repo scaffold: strict TS, Node 24 floor pinned, empty entry points, `dev`/`typecheck` scripts | `package.json`, `.nvmrc`, `tsconfig.json`, `.gitignore` | `node -v` ≥ 24; `npm run typecheck` clean; `engines` and `.nvmrc` both say 24 | D§2 (D8) | — |
 | [ ] | **B02** | DB module: open, the four pragmas, the ~10-line transaction wrapper; migration runner; `001_logs.sql` — `components`, `audiences`, `signal_deliveries`, `signals`, `decisions` | `src/server/db.ts`, `src/server/migrate.ts`, `migrations/001_logs.sql` | `npm run db:migrate` on an empty file; `PRAGMA journal_mode` returns `wal`; `.schema` matches D§2.1–2.3; insert a `ts` of 2099 and read `ts_effective` back clamped | D§2, 2.1–2.3 | **HR1 HR6 HR8** |
 | [ ] | **B03** | `002_projections.sql` — `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios` | `migrations/002_projections.sql` | `.schema`; hand-run the `ON CONFLICT DO UPDATE` upsert against `rollup_minute` twice and see one row | D§2.4 | **HR6** |
 
@@ -200,6 +208,16 @@ throughout; the stage-1 number keeps moving.
 ## 7 — Stage 4 · The Signal surface
 
 The deep surface, per D1. Read-only — no levers yet.
+
+> ### ⛔ Gate before B36 — D44 and D45 come back here
+>
+> **Deferred at B01 by F4, not answered.** B36 is the first chunk that cannot start without D45
+> (styling) and B37 the first that cannot start without D44 (chart rendering). **B35 does not hand
+> over to B36 until both are put to Seno and answered** — recommendations and full analysis are in
+> `docs/OPEN_QUESTIONS.md` § Wave 7 and need only be re-presented, not rewritten.
+>
+> Until then, nothing in B01–B35 installs a chart or styling library or hand-rolls anything that
+> pre-empts either choice; a chunk needing styling before B36 uses unstyled HTML and says so.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|

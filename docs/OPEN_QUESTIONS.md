@@ -2262,6 +2262,9 @@ a recommendation** — `system:fatigue_rule` and the approval flow are D26 cut #
 runs into on its first line, and every one of them has a defensible alternative — so per
 `CLAUDE.md` §3 they are Seno's, not mine. **No code exists and none will until D41–D43 are answered.**
 
+**D41–D43 were ratified 2026-09-04** and are recorded in `docs/DECISIONS.md` § Wave 7; each carries
+a banner below. **D44 and D45 were deferred to stage 4 in the same pass (F4)** — deferred, not open.
+
 **Two tiers, deliberately.** **D41, D42 and D43 block the first commit.** **D44 and D45 block
 nothing before stage 4** (chunks B36/B37) and can be answered later without holding the build —
 they are batched here only so the whole toolchain is decided in one pass if that is convenient.
@@ -2273,6 +2276,11 @@ where I depart from it (D41, D44) the departure is argued rather than assumed.
 ---
 
 ### DECISION #41 — Repo layout and build toolchain
+
+> **RESOLVED 2026-09-04 — option A** (single package, three entry points, Vite for the client
+> only). See `docs/DECISIONS.md` § DECISION #41. The analysis below is retained as the §3 source
+> the ratified entry compresses.
+
 
 **Blocking:** B01, and therefore everything. Nothing can be written to disk until this is answered.
 
@@ -2337,6 +2345,10 @@ so the repo can claim a completely unbundled toolchain?
 
 ### DECISION #42 — HTTP server: `node:http` or a framework
 
+> **RESOLVED 2026-09-04 — option A** (`node:http` with a hand-rolled router). See
+> `docs/DECISIONS.md` § DECISION #42.
+
+
 **Blocking:** B04. Everything from B05 onward is endpoints.
 
 **Context**
@@ -2390,6 +2402,10 @@ persistence with an asterisk.
 
 ### DECISION #43 — Test runner, and what gets an automated test at all
 
+> **RESOLVED 2026-09-04 — option A** (`node:test`, on `fold()`, attribution, restatement and the
+> lag mixture only). See `docs/DECISIONS.md` § DECISION #43.
+
+
 **Blocking:** B12 (the fold) — the first chunk whose verification step is not something you can see
 in a browser or a `sqlite3` prompt.
 
@@ -2442,6 +2458,11 @@ ship no automated tests at all (C) and lean entirely on `/api/verify` plus the P
 ---
 
 ### DECISION #44 — Chart rendering
+
+> **DEFERRED 2026-09-04 by F4** — *"Mark D44/D45 deferred, not open."* Deliberately not being asked
+> yet; raised again by the chunk before B36. Blocks B37 and nothing before it. See
+> `docs/DECISIONS.md` § F4.
+
 
 **Blocking:** B37, in stage 4. **Blocks nothing before that** — stages 0–3 need no chart.
 
@@ -2498,6 +2519,10 @@ dependency-free?
 ---
 
 ### DECISION #45 — Styling
+
+> **DEFERRED 2026-09-04 by F4** — raised again by the chunk before B36, which is the first chunk
+> that cannot start without it. See `docs/DECISIONS.md` § F4.
+
 
 **Blocking:** B36, in stage 4. **Blocks nothing before that.**
 

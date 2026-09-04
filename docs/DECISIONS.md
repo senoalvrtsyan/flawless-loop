@@ -15,9 +15,9 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D40 |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D43 (D44, D45 open) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
-| `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1, F2, F3 |
+| `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
 | `P`*n* | **Plan item** — one reviewable build chunk | `SCOPE.md` §2; `BUILD_PLAN.md` from Phase 4 | P1–P17 |
 | `L`*nnn* | **Line number in `docs/BRIEF.md`** — so a quote is checkable, never recalled | citations throughout | — |
@@ -102,6 +102,11 @@ level — and not a severity.
 | D17 | Simulator architecture | **ACCEPTED** — closed by the Phase 3 proposal block | 2026-09-03 |
 | F3 | Scenario control is a plan item (P17) | **ACCEPTED** | 2026-09-03 |
 | D35p | D35 parameter ratification (`served_fraction`, version reset `r`) | **ACCEPTED** | 2026-09-03 |
+| D41 | Repo layout and build toolchain | **ACCEPTED — A** (single package, Vite for the client only) | 2026-09-04 |
+| D42 | HTTP server: `node:http` or a framework | **ACCEPTED — A** (`node:http` + a ~40-line router) | 2026-09-04 |
+| D43 | Test runner, and what gets a test at all | **ACCEPTED — A** (`node:test`, four pure functions) | 2026-09-04 |
+| D44, D45 | Chart rendering · styling | **DEFERRED to stage 4** (B36/B37) — see F4 | 2026-09-04 |
+| F4 | D44/D45 are deferred, not open | **DECIDED** | 2026-09-04 |
 
 ---
 
@@ -1819,3 +1824,270 @@ creative. Both extremes are defensible and both are one constant away.
 on, and the first value I chose made the phenomenon the brief says it will inspect invisible — so
 the arithmetic that caught it is in the document beside the corrected value, rather than the
 corrected value appearing as though it had always been right.
+
+---
+
+# WAVE 7 — PHASE 5 TOOLCHAIN (D41–D43)
+
+**Ratified 2026-09-04**, immediately before the first line of code. Three of the five Wave 7
+questions; **D44 (chart rendering) and D45 (styling) remain open** and block nothing before stage 4
+(`BUILD_PLAN.md` B36/B37).
+
+**Wording of record.** Each was answered in two steps: the option selected, then Seno's reason for
+it in one sentence, given 2026-09-04 in a single message that also disposed of D44/D45 (**F4**). The
+sentences are reproduced verbatim in each entry and are the rationale of record; my supporting
+analysis is kept beneath, separately labelled, because it is not his.
+
+| # | Selected | Seno's words |
+|---|---|---|
+| **D41** | A — single package, Vite client-only | *"one package, Vite client-only, three packages is workspace overhead for a one-person one-command project."* |
+| **D42** | A — `node:http` + router | *"ten routes and no auth, a framework earns nothing and SSE is simpler on raw node:http."* |
+| **D43** | A — `node:test`, four functions | *"tests only where a wrong answer is invisible; the agreement sweep is the real safety net."* |
+| **D44, D45** | **DEFERRED to stage 4** | *"Mark D44/D45 deferred, not open."* — see **F4** |
+
+Full option analysis, with pros, cons, what each forecloses and reversal cost, stays in
+`docs/OPEN_QUESTIONS.md` § Wave 7 — the §3 compression allowance. The options are given below as one
+line each.
+
+---
+
+## DECISION #41 — Repo layout and build toolchain
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocked:** B01, and therefore everything
+
+### Question
+
+`CLAUDE.md` §1 fixes the stack (Node + TypeScript strict + React, `node:sqlite`, Node 24 floor) but
+does not say how React reaches a browser. `DESIGN.md` §11 and **D32** require three runnable things:
+a server, a separate-process simulator, and a client bundle. Nothing ratified constrains the bundler
+or the package layout.
+
+### Options as presented
+
+**A) Single `package.json`, three entry points, Vite for the client only.** One dependency tree;
+`src/shared` imported by relative path; Vite dev-serves and builds `src/web` alone, proxying `/api`.
+One new dev dependency. Reversal cost low.
+**B) No bundler — `tsc` to ESM, native modules, import map for React.** Zero dev dependencies beyond
+TypeScript; no HMR, no dev server, manual proxy, React vendored by hand. Reversal cost low.
+**C) npm workspaces, four packages.** Process boundary visible in the tree; build ordering and four
+manifests for a solo build. Reversal cost medium.
+
+### Chosen
+
+**A.** Single package, three entry points, Vite for `src/web` only.
+
+### Rationale — Seno's words
+
+> "one package, Vite client-only, three packages is workspace overhead for a one-person
+> one-command project."
+
+**Note what this rationale rests on and what it does not.** It rejects **C** on overhead grounds and
+takes A's client-only Vite; it does not engage the D8-purity argument that motivated **B**. The
+implication — that a dev-time tool absent from the running system does not violate D8 — is carried by
+the supporting analysis below, not by Seno's sentence, and consequence 2 is where it gets paid for.
+
+### Supporting analysis as presented *(mine, not his)*
+
+> The honest form of D8's argument is *no new **runtime** dependency*, and Vite is not one: it emits
+> static files and is absent from the running system, so the property D8 protects (the app is Node +
+> SQLite and nothing else) is untouched. What B actually costs is ten chunks of stage-4 UI work
+> without hot reload, on the one part of the build where `DESIGN.md` specifies behaviour precisely
+> and appearance not at all — meaning iteration count is the dominant cost there. C is the right
+> structure for a team and the wrong one for a slice this size.
+
+### Consequences
+
+1. **B01 is now writable**: one `package.json`, one `tsconfig.json`, `.nvmrc`, `.gitignore`.
+2. **The D8 claim acquires a qualifier that must be stated, not hidden.** The README says *no
+   runtime dependencies*; Vite, TypeScript and React are visible in `devDependencies` and React is
+   a runtime dependency of the client bundle. The claim is about the **server**, and it is written
+   that way or it is dishonest.
+3. **B57's one-command run stays a script** (`scripts/start.mjs`) spawning two processes and serving
+   a built bundle — not a build system.
+4. `src/shared` is a directory, not a package. Server, simulator and client all import it by
+   relative path.
+
+### What it forecloses
+
+**Nothing.** Vite is dev-time. Swapping or removing the bundler touches `scripts/`, `index.html` and
+one config file.
+
+### How I'd defend this in review
+
+D8 protects a property of the *running system*, and a tool that has exited before the system starts
+cannot violate it — so the cost of B was ten UI chunks without hot reload in exchange for a purity
+the deployed artifact already has.
+
+---
+
+## DECISION #42 — HTTP server: `node:http` or a framework
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B04
+
+### Question
+
+Ten routes, no auth, no sessions, no middleware chain, one client, and a synchronous store.
+`DESIGN.md` §11 requires the ingest and decision paths to be synchronous end to end inside one
+SQLite transaction. Framework or not?
+
+### Options as presented
+
+**A) `node:http` + a ~40-line router.** No dependency; SSE flush control and backpressure directly
+visible on the raw socket; we write ~60–80 lines of body parsing, 404s and error handling.
+**B) Express.** Reviewer familiarity, one-line body parsing and static serving; a dependency tree,
+and an SSE story needing care around compression and buffering.
+**C) Fastify.** Boundary schema validation; async-first over a synchronous store, and its validation
+is the wrong shape for ours. All three: reversal cost low.
+
+### Chosen
+
+**A.** `node:http` with a hand-rolled router.
+
+### Rationale — Seno's words
+
+> "ten routes and no auth, a framework earns nothing and SSE is simpler on raw node:http."
+
+### Supporting analysis as presented *(mine, not his)*
+
+> Ten routes, one client, no auth: the framework is doing almost nothing here, and the two places it
+> would do something — SSE flush control and validation-with-retention — are both places where it
+> gets in the way rather than helps. C's validation is the clearest case: our ingest boundary must
+> *keep* what it rejects (`DESIGN.md` §5.1), which is the opposite of what schema validation is for.
+> And under A, "no new dependency" stays a claim about the whole server rather than one about
+> persistence with an asterisk.
+
+### Consequences
+
+1. **The server's runtime dependency count is zero** — `node:http` + `node:sqlite` + nothing. This is
+   the claim D41 consequence 2 says must be scoped to the server; here is why it survives at all.
+2. **B04 owns the router**: one `switch` on method and pathname, a JSON body reader, an SSE helper.
+   It is a chunk, and it is small.
+3. **Validation is ours**, which is required rather than incidental: `DESIGN.md` §5.1 writes rejects
+   to `signal_deliveries` with the raw body retained. A framework's 400-and-discard would have to be
+   worked around.
+4. Handlers are `(req, res)`, so B remains a drop-in if the router ever becomes a burden.
+
+### What it forecloses
+
+**Nothing.** Handler signatures are framework-shaped either way.
+
+### How I'd defend this in review
+
+The one feature a framework would have bought us — validation at the boundary — is a feature we
+specifically cannot use, because `DESIGN.md` §5.1 requires the boundary to *persist* what it rejects.
+
+---
+
+## DECISION #43 — Test runner, and what gets an automated test at all
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B12
+
+### Question
+
+`CLAUDE.md` §10 defines done as *"verifiable by hand in the browser or terminal, with steps given"*,
+and the brief asks for no tests. But four things are pure functions whose arithmetic is wrong in ways
+a screen does not reveal: `fold()`, attribution, the restatement decrement/credit, and the lag
+mixture. `GET /api/verify` and the P14 sweep are in-product checks over real data — not unit tests,
+and not substitutes for them.
+
+### Options as presented
+
+**A) `node:test` + `node:assert`, on those four pure functions only.** Built in, zero dependency;
+no component testing, so the UI stays hand-verified as §10 asks.
+**B) Vitest, client included.** One runner both sides, shares Vite's config; a dependency, a config
+file, and it invites UI tests that `CLAUDE.md` §7 deprioritises.
+**C) No automated tests at all.** Fastest per chunk; the four functions get no coverage until B24,
+and the sweep says *that* buckets disagree, not *which* branch is wrong. All three: reversal cost low.
+
+### Chosen
+
+**A.** `node:test`, confined to `fold()`, attribution, restatement and the lag mixture.
+
+### Rationale — Seno's words
+
+> "tests only where a wrong answer is invisible; the agreement sweep is the real safety net."
+
+**This is a sharper rule than option A's own wording, and it governs.** A named four functions;
+Seno named the *criterion* that picked them — **a wrong answer that is invisible**. So the test
+surface is defined by that test, not by a list, and consequence 2 below is restated in those terms:
+a fifth test target is admissible exactly when its wrongness cannot be seen, and inadmissible
+otherwise. The second clause also fixes the standing of the automated tests: the B24 agreement sweep
+is the safety net, and unit tests are the bisection tool under it — not the other way round.
+
+### Supporting analysis as presented *(mine, not his)*
+
+> The argument is not coverage, it is bisection. `BUILD_PLAN.md` §13 names B20 (restatement) as the
+> hardest chunk and notes its bugs are invisible until B24's sweep; a fixture test that folds five
+> decisions or promotes one orphan turns "some bucket disagrees somewhere in 1.6M events" into a
+> named failing branch. Confining tests to those four functions keeps the cost near zero and keeps
+> the UI on the hand-verification path `CLAUDE.md` §10 already specifies. C's in-product checks stay
+> — they are the reviewer-facing evidence; unit tests are the developer-facing bisection tool, and
+> they are not substitutes.
+
+### Consequences
+
+1. **B01 adds a `test` script** (`node --test`) and no dependency.
+2. **The test surface is governed by a criterion, not a list** — *"only where a wrong answer is
+   invisible"*. Four functions meet it today. A chunk proposing a fifth must argue that its
+   wrongness cannot be seen by hand or by the sweep; if it can be seen, it is hand-verified per
+   `CLAUDE.md` §10 and gets no test. The criterion is cited in the chunk, not assumed.
+3. **`/api/verify` and the P14 sweep are unaffected** — they were never tests, and they remain the
+   reviewer-facing evidence.
+4. The UI is hand-verified, per chunk, per `BUILD_PLAN.md`'s verification column.
+
+### What it forecloses
+
+**Nothing.** Adding Vitest later is additive, and no test written under A would need rewriting.
+
+### How I'd defend this in review
+
+Unit tests here are a debugging tool aimed at the four functions whose bugs a screen cannot show, not
+a coverage exercise — and the in-product agreement sweep over 1.6M real events is the evidence a
+reviewer should actually be shown.
+
+---
+
+## F4 — D44 and D45 are DEFERRED, not open
+
+**Status:** DECIDED — deferred to stage 4 · **Date:** 2026-09-04 · **Relates to:** D44, D45 ·
+**Not a new decision**
+
+### Instruction
+
+> "Mark D44/D45 deferred, not open."
+
+### What the distinction means, and why it is worth an entry
+
+**Open** and **deferred** read the same in a table and behave differently on a cold resume. An
+*open* decision is an unanswered question that something is waiting on — `STATUS.md` § "What is
+open" lists it, and the next action is to chase it. A *deferred* one is a question **deliberately
+not being asked yet**, because the chunk that needs it is thirty-five chunks away and answering it
+now would be answering it with less information than we will have then.
+
+`BUILD_PLAN.md` §2 asked for exactly this disposition at the Phase 4 close — *"if you would rather
+decide them later, say so and `BUILD_PLAN.md` §2 gets a note that they are deferred rather than
+open"* — and this is that instruction.
+
+### Consequences
+
+1. **`STATUS.md` § "What is open" carries no blocking decisions.** For the first time since Phase 0
+   the build is unblocked end to end as far as B35.
+2. **D44 becomes live at B37, D45 at B36.** Whichever chunk arrives first raises both together, since
+   they land in the same two files. **The chunk before B36 must re-raise them** — a deferral that
+   nobody re-opens is just a forgotten decision.
+3. **The recommendations stay on the table** (uPlot behind a descriptor-bearing wrapper; one plain
+   stylesheet with semantic custom properties), and the analysis stays in `OPEN_QUESTIONS.md`
+   § Wave 7. Deferring is not a lean toward either.
+4. **Neither may be settled by drift.** No chunk before B36 may install a chart or styling library,
+   or hand-roll something that pre-empts the choice. If a stage-0–3 chunk needs any styling at all,
+   it uses unstyled HTML and says so.
+
+### What it forecloses
+
+**Nothing** — that is the point of deferring rather than deciding.
+
+### How I'd defend this in review
+
+Both questions are answered better at B36 than at B01, because by then the data volumes and the
+settlement-state legibility problem are concrete rather than predicted — and neither blocks a single
+chunk in between, so deferring costs nothing and buys information.

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+
+# SQLite store and its WAL sidecars. The path is B02's decision; the pattern covers it.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+*.log
+.env
+.env.*
+.DS_Store
