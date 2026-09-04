@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D55 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D58 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -118,6 +118,9 @@ level — and not a severity.
 | D53 | Does B15 backdate the seeded decisions, and thereby fix `T0`? | **ACCEPTED — B** (backdate; `T0` = seeder boot) | 2026-09-04 |
 | D54 | What writes `orphan_expired`, and against which clock | **ACCEPTED — A** (derived at read; the store holds one unresolved state) | 2026-09-04 |
 | D55 | How the `/api/verify` rebuild is isolated from the store it checks | **ACCEPTED — A** (TEMP tables shadowing the real names, plus two §14 invariants and a build-failing tripwire) | 2026-09-04 |
+| D56 | Where fatigue and novelty enter the model: λ, or `p_ctr` | **ACCEPTED — A** (`p_ctr` only; λ has four factors, not six) | 2026-09-04 |
+| D57 | Does §12's demand noise preserve mean volume, at what interval, and does κ do anything | **ACCEPTED — A / Δ = 60 s / A** (`E[m] = 1` by a −sd²/2 drift; the click rate drawn once a minute) | 2026-09-04 |
+| D58 | `ρ_pacing` is path-dependent, and §14's restart identity is not | **ACCEPTED — B** (sub-second placement made independent of the count) | 2026-09-04 |
 
 ---
 
@@ -3039,3 +3042,90 @@ asking what already depends on the answer: D52's budgets for the mean, D28's buc
 interval, and D20's gates for the granularity the rate uncertainty has to be visible at. The third
 part is the one worth pointing at, because the parameter was *transcribed correctly and did nothing*
 — which no test would have caught, and which the model now demonstrates by A/B rather than claims.
+
+---
+
+## DECISION #58 — `ρ_pacing` is path-dependent, and §14's restart identity is not
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Blocks:** B32, and B33's verification
+**Relates to:** `SIMULATOR.md` §9, §13, §14 property 1 · D26 consequence 3 · I3/P11 · D52 · B11 · B31b
+
+### Question
+
+`SIMULATOR.md` §9 makes `ρ` a function of `a = spend_so_far_today / daily_budget_cents`, read from
+the world poll. §14 property 1 says a restart's re-emission is `duplicate_identical` — B11 measured
+**14 identical / 0 conflicting**. **Both cannot hold.** Spend is path-dependent, so a catch-up tick
+re-derived at boot uses a different `a` than its original emission did; `ρ` moves, λ moves, and
+`negBinomial` returns a different count. `spreadMs(tick, i, count)` divides by `count`, so a count
+change rewrites `ts` for every `event_id` the two runs share — the same id with a different body,
+which §5.1 step 4 classifies `duplicate_conflicting` and surfaces as a **platform correction**.
+
+Measured before the decision was put, over the seeded portfolio, 12 ads × 120 s of catch-up
+(541 impressions, 1,440 tick-ads):
+
+| `ρ` drift | tick-ads whose count changes | conflicting | as a rate |
+|---|---|---|---|
+| 0.4% — `ρ_catchup`, slope 3.0, the ten unconstrained ads | 4 / 1440 | 0 | 0.000% |
+| 1.0% | 8 / 1440 | 3 | 0.555% |
+| 2.8% — `ρ_terminal` at `a` ≈ 1.0, slope 6.67, **`a_12`** | 34 / 1440 | 9 | **1.66%** |
+
+§13 injects `duplicate_conflicting` at **0.05%**. The taper case is ~33× that, concentrated on
+`a_08` and `a_12` — the two ads **D52** deliberately placed near their cap so §9 would be visible,
+one of which is the brief's own pause target. **B33's verification is a disposition count against
+§13's rates**, so B32 built literally corrupts the check B33 exists to make.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | **Live `ρ`, emission mechanics unchanged.** §9 verbatim, no extra code, `set_budget` moves the rate inside one tick — and the table above, every restart, on the demo ad | Rejected — it makes a number on screen wrong for a reason that is not a fault we injected, and it forecloses §14 property 1 and a clean §13 measurement at B33 and B35 |
+| **B** | **Live `ρ`, and make sub-second placement independent of the count.** `ts = tick·1000 + min(i, 999)` instead of an even spread over `count`, so an impression's `ts` is a pure function of `(tick, i)` and a click's of `(tick, click ordinal)`. A count change can then only **append or omit at the tail** — never rewrite an event already sent | **CHOSEN** |
+| C | **The world serves spend at minute boundaries; `ρ` is evaluated at the tick's own minute.** `GET /api/sim/world` adds cumulative spend as of the last ~3 minute boundaries; only the numerator snaps, so `daily_budget_cents` stays live and `set_budget` is still instant. Exact restart identity including the count | Rejected for now — it changes B31a's shipped wire format, grows B32 past one concern, and is still inexact where a §13 reorder lands a `cost_cents` in a past minute. The better answer if seed-only determinism were the centrepiece; §14 has already ratified the weaker true claim instead |
+
+### Rationale, in Seno's words
+
+> B — then announce B32 + B33
+
+**Recorded honestly: this ratification is a bare option choice, so the reasoning of record is the
+one put with the recommendation**, not a reconstruction in Seno's voice. That reasoning: B is six
+lines in one file, needs no server change, and removes the whole failure class rather than the one
+instance — including the φ/ν residue **B31b** left in `BUILD_PLAN.md` §14 as a bounded trap. What it
+spends is a property nothing in this build reads: even sub-second placement inside a second that
+**D28** buckets by the minute.
+
+### Consequences
+
+1. **`spreadMs` changes, and the move is FORCED rather than a drive-by** — it is a line B11 shipped,
+   named in the B32 announcement before it was touched. `src/sim/index.ts` carries the reason at the
+   point it happens.
+2. **The B31b φ/ν trap is retired.** §14's entry bounded re-emission divergence at ~1e-4 conflicting
+   per catch-up; under B the conflicting term is **zero** and the residue is at most one extra or
+   one missing event. The §14 row is rewritten rather than deleted, because the *cause* is unchanged
+   and only the consequence moved.
+3. **A residual remains and is stated, not hidden.** A count flip can still add an impression the
+   first run never sent — measured 4 per 120 s catch-up at 0.4% drift, all 0↔1 transitions. Those
+   are `accepted`, not conflicting, so a re-emitted bucket can gain a handful of events on a
+   restart. That is a real property of a path-dependent pacer and belongs in the README's
+   misbehaviour section beside §13's injected rates.
+4. **Sub-second placement stops being even.** Nothing reads it — D28 buckets by the minute, and
+   `index.ts` already said so at the line B replaces. If anything later wants even spread it has to
+   restate this decision.
+5. **§9 stays literal.** `ρ` is live off the poll, so *"raise the budget and the event rate visibly
+   rises inside a second"* — D26 consequence 3, the second closable decision — is unaffected.
+
+### What it forecloses
+
+Even sub-second placement, and with it any future claim about intra-second event ordering. It also
+forecloses the *strong* determinism story C would have bought: after B, a restart's catch-up is
+byte-identical for every event both runs produce, but the two runs may not produce the same **set**.
+Anyone wanting set-identity has to take C, which is a wire change to `GET /api/sim/world`.
+
+### How I'd defend this in review
+
+The tension is real and inherent — a pacer that reacts to realised spend cannot be a pure function
+of time — so the question was never whether to have a divergence but which failure mode to buy. A
+fabricated `duplicate_conflicting` is the worst available, because it is indistinguishable from the
+0.05% §13 injects on purpose and it lands hardest on the two ads the demo is built around. B moves
+the divergence onto a channel that is already honest about itself (an event that exists or does
+not) and costs a property no reader of this build can observe. It was measured before it was
+decided, and the measurement is in the entry.
