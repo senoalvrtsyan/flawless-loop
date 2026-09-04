@@ -46,7 +46,7 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | 2 | Read a signal off the chart | B37, **B38** | ✅ below — ratios landed at B38 |
 | 3 | The gate refuses to draw a ratio it cannot support | **B39**, B40 | ✅ below |
 | 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | **B46, B47, B48** | ✅ below |
-| 5 | **A late conversion restates a settled bucket** | **B41, B42, B43**, B49 | ✅ below |
+| 5 | **A late conversion restates a settled bucket** | **B41, B42, B43, B49, B50** | ✅ below — and now causable on demand |
 | 6 | **Walk a number back to its events** | B52, B53 | — |
 | 7 | Configs are versioned; the swap is visible | **B48**, B56 | partly — the boundary and the swap are in beat 4; B56's component screen is still owed |
 | 8 | Kill everything and restart — the world is still there | B60 | — |
@@ -424,6 +424,84 @@ different messages, so they are different sentences."*
 curl -s "localhost:8787/api/restatements?from=$(node -e "console.log(new Date(Date.now()-7*86400e3).toISOString())")&to=$(node -e "console.log(new Date().toISOString())")" | python3 -m json.tool | head -40
 sqlite3 data/loop.sqlite "SELECT COUNT(*) FROM rollup_minute WHERE restated_at IS NOT NULL;"   # 10
 ```
+
+---
+
+### Causing it on demand — the horizon control (B49 / P16)
+
+**Say:** *"Everything above was true before I opened the app. But a reviewer is entitled to ask me
+to make one happen. There are two ways, and they are different ways on purpose."*
+
+**The first is to change what 'settled' means.**
+
+11. **Above the chart, the lateness horizon: `72h (D13)` · `24h` · `6h` · `2h`. Press `2h`.**
+12. **Read the sweep line.** *"swept 72h → 2h in 83 ms · **40,881** buckets changed settlement
+    state, of which **172** had already moved by the time 2h says they were settled · read
+    **40,881** of 71,584 buckets, the band … on `ix_rollup_time`."*
+
+    **Say:** *"That is F2's whole argument, on screen. At 72 hours with seven days of backfill, the
+    old buckets are already settled and the new ones never reach settlement inside a demo — so the
+    restatement path would be built, correct, and invisible. Shortening the horizon re-evaluates
+    settlement across the affected range, which is why this is a sweep with a control on it and not
+    a toggle. Note what it read: the band, not the table."*
+13. **The list underneath shows the restated ones first**, each with the arrival that did it.
+14. **The caption in the shortened state is the important one:** *"answering at 2h, not the
+    account's 72h … **Nothing was written.** `restated_at` in the store still records what was true
+    at 72h."*
+
+    **Say:** *"The horizon is a read parameter, and that is forced rather than preferred.
+    `restated_at` is stamped at ingest against the horizon in force then; `/api/verify` rebuilds by
+    replaying against the horizon in force now. Persist the horizon and verify reports a divergence
+    on a completely correct store. So the write side keeps 72 hours and the read side takes a
+    parameter."*
+15. **Press `72h (D13)` to go back**, then run `curl -s -o /dev/null -w "%{http_code}"
+    localhost:8787/api/verify` → **200**. Nothing the sweep did needed undoing.
+
+### Causing it on demand — the scenario control (B50 / P17)
+
+**Say:** *"The second way is to make the world do something. This is the simulator, not the
+advertiser — different table, different endpoint, and it appears in no decision log."*
+
+16. **"Scenario control — cause the interesting thing".** Note the **dashed** border: it is a
+    sibling of the action console and deliberately not the same thing.
+17. **`late_cascade`, on `a_01`. Fire.** The banner says the trigger was **written** and is awaiting
+    the simulator's next poll — *"Nothing has happened yet."*
+
+    **Say:** *"The trigger is a row before it is an effect. Section 14's determinism claim is seed
+    plus decision log plus `sim_scenarios` gives you the world — a claim whose third input lived in
+    memory would be false. Watch the `picked up` column fill in; that is the handover between two
+    processes that share no memory."*
+18. **Within a second or two, the restatement timeline grows.** Measured on the seeded store:
+    **12 → 17 restated buckets**, entries **seven days back**, one of them `conv 0 → 6`, ROAS
+    `0.00 → 119.25`, **168.0 hours late**, and every entry `explained`.
+
+    **Say:** *"Those are real clicks from the log, days old, that we have now made convert. An
+    invented `click_id` would produce an orphan that parks at its own minute and restates nothing —
+    the flagship path replaced by the orphan path wearing its clothes."*
+19. **Fire `orphan_burst`.** Six conversions land whose clicks are withheld 90 seconds. Watch the
+    provisional count rise, then — 90 seconds later — the clicks arrive and the conversions are
+    **promoted**. Measured: orphans **8 → 14 → 8**, with `credited_minute` moving **19:59 → 19:57**.
+
+    **Say:** *"Two buckets moved for one promotion: the minute it was parked in lost it, and the
+    click's own minute gained it. That is D16's path, and it is the direction the restatement
+    timeline reports as **UNEXPLAINED** if it ever lands on a settled bucket — which is exactly what
+    we want it to do rather than guess."*
+20. **Fire `stall{30}`** and watch the liveness display. Measured: **`ingest_seq` did not move for
+    12 seconds**, then emission resumed on its own.
+
+    **Say:** *"We can say the stream is quiet. We cannot say why — there is no emitter sequence
+    number, so a lost event and an event that never existed are indistinguishable. That is G21, and
+    it is the one failure this app cannot see. It is named in the README rather than discovered."*
+21. **Close with `curl -s -o /dev/null -w "%{http_code}" localhost:8787/api/verify` → 200, and
+    `npm run agree` → OK.** Both were run after all five scenarios above.
+
+    **Say:** *"Five scenarios, a horizon sweep, and three lever pulls later, every projection still
+    rebuilds from the logs and every bucket's counts still agree with the raw events."*
+
+**Try to break it, out loud:** press `traffic_burst` with a multiplier of 1000 via curl. It comes
+back **400** — *"multiplier must be a number in [1, 20]"*. Arguments are **refused, never clamped**:
+a silently clamped multiplier puts a figure on screen nobody asked for, and the reviewer then reads
+the resulting backpressure as the model's rather than as the clamp's.
 
 ---
 
