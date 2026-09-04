@@ -33,8 +33,14 @@ const NO_EVENT_ID_PREFIX = '(no event_id):';
  * value, which is the LATER instant. Mixed precision would silently invert I10's clamp. Same-shape
  * strings make lexicographic order chronological order, so the whole problem disappears — and
  * `signals.ts` stays "as emitted, never altered".
+ *
+ * EXPORTED for its D43 test (B12) and for no other caller. Loosened — a `Z`-less or second-
+ * precision `ts` let through — the event is ACCEPTED, `ts_effective` silently takes the later
+ * instant, and B24's sweep re-derives from that same column and agrees with itself. Our own
+ * emitter only ever sends the canonical form, so neither the sweep nor hand verification can see
+ * it: the definition of a wrong answer that is invisible.
  */
-function isCanonicalIso(value: unknown): value is string {
+export function isCanonicalIso(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const parsed = new Date(value);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
