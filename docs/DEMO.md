@@ -43,7 +43,7 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | # | Beat | Chunk | Written? |
 |---|---|---|---|
 | 1 | **The world has a past** — the app opens onto seven days, not an empty chart | B36 | ✅ below |
-| 2 | Read a signal off the chart | B37, B38 | — |
+| 2 | Read a signal off the chart | B37, B38 | ◐ chart written below; ratios owed by B38 |
 | 3 | The gate refuses to draw a ratio it cannot support | B40 | — |
 | 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | B46, B47 | — |
 | 5 | **A late conversion restates a settled bucket** | B42, B43, B49 | — |
@@ -81,6 +81,43 @@ sqlite3 data/loop.sqlite "SELECT COUNT(*) FROM decisions;"     # the ads' whole 
 **If asked "could you have hard-coded that?":** pause an ad with `curl` (beat 4's lever, available
 from B14 on the server whether or not the console is built) and refresh — the list changes, and the
 only thing that changed on disk is one row in `decisions`.
+
+---
+
+## Beat 2 — read a signal off the chart (B37; ratios owed by B38)
+
+**Say:** *"Every point on this chart is a sum of events that are still in the store. Pick one and I
+will show you the events under it."*
+
+1. **Select two or three ads.** One line each, in the portfolio's own order, so a colour means the
+   same ad in the list and on the chart.
+2. **Switch minute → hour.** Hours are summed from minutes — `DESIGN.md` §4.1's "base grain is the
+   minute; hours derive from minutes" — and nothing is divided, because D10 puts the division after
+   the aggregation.
+3. **Pick a point and read its value off the legend.** Then, in a terminal:
+
+```
+sqlite3 data/loop.sqlite "
+  SELECT SUM(impressions) FROM rollup_minute
+   WHERE ad_id='a_03' AND minute_start >= '<hour>' AND minute_start < '<hour+1h>';"
+```
+
+   …and then the same hour from **raw events**, which never touch the projection:
+
+```
+sqlite3 data/loop.sqlite "
+  SELECT COUNT(*) FROM signals
+   WHERE ad_id='a_03' AND kind='impression'
+     AND ts_effective >= '<hour>' AND ts_effective < '<hour+1h>';"
+```
+
+   All three agree. Measured at B37 on six consecutive hours of `a_03`: 794 / 916 / 804 / 1136 /
+   1660 / 1129, identical across chart, rollup and raw. **B53 makes this a click instead of a
+   terminal**, and turns it from a demonstration into a check the app performs on itself.
+
+4. **A line that falls to zero is an ad delivering nothing; a line that has not started is an ad
+   that did not exist yet.** The chart distinguishes them: zero inside the ad's life, nothing at
+   all before `launched_at`.
 
 ---
 

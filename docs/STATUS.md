@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · stage 4 · B36 CLOSED — THE SHELL EXISTS · 41 / 67 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · stage 4 · B37 CLOSED — THE CHART DRAWS · 42 / 67 chunks**
 
 ---
 
@@ -913,8 +913,21 @@ fold and none from `fixtures.ts` — and window / granularity / selection contro
 **D45 landed** as `src/web/app.css`. **`docs/DEMO.md` exists** (D50) with its eight-beat spine and
 beat 1 written.
 
-**Next is B37 — the chart, single-gated.** It is the chunk that installs **uPlot `1.6.32`**, pinned
-exact, imported in `src/web/Chart.tsx` and nowhere else (D44).
+**B37 is closed and the chart draws.** **uPlot `1.6.32` is installed, pinned exact** — the project's
+one client runtime dependency — and `import uPlot` appears in `src/web/Chart.tsx` and nowhere else,
+which is D44's rule and also what makes its flip condition (to hand-rolled SVG, behind the same
+props interface) a mechanical port. **The arithmetic lives in `src/web/series.ts`, not in the
+component**, because D43's criterion applies to it: a mis-summed hour draws a completely normal
+chart. Eight tests, **86 total**.
+
+**The plan's own check passed three ways**: `a_03`'s six hour points through `toColumns()` are
+794 / 916 / 804 / 1136 / 1660 / 1129, identical to `SUM(impressions)` over `rollup_minute` and
+identical again to `COUNT(*)` over **raw `signals`** — the third route never touches the projection,
+so that is HR2 and HR5 in one measurement.
+
+**Next is B38 — ratios derived at read from additive counts (CTR, CPA, ROAS), server-computed.** It
+is where **D46** starts to bite: `snapshot()` grows totals and ratios, `web/metrics.ts` is
+re-bucketing and formatting under a server descriptor and never an independent number.
 
 **Stage 3 is closed and `SIMULATOR.md` is fully implemented.** What that leaves owed is written
 under "What is owed" — none of it blocks B36.

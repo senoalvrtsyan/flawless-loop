@@ -327,7 +327,7 @@ The deep surface, per D1. Read-only — no levers yet.
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
 | [x] | **B36** | App shell: portfolio list from `ads`, window / granularity / ad-selection controls, one stylesheet. **The plan row was one file short** — `DESIGN.md` §3.1 puts `ads[]` on the SNAPSHOT (*"one request, one read transaction, consistent by construction"*) and no chunk added it, so `snapshot.ts` gains `AdRow[]`, read in the same transaction as the buckets and deliberately NOT filtered by `?ads=`. **D45 landed**: `app.css`, semantic custom properties, one theme; the settlement tokens are declared here with their non-colour channel (dash patterns) for B42, and ad status carries a glyph as well as a colour. **Granularity is viewport state only until B37** and changes nothing yet — D46 forbids re-bucketing except at a descriptor's own granularity, and descriptors arrive at B51. **D50: `docs/DEMO.md` created** | `src/server/snapshot.ts`, `src/web/App.tsx`, `src/web/Portfolio.tsx`, `src/web/app.css`, `docs/DEMO.md` | Twelve ads listed with status, budget and generation, all from the fold — verified on the seeded store: `ads: 12`, `a_01 … live … 250000 … g_a_01_002`. `?ads=a_12` returns **2 buckets for `a_12` only and all 12 portfolio rows**. Window and selection changes re-run §3.1 from step 1. `npx vite build` clean (2.43 kB CSS bundled) | D§3, §3.1 | — |
-| [ ] | **B37** | Chart: one series per selected ad over the window, drawn from bucket rows only | `src/web/Chart.tsx` | Pick one point, read its value, and match it against a `sqlite3` sum over `rollup_minute` | D§4.1, §11 | **HR2** |
+| [x] | **B37** | Chart: one series per selected ad over the window, drawn from bucket rows only. **D44 installed: `uplot@1.6.32`, pinned exact**, imported in `src/web/Chart.tsx` and nowhere else. The arithmetic is **split into `src/web/series.ts`** so it can be tested — D43's criterion, *"tests only where a wrong answer is invisible"*, and a mis-summed hour draws a completely normal chart. Hours derive from minutes by SUMMING COUNTS (D§4.1), no division (D10). **D64: a missing bucket is 0 inside the ad's life and `null` before `launched_at`** — a bucket exists iff an event landed in it, so an absent minute is a delivered zero, but before launch zero would be a fabricated point. **D46 lands on `toColumns()` at B51**: the aggregation must then bind to the descriptor's own `granularity_s`, and the comment there is the hook | `src/web/Chart.tsx`, `src/web/series.ts`, `src/web/series.test.ts`, `src/web/App.tsx`, `src/web/app.css`, `package.json` | **The plan's own check, run three ways and all three agree exactly.** `a_03`, six hour points from the live snapshot through `toColumns()`: 794 / 916 / 804 / 1136 / 1660 / 1129 — identical to `SUM(impressions)` over `rollup_minute` per hour, and identical again to `COUNT(*)` over **raw `signals`**, which never touches the projection. Eight new tests (86 total); `npx vite build` clean | D§4.1, §11 | **HR2** |
 | [ ] | **B38** | Ratios derived at read from additive counts — CTR, CPA, ROAS. Nothing stored, nothing computed on the client from raw | `src/web/metrics.ts`, `src/server/snapshot.ts` | Hand-compute CTR for one bucket from its two counts and compare; grep proves no ratio column exists | D§4.3 | **HR2** |
 | [ ] | **B39** | D20's gate and adaptive ladder: minute → 5 min → 15 min → hour, **stop**, then show counts with the reason stated | `src/web/gate.ts`, `src/web/Chart.tsx` | `a_08` draws hourly CPA at the daily peak and falls to counts overnight; `a_09` never clears any bar and says why — **both branches of D20 fire on camera** | D§4.5; S§18.3 | — |
 | [ ] | **B40** | EWMA smoothing, 15-minute half-life, with a raw toggle | `src/web/metrics.ts` | Toggle and watch the same series smooth and unsmooth; the raw view is the one the drill-down asserts against | D§4.5 | — |
@@ -513,6 +513,26 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+**The newest (B37), about the chart:**
+
+- **The series-identity key must be AD IDS, not labels.** uPlot builds its series at construction,
+  so the effect that rebuilds the plot keys on "which ads". Keyed on joined NAMES — which was the
+  first version of this file — `Product demo · retargeting` splits into four labels the moment it is
+  read back apart, and the chart draws four unnamed series where one belonged. Found by reading it,
+  not by running it.
+- **`data` must NOT be a dependency of the construction effect.** It is the instance's *initial*
+  data; `setData` in a second effect is the update path. Listing it destroys and rebuilds the canvas
+  **four times a second** at the 250 ms flush tick — nothing errors, the chart just becomes the one
+  thing D44 chose this library to avoid.
+- **A missing bucket is a delivered ZERO, not a gap — but only inside the ad's life (D64).** A bucket
+  exists iff an event landed in it. Flip it to `null` everywhere and a paused ad's line simply
+  stops rather than falling to zero, which reads as missing data instead of as the lever working;
+  fill zero before `launched_at` and the chart shows an ad delivering nothing before it existed,
+  which is a fabricated point. Both look fine.
+- **D46 lands on `toColumns()` at B51**, not before. Once a `TraceDescriptor` exists, this
+  aggregation must use the descriptor's `granularity_s` and not the viewport's, or the drill-down
+  replays a different question from the one the number answers — and it can pass by coincidence.
 
 **The newest (B35a), about the handover's shape:**
 

@@ -27,6 +27,7 @@ import type { AdRow, Snapshot } from '../server/snapshot.ts';
 import { applyRows, createStore, latestBucket, type BucketStore } from './store.ts';
 import { subscribe } from './stream.ts';
 import { Portfolio } from './Portfolio.tsx';
+import { Chart } from './Chart.tsx';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
@@ -193,6 +194,9 @@ export function App() {
 
   const { store, cursor, ads } = state;
   const latest = latestBucket(store);
+  // "All" resolved to a concrete list, in the portfolio's own order, so the chart's series order
+  // and the list's row order are the same thing and a colour means one ad in both.
+  const charted = selected === null ? ads : ads.filter((ad) => selected.has(ad.ad_id));
 
   return (
     <div className="shell">
@@ -236,6 +240,16 @@ export function App() {
           </div>
         </div>
 
+        {/* B37. One series per selected ad, drawn from the SAME bucket rows the number below is
+            taken from — so a reviewer comparing the two is comparing one source to itself, and
+            B53's drill-down is what compares either of them to raw events. */}
+        <Chart
+          rows={[...store.rows.values()]}
+          window={store.window}
+          ads={charted}
+          granularitySeconds={granularity}
+        />
+
         {latest === null ? (
           <p>
             No buckets in this window for this selection. Widen the window, or select an ad that is
@@ -243,8 +257,8 @@ export function App() {
           </p>
         ) : (
           <>
-            {/* Still ONE number, taken verbatim from the server: B37 is the chart. The reason it is
-                not a total is unchanged and is written at the top of this file. */}
+            {/* Still ONE number, taken verbatim from the server. The reason it is not a total is
+                unchanged and is written at the top of this file; B38 adds server-computed totals. */}
             <p>
               <strong>{latest.impressions}</strong> impressions
             </p>

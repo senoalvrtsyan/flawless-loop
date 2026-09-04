@@ -101,3 +101,11 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
 .telemetry { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem;
              color: var(--telemetry-ink); background: var(--telemetry-bg);
              padding: .4rem .6rem; border-radius: 3px; }
+
+/* Chart --------------------------------------------------------------------------------------- */
+
+/* uPlot brings its own stylesheet (imported in Chart.tsx, the one file that may). These are the
+ * few places its defaults need to meet ours rather than override them. */
+.chart { margin-bottom: 1rem; }
+.chart .u-legend { font-size: .78rem; color: var(--ink-muted); }
+.chart .u-legend .u-marker { width: 10px; height: 10px; }
