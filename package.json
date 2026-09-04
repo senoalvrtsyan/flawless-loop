@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "db:migrate": "node src/server/migrate.ts",
+    "seed": "node src/sim/seed-world.ts",
     "sim": "node src/sim/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
