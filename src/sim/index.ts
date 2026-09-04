@@ -17,12 +17,14 @@ import { derivedId } from './rng.ts';
 import { ADS, type AdFixture } from './fixtures.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
 import { adFatigue, adNovelty, nominalAccrual, noveltyAgesAtT0 } from './fatigue.ts';
+import { demand, demandFactor } from './noise.ts';
 import { clicksForTick, cpmAccrualCents, isSpendBoundary, spendCents } from './emit.ts';
 import { SPEND_TICK_S } from './params.ts';
 import {
   arrivalProcess,
   clickAndCostPath,
   conversionLag,
+  demandNoise,
   fatigue,
   localMidnightAtOrBefore,
   noveltySection,
@@ -108,9 +110,19 @@ function impressionsForTick(tick: number): number {
   // — D56 puts both in `p_ctr` only, because fatigue changes what an impression is worth rather
   // than how many arrive.
   //
+  // §12's two demand factors ARE passed (B30) — they are the only one of §3's remaining factors
+  // that is. They stay a pure function of `t` for exactly the reason below.
+  //
   // A pure function of `(ad, tick)`, which is what lets the 60-second `spend` delta below
   // re-derive an interval's impressions instead of accumulating them.
-  return negBinomial(SEED, AD_ID, tick, lambdaPerSecond(AD_ID, AD.channel, tick * 1_000));
+  return negBinomial(
+    SEED,
+    AD_ID,
+    tick,
+    lambdaPerSecond(AD_ID, AD.channel, tick * 1_000, {
+      demand: demandFactor(AD.channel, AD_ID, tick * 1_000),
+    }),
+  );
 }
 
 /** Sub-second placement: spread evenly inside the tick's second rather than drawn for it. §14's
@@ -137,7 +149,11 @@ function eventsForTick(tick: number): Signal[] {
 
   // §10's clicks. The `event_id` carries a `'c'` part so a click and an impression at the same
   // (tick, index) cannot collide — parts are NUL-joined, so no other part sequence can produce it.
-  const clicks = clicksForTick(SEED, AD, tick, count, { phiAd: PHI_AD, nu: NU });
+  const clicks = clicksForTick(SEED, AD, tick, count, {
+    phiAd: PHI_AD,
+    nu: NU,
+    mChannel: demand('channel', AD.channel, tick * 1_000),
+  });
   for (const click of clicks) {
     events.push({
       event_id: derivedId(SEED, 'eid', AD_ID, tick, 'c', click.index),
@@ -300,6 +316,7 @@ if (dry !== null) {
   fatigue();
   noveltySection();
   conversionLag(dry);
+  demandNoise(dry);
   clickAndCostPath(dry, arrivalProcess(dry));
   console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
   process.exit(0);
@@ -309,7 +326,7 @@ console.log(
   `[sim] ${AD_ID} on ${AD.channel} at ${BASE_IMPR_PER_DAY[AD_ID]}/day nominal → ${INGEST_URL}` +
     ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week, NegBinomial(λ, α=8)` +
     ` · §10 clicks at p_ctr with φ_ad ${PHI_AD.toFixed(4)} · ν ${NU.toFixed(4)} (D56),` +
-    ` CPM spend every ${SPEND_TICK_S}s` +
+    ` §12 demand on λ and CPC, CPM spend every ${SPEND_TICK_S}s` +
     ` · replaying the last ${CATCHUP_S}s`,
 );
 

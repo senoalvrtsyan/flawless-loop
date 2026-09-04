@@ -12,10 +12,12 @@
 // (B27) appended below it.
 
 import { ACCOUNT_TZ, HORIZON_MS } from '../shared/config.ts';
+import { draw } from './rng.ts';
 import { ADS, AUDIENCES, COMPONENTS } from './fixtures.ts';
 import {
   BASE_IMPR_PER_DAY,
   CHANNEL,
+  DEMAND,
   DIURNAL,
   DOW_CVR,
   DOW_ORDER_VALUE,
@@ -42,9 +44,11 @@ import {
   rest,
   versionAdjusted,
 } from './fatigue.ts';
-import { diurnal, dowVolume, localHour, localMs, localWeekday, lambdaPerSecond, negBinomial } from './rate.ts';
+import { demand, demandConstants, demandFactor } from './noise.ts';
 import { purchaseLagMs, reportingLagMs } from './lag.ts';
+import { diurnal, dowVolume, localHour, localMs, localWeekday, lambdaPerSecond, negBinomial } from './rate.ts';
 import {
+  beta,
   betaBinomial,
   clicksForTick,
   cpmAccrualCents,
@@ -144,7 +148,7 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   console.log(
     `\n=== B25 · §3 arrival process · §4 diurnal and day of week ===\n` +
       `${hours} h from ${localStamp(fromMs)} ${ACCOUNT_TZ} · seed '${seed}'\n` +
-      `ρ_pacing (B32) and m_channel·m_ad (B30) held at 1.00 — this is λ's shape.\n` +
+      `§12's m_channel·m_ad ARE applied (B30). ρ_pacing (B32) held at 1.00.\n` +
       `φ and ν are NOT applied and never will be — D56 puts both in p_ctr only.\n`,
   );
 
@@ -169,6 +173,8 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   const intervalAccrual = new Map(ADS.map((a) => [a.ad_id, 0]));
   let dSum = 0;
   let dCount = 0;
+  let mSum = 0;
+  let mCount = 0;
 
   for (let h = 0; h < hours; h++) {
     const hourStart = startSec + h * 3_600;
@@ -186,7 +192,12 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
       for (let s = 0; s < 3_600; s++) {
         const tick = hourStart + s;
         const atMs = tick * 1000;
-        const lambda = lambdaPerSecond(ad.ad_id, ad.channel, atMs);
+        // §12's two demand factors are the ONLY §3 factor this chunk passes — D56 keeps φ and ν
+        // out of λ, and ρ_pacing is B32.
+        const m = demandFactor(ad.channel, ad.ad_id, atMs);
+        mSum += m;
+        mCount++;
+        const lambda = lambdaPerSecond(ad.ad_id, ad.channel, atMs, { demand: m });
         const n = negBinomial(seed, ad.ad_id, tick, lambda);
         hourExpected += lambda;
         hourDrawn += n;
@@ -195,7 +206,11 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
 
         // §10, B27. φ enters here and not in λ above — D56.
         own.impressions += n;
-        const clicks = clicksForTick(seed, ad, tick, n, { phiAd, nu });
+        const clicks = clicksForTick(seed, ad, tick, n, {
+          phiAd,
+          nu,
+          mChannel: demand('channel', ad.channel, atMs),
+        });
         own.clicks += clicks.length;
         for (const click of clicks) own.clickCostCents += click.cost_cents;
 
@@ -283,6 +298,11 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   const nominalDay = ADS.reduce((sum, a) => sum + (BASE_IMPR_PER_DAY[a.ad_id] ?? 0), 0);
   const dow = dowVolume(fromMs + 43_200_000);
   const nominal = (nominalDay * hours * dow) / 24;
+  // What E[m] WOULD have been without D57's drift correction: exp(sd²/2) per factor. Kept as a
+  // printed figure because it is the size of the bias the correction removes, and the realised
+  // mean below is the evidence that it is gone.
+  const uncorrectedMeanM =
+    Math.exp(DEMAND.channel.sd ** 2 / 2) * Math.exp(DEMAND.ad.sd ** 2 / 2);
   console.log(
     `\n  window   expected ${Math.round(totalExpected)}  drawn ${totalDrawn}  ` +
       `drawn/expected ${(totalDrawn / totalExpected).toFixed(4)}\n` +
@@ -290,7 +310,16 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
       `(${DAY_NAMES[localWeekday(fromMs + 43_200_000)]}) = ${Math.round(nominal)}\n` +
       `  expected/nominal ${(totalExpected / nominal).toFixed(4)}  ` +
       `· mean d_c over the window ${(dSum / dCount).toFixed(4)}\n` +
-
+      `  §12's demand factors: E[m] = 1 by construction (D57) · realised over this window ` +
+      `${(mSum / Math.max(mCount, 1)).toFixed(4)}.\n` +
+      `  Uncorrected it would be exp(sd²/2) per factor = ${uncorrectedMeanM.toFixed(4)} — a systematic ` +
+      `+${((uncorrectedMeanM - 1) * 100).toFixed(2)}% on\n  every ad's volume, which D52's pacing baselines ` +
+      `would have absorbed as ρ throttling on a_08\n  and a_12. ONE window still scatters: at τ 45/20 min a ` +
+      `day holds only ~32 and ~72\n  independent draws, so read the realised figure as noisy, not as a check ` +
+      `of the mean.\n` +
+      `  These figures do NOT multiply out to expected/nominal and are not a decomposition: the\n` +
+      `  ratio is weighted by each ad's base_impr_per_day and its channel, while mean d_c is an\n` +
+      `  unweighted mean over four channels and mean m is per (ad, second).\n` +
       `  w_dow, §4.2: ` +
       DAY_NAMES.map((d, i) => `${d} ${DOW_VOLUME[i]?.toFixed(2)}`).join('  '),
   );
@@ -452,8 +481,13 @@ export function clickAndCostPath(opts: DryRunOptions, tally: Map<string, AdTally
     // pacing is unaffected and the numbers are left alone — `fixtures.ts` already says a budget is
     // an account setting, not a measurement.
     const cpc = t.clicks === 0 ? 0 : t.clickCostCents / t.clicks;
+    // Two lognormal mean corrections, both `exp(σ²/2)`: §12's own `LogNormal(σ 0.35)` on the CPC,
+    // and `m_channel^0.6`, whose log-sd is `0.6 · 0.18`. The second is worth only 0.6% but the
+    // column is a check, and a check with a known 0.6% lean in it is a worse check.
     const cpcMean = Math.exp(NOISE.cpcSigma ** 2 / 2);
-    const expCpc = channel.cpcShare * channel.cpcBaseCents * row.cpcMult * cpcMean;
+    const demandMean = Math.exp((NOISE.cpcDemandExponent * DEMAND.channel.sd) ** 2 / 2);
+    const expCpc =
+      channel.cpcShare * channel.cpcBaseCents * row.cpcMult * cpcMean * demandMean;
 
     console.log(
       `  ${ad.ad_id.padEnd(6)} ${ad.channel.padEnd(13)} ${pad(t.impressions, 8)} ${pad(t.clicks, 7)} ` +
@@ -624,5 +658,182 @@ export function conversionLag(opts: DryRunOptions, sampleSize = 20_000): void {
       `  Small on purpose: it describes US, not the buyer. Purchase lag is what drives restatement.\n` +
       `  p95 sits INSIDE the 72 h horizon so headline numbers mean something; the tail crosses it,\n` +
       `  so P7's restatement path fires on real data rather than only on a scenario trigger (§11.2).`,
+  );
+}
+
+/**
+ * §12's two demand factors, measured.
+ *
+ * **The autocorrelation is estimated WITHOUT subtracting a sample mean**, and that is not a
+ * shortcut. `log m` has a true mean of exactly zero by construction, and at τ/Δ of 20–45 a window
+ * of a few hundred steps holds only ~12–25 effective observations — so a sample mean is noisy
+ * enough to drag the estimate 20% low at lag τ and make a correct process look broken. Recorded in
+ * `BUILD_PLAN.md` §14, because that is a trap for whoever verifies this next rather than a bug.
+ */
+export function demandNoise(opts: DryRunOptions): void {
+  console.log(
+    `\n=== B30 · §12 autocorrelated demand ===\n` +
+      `log-AR(1) in log space, sampled every ${DEMAND.stepMs / 1000} s (D28's bucket; §12 leaves Δ free —\n` +
+      `ASSUMPTION, unratified, needs sign-off before B34). Innovation sum, never an accumulator:\n` +
+      `a stateful m would re-derive differently after a restart and make every re-emitted tick a\n` +
+      `duplicate_conflicting. Estimated with NO mean subtracted — log m has a true mean of 0.\n`,
+  );
+
+  for (const kind of ['channel', 'ad'] as const) {
+    const c = demandConstants(kind);
+    const tauSteps = Math.round(c.tauMs / DEMAND.stepMs);
+    // Synthetic entities, and MORE of them than the world has, for the same reason B29 uses
+    // synthetic click ids: four channels over 600 steps is ~27 effective observations at τ/Δ = 45,
+    // which estimates an autocorrelation of 0.37 to about ±0.19. The closed form below is the
+    // check; this ensemble is corroboration, and it prints its own effective sample size so the
+    // reader knows which is which.
+    const entities = Array.from({ length: 16 }, (_, i) => `sample-${kind}-${i}`);
+    const steps = 600;
+    const lags = [1, Math.round(tauSteps / 4), tauSteps, 2 * tauSteps];
+    /**
+     * The autocorrelation of the truncated sum AS IMPLEMENTED, in closed form: an MA(K)
+     * representation with weights ρ^k has `acf(h) = ρ^h · Σ_{k<K−h} ρ^{2k} / Σ_{k<K} ρ^{2k}`.
+     * Exact arithmetic, no sampling — so a disagreement with `exp(−lag/τ)` is a real defect and a
+     * disagreement between this and the measured column is just sample size.
+     */
+    const closedForm = (h: number): number =>
+      c.rho ** h * ((1 - c.rho ** (2 * (c.terms - h))) / (1 - c.rho ** (2 * c.terms)));
+    const numerator = new Map(lags.map((l) => [l, 0]));
+    let denominator = 0;
+
+    for (const entity of entities) {
+      const x: number[] = [];
+      for (let i = 0; i < steps; i++) {
+        x.push(Math.log(demand(kind, entity, opts.fromMs + i * DEMAND.stepMs)));
+      }
+      for (const v of x) denominator += v * v;
+      for (const l of lags) {
+        let sum = 0;
+        for (let i = 0; i + l < steps; i++) sum += (x[i] ?? 0) * (x[i + l] ?? 0);
+        numerator.set(l, (numerator.get(l) ?? 0) + (sum / (steps - l)) * steps);
+      }
+    }
+    const sd = Math.sqrt(denominator / (entities.length * steps));
+    console.log(
+      `  m_${kind}: τ ${c.tauMs / 60_000} min · ρ ${c.rho.toFixed(5)} · ${c.terms} terms ` +
+        `(${DEMAND.memoryTaus}τ) · target sd ${c.sd} · measured sd ${sd.toFixed(4)} · ` +
+        `log drift −${c.drift.toFixed(5)} so E[m] = 1 (D57)`,
+    );
+    console.log(
+      `    ${'lag'.padEnd(9)} ${pad('implemented', 12)} ${pad('exp(-lag/τ)', 12)} ` +
+        `${pad('measured', 10)} ${pad('n_eff', 7)}`,
+    );
+    for (const l of lags) {
+      const measured = (numerator.get(l) ?? 0) / denominator;
+      const target = Math.exp((-l * DEMAND.stepMs) / c.tauMs);
+      const nEff = Math.round((entities.length * steps) / (2 * tauSteps));
+      console.log(
+        `    ${`${l} min`.padEnd(9)} ${pad(closedForm(l).toFixed(4), 12)} ${pad(target.toFixed(4), 12)} ` +
+          `${pad(measured.toFixed(4), 10)} ${pad(nEff, 7)}` +
+          (l === tauSteps ? '   <- at τ, the §12 check' : ''),
+      );
+    }
+    console.log(
+      `    truncation at ${c.terms} terms costs at most ` +
+        `${(Math.max(...lags.map((l) => Math.abs(closedForm(l) - Math.exp((-l * DEMAND.stepMs) / c.tauMs)))) * 1e4).toFixed(1)}e-4 ` +
+        `of autocorrelation across these lags — invisible where it matters.`,
+    );
+  }
+
+  clickRateUncertainty(opts);
+}
+
+/**
+ * §12's κ, measured rather than asserted — the evidence for **D57**'s third part.
+ *
+ * The click rate is now drawn once per minute and held across the minute's ticks, so
+ * `κ = 200` contributes the overdispersion §10 names instead of nothing. The check is an A/B on the
+ * SAME impression draws and the SAME uniforms: clicks counted against the per-minute Beta rate,
+ * and clicks counted against a fixed `p_ctr`. The ratio of their variances isolates κ's
+ * contribution, and `1 + (N̄−1)/(κ+1)` is what it should be.
+ *
+ * A/B rather than an absolute variance, because clicks also inherit the variance of `N` itself —
+ * `NegBinomial(α = 8)` and the two AR(1) factors — so an absolute `var/mean` overshoots the
+ * BetaBinomial prediction for reasons that have nothing to do with κ. That was the first thing this
+ * measurement got wrong.
+ */
+function clickRateUncertainty(opts: DryRunOptions): void {
+  const accrual = nominalAccrual();
+  const ages = noveltyAgesAtT0();
+  const minutes = 1_440;
+  const startTick = Math.floor(opts.fromMs / 1000);
+
+  console.log(
+    `\n  §12's κ = ${NOISE.clickKappa}, now that the click rate is drawn per minute (D57):\n` +
+      `  A/B over ${minutes} minutes on the same impressions and the same uniforms — per-minute Beta\n` +
+      `  rate vs a fixed p_ctr. The ratio is κ's contribution alone.\n`,
+  );
+  console.log(
+    `  ${'ad'.padEnd(6)} ${pad('N/min', 7)} ${pad('p_ctr', 8)} ${pad('clicks/min', 11)} ` +
+      `${pad('var/mean β', 11)} ${pad('p fixed', 9)} ${pad('ratio', 7)} ${pad('1+(N-1)/(κ+1)', 14)}`,
+  );
+
+  for (const ad of ADS) {
+    const phiAd = adFatigue(ad.ad_id, accrual).phi_ad;
+    const nu = adNovelty(ad.ad_id, ages);
+    const p = pCtr(ad, phiAd, nu);
+    const withBeta: number[] = [];
+    const withFixed: number[] = [];
+    let impressions = 0;
+
+    for (let m = 0; m < minutes; m++) {
+      const minute = Math.floor(((startTick + m * 60) * 1000) / DEMAND.stepMs);
+      const pMinute = beta(
+        opts.seed,
+        'ctr',
+        [ad.ad_id, minute, 'rate'],
+        p * NOISE.clickKappa,
+        (1 - p) * NOISE.clickKappa,
+      );
+      let b = 0;
+      let f = 0;
+      for (let sec = 0; sec < 60; sec++) {
+        const tick = startTick + m * 60 + sec;
+        const atMs = tick * 1000;
+        const n = negBinomial(
+          opts.seed,
+          ad.ad_id,
+          tick,
+          lambdaPerSecond(ad.ad_id, ad.channel, atMs, {
+            demand: demandFactor(ad.channel, ad.ad_id, atMs),
+          }),
+        );
+        impressions += n;
+        for (let i = 0; i < n; i++) {
+          const u = draw(opts.seed, 'ctr', ad.ad_id, tick, i);
+          if (u < pMinute) b++;
+          if (u < p) f++;
+        }
+      }
+      withBeta.push(b);
+      withFixed.push(f);
+    }
+
+    const varOverMean = (xs: readonly number[]): [number, number] => {
+      const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+      if (mean === 0) return [0, 0];
+      return [mean, xs.reduce((a, b) => a + (b - mean) ** 2, 0) / xs.length / mean];
+    };
+    const [meanB, ratioB] = varOverMean(withBeta);
+    const [, ratioF] = varOverMean(withFixed);
+    if (meanB === 0 || ratioF === 0) continue;
+    const nBar = impressions / minutes;
+    console.log(
+      `  ${ad.ad_id.padEnd(6)} ${pad(nBar.toFixed(1), 7)} ${pad((p * 100).toFixed(3) + '%', 8)} ` +
+        `${pad(meanB.toFixed(3), 11)} ${pad(ratioB.toFixed(3), 11)} ${pad(ratioF.toFixed(3), 9)} ` +
+        `${pad((ratioB / ratioF).toFixed(3), 7)} ` +
+        `${pad((1 + (nBar - 1) / (NOISE.clickKappa + 1)).toFixed(3), 14)}`,
+    );
+  }
+  console.log(
+    `\n  κ = ${NOISE.conversionKappa} for CONVERSIONS is still inert and lifting it to the minute would not help:\n` +
+      `  a conversion draw is over one tick's CLICKS, which is 0-1, and stays 0-1 over a minute. It\n` +
+      `  would take an hour-wide window to give it any effect — a further decision about where\n` +
+      `  cohort-rate uncertainty lives, not a fix. Stated as a limit in BUILD_PLAN.md §14.`,
   );
 }

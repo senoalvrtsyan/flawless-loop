@@ -129,7 +129,7 @@ export type RateFactors = {
   nu?: number;
   /** §9's `ρ_catchup × ρ_terminal` — B32. */
   rho?: number;
-  /** §12's `m_channel × m_ad` — B30. */
+  /** §12's `m_channel × m_ad` — B30, and the one factor of the four that IS passed. */
   demand?: number;
 };
 

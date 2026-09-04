@@ -247,3 +247,32 @@ export const LAG = {
   stragglerMinMs: 2 * 3_600_000,
   stragglerMaxMs: 9 * 3_600_000,
 } as const;
+
+/**
+ * §12's two autocorrelated demand factors. `m_channel` moves every ad on a channel TOGETHER —
+ * platform-wide traffic and auction pressure — while `m_ad` is idiosyncratic creative rotation.
+ *
+ * Ratified in Seno's words, and the reason there are two: *"channel-level moves ads together,
+ * ad-level is idiosyncratic, and the fact that you can't immediately tell which one you're looking
+ * at is a real property of the domain — it's also the honest basis for the fatigue flag's 'can't
+ * separate this from a platform delivery change' limit."*
+ *
+ * `stepMs` is NOT in §12, which fixes `τ` and the stationary sd but leaves the sampling interval
+ * free. See `noise.ts` for why it has to exist and why it is 60 s.
+ *
+ * **RATIFIED 2026-09-04 (D57): `stepMs = 60_000`.** In Seno's words: *"τ/Δ of 45 and 20 resolves
+ * the autocorrelation fully and nothing observable is finer than D28's minute bucket."*
+ *
+ * D57 also settled the drift that makes `E[m] = 1` — see `noise.ts`.
+ */
+export const DEMAND = {
+  stepMs: 60_000,
+  channel: { tauMs: 45 * 60_000, sd: 0.18 },
+  ad: { tauMs: 20 * 60_000, sd: 0.25 },
+  /**
+   * How many steps of innovation history the memory-free sum keeps, in time constants. At five τ
+   * the truncated sum holds 1 − exp(−10) of the stationary variance; the innovation sd is rescaled
+   * so what remains is exact regardless, and the dry run measures the realised autocorrelation.
+   */
+  memoryTaus: 5,
+} as const;

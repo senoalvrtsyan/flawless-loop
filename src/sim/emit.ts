@@ -20,6 +20,7 @@ import { draw, derivedId } from './rng.ts';
 import { AUDIENCES } from './fixtures.ts';
 import {
   CHANNEL,
+  DEMAND,
   DOW_CVR,
   DOW_ORDER_VALUE,
   NOISE,
@@ -87,6 +88,49 @@ function normal(seed: string, stream: string, parts: readonly (string | number)[
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 }
 
+/**
+ * `Gamma(shape, 1)` by Marsaglia–Tsang, keyed. The rejection loop is addressed by an attempt index
+ * rather than pulled off a sequence, so the draw stays a pure function of its key (§14).
+ *
+ * Shapes below 1 use the standard boost, `Gamma(a) = Gamma(a+1) · u^(1/a)`, which is needed here:
+ * the smallest `p_ctr · κ` in the seeded portfolio is `a_04`'s 0.63.
+ *
+ * Acceptance is ~95% at these shapes, so the loop almost never runs twice; the cap exists so a
+ * pathological key cannot spin forever, and it throws rather than returning a quiet fallback.
+ */
+function gamma(seed: string, stream: string, parts: readonly (string | number)[], shape: number): number {
+  if (shape < 1) {
+    const boost = draw(seed, stream, ...parts, 'boost');
+    return gamma(seed, stream, [...parts, 'shifted'], shape + 1) * Math.max(boost, 2 ** -53) ** (1 / shape);
+  }
+  const d = shape - 1 / 3;
+  const c = 1 / Math.sqrt(9 * d);
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const z = normal(seed, stream, [...parts, attempt]);
+    const v = (1 + c * z) ** 3;
+    if (v <= 0) continue;
+    const u = Math.max(draw(seed, stream, ...parts, attempt, 'u'), 2 ** -53);
+    if (Math.log(u) < 0.5 * z * z + d - d * v + d * Math.log(v)) return d * v;
+  }
+  throw new Error(`gamma(${shape}) did not converge in 64 attempts — key ${parts.join('/')}`);
+}
+
+/**
+ * `Beta(a, b)` as `X / (X + Y)` with `X ~ Gamma(a)`, `Y ~ Gamma(b)`. The standard construction, and
+ * the only place this file samples a *rate* rather than a count.
+ */
+export function beta(
+  seed: string,
+  stream: string,
+  parts: readonly (string | number)[],
+  a: number,
+  b: number,
+): number {
+  const x = gamma(seed, stream, [...parts, 'a'], a);
+  const y = gamma(seed, stream, [...parts, 'b'], b);
+  return x / (x + y);
+}
+
 /** `LogNormal(median, σ)` — parameterised by its MEDIAN, as §10 and §11 write it, not its mean. */
 export function logNormal(
   seed: string,
@@ -147,6 +191,8 @@ export type ClickFactors = {
   phiAd: number;
   /** §8's `ν` (B28). 1.0 means "no novelty left", which is what an old pair genuinely has. */
   nu?: number;
+  /** §12's `m_channel` (B30) — CPC only, raised to `cpcDemandExponent`. Never touches `p_ctr`. */
+  mChannel?: number;
 };
 
 export function clicksForTick(
@@ -156,22 +202,48 @@ export function clicksForTick(
   impressions: number,
   factors: ClickFactors,
 ): ClickDraw[] {
-  const { phiAd, nu = 1 } = factors;
-  const count = betaBinomial(
+  const { phiAd, nu = 1, mChannel = 1 } = factors;
+
+  // §12's click rate, drawn ONCE PER MINUTE and held across the minute's ticks — D57.
+  //
+  // §10 writes `clicks ~ BetaBinomial(N, p_ctr, κ)` per tick, and as written κ does nothing:
+  // the urn's overdispersion enters through `(N−1)/(κ+1)`, exactly zero at `N = 1`, and per-tick
+  // `N` is 0–3. Drawing `p` per minute and taking `Binomial(N_tick, p)` on each of the minute's
+  // ticks makes the minute's total exactly `BetaBinomial(N_minute, p_ctr, κ)` — the same
+  // distribution §10 names, at the granularity D28 buckets and D20 gates on — while keeping
+  // clicks emitted in the same second as their impressions. Ratified in Seno's words: *"draw the
+  // click rate on that same schedule … so §12's 'the rate is uncertain, not just the count' is
+  // true of the data instead of only of the doc."*
+  //
+  // The minute is `DEMAND.stepMs` and not a constant of its own, because "that same schedule" is
+  // the point: one grid for every per-minute rate modulation in the model.
+  const minute = Math.floor((tick * 1000) / DEMAND.stepMs);
+  const pMean = pCtr(ad, phiAd, nu);
+  const pMinute = beta(
     seed,
     'ctr',
-    [ad.ad_id, tick],
-    impressions,
-    pCtr(ad, phiAd, nu),
-    NOISE.clickKappa,
+    [ad.ad_id, minute, 'rate'],
+    pMean * NOISE.clickKappa,
+    (1 - pMean) * NOISE.clickKappa,
   );
+
+  // `Binomial(N_tick, p)` as `N` keyed Bernoulli trials. Summed over the minute's ticks these are
+  // `Binomial(N_minute, p)` exactly, because `p` is the same for all of them.
+  let count = 0;
+  for (let i = 0; i < impressions; i++) {
+    if (draw(seed, 'ctr', ad.ad_id, tick, i) < pMinute) count++;
+  }
 
   const channel = CHANNEL[ad.channel];
   const cpcMult = temperatureOf(ad.audience_id).cpcMult;
   const clicks: ClickDraw[] = [];
   for (let i = 0; i < count; i++) {
     const onCpcShare = draw(seed, 'cpc', ad.ad_id, tick, 'share', i) < channel.cpcShare;
-    const median = channel.cpcBaseCents * cpcMult;
+    // §12 couples CPC to channel demand at `m_channel^0.6`, and that coupling is the row's point:
+    // competition raises price and volume pressure TOGETHER, so a busy hour is also a dear one.
+    // The exponent is below 1 because price responds less than volume does.
+    const median =
+      channel.cpcBaseCents * cpcMult * mChannel ** NOISE.cpcDemandExponent;
     const cost = onCpcShare
       ? Math.max(1, Math.round(logNormal(seed, 'cpc', [ad.ad_id, tick, i], median, NOISE.cpcSigma)))
       : 0;
