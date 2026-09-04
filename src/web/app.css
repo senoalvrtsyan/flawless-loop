@@ -1,0 +1,103 @@
+/* The one stylesheet — D45 option A, created at B36.
+ *
+ * Two rules govern this file and neither is about taste:
+ *
+ *   1. THE SEMANTIC COLOURS ARE NAMED CUSTOM PROPERTIES. `--state-restated` says what it is at the
+ *      point of use; `#c2410c` does not. Everything a reviewer might ask "why is that one
+ *      different?" about resolves to a variable whose name is the answer.
+ *   2. ONE THEME. No light/dark switch, no `prefers-color-scheme` branch — D45. Two themes means
+ *      every colour below is decided twice and the non-colour channel gets verified in one and
+ *      assumed in the other, on a surface the brief says is not graded on looks.
+ *
+ * Everything else here is legibility. CLAUDE.md §7: do not gold-plate.
+ */
+
+:root {
+  --surface: #ffffff;
+  --surface-sunk: #f4f5f7;
+  --ink: #16191d;
+  --ink-muted: #5b6470;
+  --border: #d7dbe0;
+  --accent: #1b4fd8;
+
+  /* Ad status, from the fold. Four, because `ads.status` has a four-value CHECK. */
+  --status-live: #157347;
+  --status-paused: #a16207;
+  --status-draft: #5b6470;
+  --status-archived: #8b8f96;
+
+  /* DESIGN §5.4's three settlement states. Declared here, drawn at B42.
+   *
+   * **D45: each of these carries a NON-COLOUR channel as well as its colour** — a border
+   * treatment, a hatch, a marker shape or a label, chosen per surface but never absent. Colour
+   * alone fails for a colour-blind reviewer, and it also fails on a projector and in a greyscale
+   * screenshot, which is how this is most likely to be met. B42's check is literally: read the
+   * three states off a greyscale screenshot. The dash patterns below are that channel's default. */
+  --state-live: #1b4fd8;
+  --state-live-dash: 2 3;
+  --state-settled: #157347;
+  --state-settled-dash: none;
+  --state-restated: #c2410c;
+  --state-restated-dash: 6 3;
+
+  /* §11's stream telemetry. Quarantined by treatment so it can never read as a performance
+   * metric — monospace, muted, never the ink colour a number uses. */
+  --telemetry-ink: #5b6470;
+  --telemetry-bg: #f4f5f7;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.shell { display: grid; grid-template-columns: 20rem 1fr; min-height: 100vh; }
+.shell__side { border-right: 1px solid var(--border); background: var(--surface-sunk); }
+.shell__main { padding: 1rem 1.25rem; min-width: 0; }
+
+h1 { font-size: 1.05rem; margin: 0 0 .75rem; }
+h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-muted);
+     text-transform: uppercase; letter-spacing: .06em; }
+
+/* Controls ------------------------------------------------------------------------------------ */
+
+.controls { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: baseline;
+            padding-bottom: .75rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+.controls__group { display: flex; gap: .35rem; align-items: baseline; }
+.controls__label { color: var(--ink-muted); font-size: .8rem; }
+.controls button { font: inherit; padding: .15rem .5rem; cursor: pointer;
+                   background: var(--surface); color: var(--ink);
+                   border: 1px solid var(--border); border-radius: 3px; }
+.controls button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent);
+                                        color: var(--surface); }
+
+/* Portfolio ----------------------------------------------------------------------------------- */
+
+.portfolio { list-style: none; margin: 0; padding: 0 .5rem .75rem; }
+.portfolio__item { display: block; width: 100%; text-align: left; font: inherit; cursor: pointer;
+                   padding: .4rem .5rem; margin-bottom: 2px; border: 1px solid transparent;
+                   border-radius: 3px; background: none; color: inherit; }
+.portfolio__item:hover { background: var(--surface); }
+/* Selection carries a LEFT BAR as well as a background — the same non-colour rule as the
+ * settlement states, for the same reason. */
+.portfolio__item[aria-pressed="true"] { background: var(--surface); border-color: var(--border);
+                                        box-shadow: inset 3px 0 0 var(--accent); }
+.portfolio__line { display: flex; justify-content: space-between; gap: .5rem; }
+.portfolio__name { font-weight: 600; }
+.portfolio__meta { color: var(--ink-muted); font-size: .78rem; }
+
+/* Status carries its own glyph as well as its colour — no status is distinguishable by hue
+ * alone. `●` live, `❙❙` paused, `○` draft, `▪` archived; the glyph is in the markup. */
+.status { font-size: .78rem; white-space: nowrap; }
+.status--live { color: var(--status-live); }
+.status--paused { color: var(--status-paused); }
+.status--draft { color: var(--status-draft); }
+.status--archived { color: var(--status-archived); }
+
+/* Telemetry ----------------------------------------------------------------------------------- */
+
+.telemetry { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem;
+             color: var(--telemetry-ink); background: var(--telemetry-bg);
+             padding: .4rem .6rem; border-radius: 3px; }

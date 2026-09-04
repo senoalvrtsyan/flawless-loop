@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · STAGE 3 CLOSED · B36 GATE CLEARED · 40 / 67 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · stage 4 · B36 CLOSED — THE SHELL EXISTS · 41 / 67 chunks**
 
 ---
 
@@ -905,7 +905,16 @@ shrinking only because of what the emitter itself just sent. Now behind `?includ
 bytes** per poll, `simWorld()` **33.2 → 17.3 ms**, and the emitter's held list drains from 7,161 to
 149 on the first tick because D62's Bernoulli rejects the rest once instead of every tick.
 
-**Next is B36 — the app shell, single-gated.** The gate above it is cleared.
+**B36 is closed and stage 4 has started.** The shell is a two-column page on :5173: the portfolio
+list on the left — twelve ads with status, channel, budget and **generation number**, all from the
+fold and none from `fixtures.ts` — and window / granularity / selection controls on the right.
+`DESIGN.md` §3.1 puts `ads[]` on the SNAPSHOT and no chunk had added it, so `snapshot.ts` gained
+`AdRow[]`, read in the same transaction as the buckets and deliberately unfiltered by `?ads=`.
+**D45 landed** as `src/web/app.css`. **`docs/DEMO.md` exists** (D50) with its eight-beat spine and
+beat 1 written.
+
+**Next is B37 — the chart, single-gated.** It is the chunk that installs **uPlot `1.6.32`**, pinned
+exact, imported in `src/web/Chart.tsx` and nowhere else (D44).
 
 **Stage 3 is closed and `SIMULATOR.md` is fully implemented.** What that leaves owed is written
 under "What is owed" — none of it blocks B36.

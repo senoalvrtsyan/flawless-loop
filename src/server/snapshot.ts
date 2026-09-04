@@ -55,10 +55,41 @@ export type BucketRow = {
 /** The resolved window. `ads: null` means the whole portfolio (DESIGN §2.4's second access path). */
 export type SnapshotQuery = { from: string; to: string; ads: string[] | null };
 
+/**
+ * One row of the portfolio list — **B36**, and `DESIGN.md` §3.1's `ads[]`.
+ *
+ * The fold's head (D7), never a fixture: `fixtures.ts` still says what `a_12`'s budget was at
+ * seeding, and a `set_budget` decision has since made that wrong. Everything here comes from the
+ * `ads` projection, which exists only because `applyDecision()` ran.
+ *
+ * `current_generation_id` and `last_decision_seq` are carried because the shell is the only place
+ * that can show that config is versioned WITHOUT a chart: an ad on generation 4 has had three
+ * levers pulled on it, and that is HR6 visible on the first screen rather than at B48.
+ */
+export type AdRow = {
+  ad_id: string;
+  name: string;
+  status: 'draft' | 'live' | 'paused' | 'archived';
+  channel: string;
+  audience_id: string;
+  daily_budget_cents: number;
+  launched_at: string | null;
+  current_generation_id: string;
+  last_decision_seq: number;
+};
+
 export type Snapshot = {
   /** The window as the server RESOLVED it — snapped to whole minutes, echoed so a caller
    *  can see which buckets were actually asked for rather than inferring it. */
   query: SnapshotQuery;
+  /**
+   * The whole portfolio — **every** ad, not only the selected ones (B36).
+   *
+   * Deliberately unfiltered by `query.ads`: `?ads=` selects what is CHARTED, and a portfolio list
+   * that hid the ads you are not currently looking at would make selecting them impossible. It is
+   * twelve rows, so the cost of always sending it is nothing next to a second round trip.
+   */
+  ads: AdRow[];
   /** Ordered by `(ad_id, minute_start)`, both request paths, so hand-diffs are reproducible. */
   buckets: BucketRow[];
   /**
@@ -184,6 +215,16 @@ const SELECT_ALL_ADS = `SELECT ${BUCKET_COLUMNS} FROM rollup_minute
   WHERE minute_start >= ? AND minute_start < ? ORDER BY ad_id, minute_start`;
 
 /** `MAX(signals.ingest_seq)`, the same high-water mark `/api/health` reports (D12/E2). */
+/**
+ * The portfolio, ordered by `ad_id` so the list is stable across refreshes — a list that reordered
+ * itself as statuses changed would move the row under the reviewer's cursor mid-demo.
+ */
+const SELECT_PORTFOLIO = `
+  SELECT ad_id, name, status, channel, audience_id, daily_budget_cents, launched_at,
+         current_generation_id, last_decision_seq
+    FROM ads ORDER BY ad_id
+`;
+
 const SELECT_LOG_POSITION = `SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals`;
 
 /**
@@ -235,6 +276,7 @@ export function bucketsSinceReader(db: DatabaseSync): (cursor: number, limit: nu
 }
 
 export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
+  const portfolio = db.prepare(SELECT_PORTFOLIO);
   const perAd = db.prepare(SELECT_ONE_AD);
   const allAds = db.prepare(SELECT_ALL_ADS);
   const logPosition = db.prepare(SELECT_LOG_POSITION);
@@ -256,6 +298,16 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
     // One instant for the whole snapshot: two buckets in one response must not be judged against
     // two different clocks, or a window straddling the horizon can come back internally
     // inconsistent — the earlier row `settled` and a later one `live`.
-    return { query, buckets: withState(buckets, new Date().toISOString()), as_of_ingest_seq: seq.seq };
+    // In the SAME read transaction as the buckets, which is the whole reason §3.1 makes this one
+    // request: a portfolio read separately could show an ad as `live` beside buckets taken from
+    // after it was paused, and the screen would be internally inconsistent with nothing to blame.
+    const ads = portfolio.all() as unknown as AdRow[];
+
+    return {
+      query,
+      ads,
+      buckets: withState(buckets, new Date().toISOString()),
+      as_of_ingest_seq: seq.seq,
+    };
   });
 }
