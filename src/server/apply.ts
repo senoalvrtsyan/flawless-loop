@@ -16,6 +16,11 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { tx } from './db.ts';
 import { fold, precondition, type FoldErrorCode, type FoldState } from './fold.ts';
+// A cycle: attribute.ts imports `floorMinute` from here. Both bindings are hoisted
+// function declarations used only at call time, so neither module observes the other
+// half-initialised. The alternative — attribution resolved by the caller — is the one
+// the doc comment on apply() rules out.
+import { resolveAttribution } from './attribute.ts';
 import type { AdConfig, Decision, DecisionBody } from '../shared/decisions.ts';
 
 /**
@@ -36,6 +41,7 @@ export type AppliedSignal = {
   | { kind: 'impression' }
   | { kind: 'click'; cost_cents: number }
   | { kind: 'spend'; amount_cents: number }
+  | { kind: 'conversion'; attributed_click_id: string; value_cents: number }
 );
 
 /** The bucket a signal moved. Returned so B09 can collect the dirty set without reaching in here. */
@@ -74,14 +80,32 @@ projection, which means the B05 boundary was bypassed`);
  */
 const UPSERT_ROLLUP = `
   INSERT INTO rollup_minute (ad_id, minute_start, impressions, clicks, click_cost_cents,
-                             spend_cents, first_written_at, max_ingest_seq)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                             spend_cents, conversions, value_cents, first_written_at,
+                             max_ingest_seq)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT (ad_id, minute_start) DO UPDATE SET
     impressions      = impressions      + excluded.impressions,
     clicks           = clicks           + excluded.clicks,
     click_cost_cents = click_cost_cents + excluded.click_cost_cents,
     spend_cents      = spend_cents      + excluded.spend_cents,
+    conversions      = conversions      + excluded.conversions,
+    value_cents      = value_cents      + excluded.value_cents,
     max_ingest_seq   = MAX(max_ingest_seq, excluded.max_ingest_seq)
+`;
+
+/**
+ * The `conversion_attribution` row B17 computes and this file persists — apply() is its only
+ * writer (D7), which is why `resolveAttribution()` returns a value and touches nothing.
+ *
+ * Written for an ORPHAN as readily as for a resolved conversion: D16 makes an unattributed
+ * conversion a fact we hold, not one we discard, and the stored `credited_minute` is what lets
+ * B20 find the bucket to decrement when the click finally lands.
+ */
+const INSERT_ATTRIBUTION = `
+  INSERT INTO conversion_attribution (event_id, state, click_event_id, credited_ad_id,
+                                      credited_minute, credited_generation_id, ad_id_conflict,
+                                      resolved_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 /**
@@ -89,35 +113,51 @@ const UPSERT_ROLLUP = `
  * per event costs ~3.6x on the seed path (37k events/s vs 133k), which turns D39's ~12 s backfill
  * into ~45 s of boot before the demo shows anything. `WeakMap` so a closed handle is collectable.
  */
-const cache = new WeakMap<DatabaseSync, StatementSync>();
+const cache = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
 
-function upsertRollup(db: DatabaseSync): StatementSync {
-  let stmt = cache.get(db);
+/** Keyed by the SQL itself, so a second cached statement cannot be given the first one's slot. */
+function prepared(db: DatabaseSync, sql: string): StatementSync {
+  let bySql = cache.get(db);
+  if (bySql === undefined) {
+    bySql = new Map();
+    cache.set(db, bySql);
+  }
+  let stmt = bySql.get(sql);
   if (stmt === undefined) {
-    stmt = db.prepare(UPSERT_ROLLUP);
-    cache.set(db, stmt);
+    stmt = db.prepare(sql);
+    bySql.set(sql, stmt);
   }
   return stmt;
 }
 
 /**
- * Apply one accepted signal to the projections. MUST be called inside the caller's transaction —
+ * Apply one accepted signal to the projections, returning the buckets it moved.
+ *
+ * A LIST, not one key (B18). Until the conversion existed, every signal moved exactly one bucket —
+ * its own. D27-B is where that stops being true in both directions: an orphan moves none until its
+ * click arrives, and B20's promotion moves two. The flush treats a key it is given as a bucket
+ * that certainly exists (`stream.ts` logs "apply/flush disagree" otherwise), so "no bucket" has to
+ * be expressible rather than approximated with the key of a row nothing wrote.
+ *
+ * MUST be called inside the caller's transaction —
  * DESIGN §11 makes ingest one synchronous transaction, so a reader can never see a signal whose
  * bucket has not moved.
  *
  * `applied_at` is the caller's clock, not a fresh `Date.now()`: during the seed it is the event's
  * own `received_at`, so `first_written_at` describes the seeded world rather than the boot minute.
  */
-export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: string): BucketKey {
-  // §5.3: event time, never arrival time — impressions, clicks and spend all land at their own
-  // minute. The conversion is the one kind that does NOT (D27-B places it at its CLICK's minute),
-  // which is why it is a separate path at B18 rather than another case here.
-  const minute_start = floorMinute(signal.ts_effective);
+export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: string): BucketKey[] {
+  // §5.3: event time, never arrival time. Impressions, clicks and spend land at their OWN minute,
+  // so that is the default — and the conversion is the ONE kind for which it is wrong, so the
+  // branch below replaces BOTH halves of the key rather than just the minute.
+  let bucket: BucketKey = { ad_id: signal.ad_id, minute_start: floorMinute(signal.ts_effective) };
 
   let impressions = 0;
   let clicks = 0;
   let click_cost_cents = 0;
   let spend_cents = 0;
+  let conversions = 0;
+  let value_cents = 0;
 
   switch (signal.kind) {
     case 'impression':
@@ -134,11 +174,46 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
       // would grow quadratically with no error anywhere; the emitter's contract is SIMULATOR §10.
       spend_cents = signal.amount_cents;
       break;
+    case 'conversion': {
+      // Attribution is resolved HERE and not handed in by the caller, and that is what keeps
+      // B22/B23 possible: a rebuild pushes raw `signals` back through this function and re-derives
+      // the placement over the prefix it is replaying. Resolved at the ingest boundary instead, it
+      // would have to exist a second time in the replay — two implementations of the one rule the
+      // sweep is meant to be checking.
+      const attribution = resolveAttribution(db, {
+        event_id: signal.event_id,
+        ad_id: signal.ad_id,
+        ts_effective: signal.ts_effective,
+        attributed_click_id: signal.attributed_click_id,
+      }, applied_at);
+
+      prepared(db, INSERT_ATTRIBUTION).run(
+        attribution.event_id, attribution.state, attribution.click_event_id,
+        attribution.credited_ad_id, attribution.credited_minute,
+        attribution.credited_generation_id, attribution.ad_id_conflict, attribution.resolved_at,
+      );
+
+      if (attribution.state !== 'resolved') {
+        // B19 credits the orphan into the `provisional_*` columns at its own minute. Until it
+        // does, an orphan moves NO bucket — and returning a key for a bucket this call did not
+        // write would trip the flush's "apply/flush disagree" guard (stream.ts), which exists to
+        // catch precisely that disagreement.
+        return [];
+      }
+
+      conversions = 1;
+      value_cents = signal.value_cents;
+      // D27-B and I8/G30 together: the CLICK's minute, on the CLICK's ad. A conversion can
+      // therefore move a bucket belonging to an ad its own body never names — that is the
+      // mechanism that makes CPA(T) and ROAS(T) cohort ratios, not a bug to reconcile.
+      bucket = { ad_id: attribution.credited_ad_id, minute_start: attribution.credited_minute };
+      break;
+    }
   }
 
-  upsertRollup(db).run(signal.ad_id, minute_start, impressions, clicks, click_cost_cents,
-    spend_cents, applied_at, signal.ingest_seq);
-  return { ad_id: signal.ad_id, minute_start };
+  prepared(db, UPSERT_ROLLUP).run(bucket.ad_id, bucket.minute_start, impressions, clicks,
+    click_cost_cents, spend_cents, conversions, value_cents, applied_at, signal.ingest_seq);
+  return [bucket];
 }
 
 // ---------------------------------------------------------------------------------------------

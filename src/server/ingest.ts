@@ -14,8 +14,8 @@ import { tx } from './db.ts';
 import { apply, type BucketKey } from './apply.ts';
 import type { Disposition, IngestResult, SignalKind, SignalSource } from '../shared/types.ts';
 
-/** Kinds this build ingests. B18 adds `conversion`; until then it is rejected, not ignored. */
-const SUPPORTED: readonly SignalKind[] = ['impression', 'click', 'spend'];
+/** Kinds this build ingests — all four of the brief's, complete as of B18. */
+const SUPPORTED: readonly SignalKind[] = ['impression', 'click', 'spend', 'conversion'];
 
 /**
  * The variant fields, and which kind owns each. DESIGN §2.2's four CHECK constraints say the same
@@ -134,6 +134,17 @@ function validate(raw: unknown): string | null {
   if (kind === 'spend' && !isCents(e['amount_cents'])) {
     return 'amount_cents_not_a_non_negative_integer';
   }
+  // The conversion names the CLICK it belongs to, by `click_id` and never by `event_id` (E3). A
+  // conversion with no `attributed_click_id` could not be an orphan either — an orphan is a
+  // conversion whose click we have not seen YET, and this one names no click to wait for.
+  if (kind === 'conversion') {
+    if (!isNonEmptyString(e['attributed_click_id'])) {
+      return 'attributed_click_id_missing_or_not_a_string';
+    }
+    // U4: gross value. Zero is legal — a conversion can be worth nothing and still be a
+    // conversion, and the count is what CPA divides by.
+    if (!isCents(e['value_cents'])) return 'value_cents_not_a_non_negative_integer';
+  }
   return null;
 }
 
@@ -177,8 +188,8 @@ export function ingest(
   // MIN() that could drift from it.
   const insertSignal = db.prepare(`
     INSERT INTO signals (event_id, ingest_seq, received_at, ts, ad_id, kind, source,
-                         click_id, cost_cents, amount_cents)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         click_id, cost_cents, amount_cents, attributed_click_id, value_cents)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING ts_effective
   `);
   // §13 injects a 0.05% "dual click-id" fault: two DIFFERENT events claiming one `click_id`.
@@ -263,6 +274,8 @@ export function ingest(
           (e['click_id'] as string | undefined) ?? null,
           (e['cost_cents'] as number | undefined) ?? null,
           (e['amount_cents'] as number | undefined) ?? null,
+          (e['attributed_click_id'] as string | undefined) ?? null,
+          (e['value_cents'] as number | undefined) ?? null,
         ) as { ts_effective: string };
 
         // Same transaction, immediately: D29's incremental upsert. A reader can never observe a
@@ -277,11 +290,17 @@ export function ingest(
         // The union is narrowed HERE, where `validate()` has just proved the fields are present,
         // rather than inside apply() with a cast. apply() then cannot be called for a kind whose
         // money it has not been given — a compile error instead of a runtime one.
-        dirty.push(apply(db, kind === 'click'
+        // SPREAD, not push: apply() returns the buckets it moved, and a conversion whose click
+        // has not arrived moves none (B18). Zero is a real answer here, not an empty edge case.
+        dirty.push(...apply(db, kind === 'click'
           ? { ...base, kind, cost_cents: e['cost_cents'] as number }
           : kind === 'spend'
             ? { ...base, kind, amount_cents: e['amount_cents'] as number }
-            : { ...base, kind: 'impression' }, receivedAt));
+            : kind === 'conversion'
+              ? { ...base, kind,
+                  attributed_click_id: e['attributed_click_id'] as string,
+                  value_cents: e['value_cents'] as number }
+              : { ...base, kind: 'impression' }, receivedAt));
       }
 
       result[disposition] += 1;
