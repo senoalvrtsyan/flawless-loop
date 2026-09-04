@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · B32 + B33 CLOSED · 36 / 65 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · stage 3 · B34 CLOSED — THE WORLD HAS A PAST · 37 / 65 chunks**
 
 ---
 
@@ -49,11 +49,21 @@ aged from the pair's first exposure. Verified live: pausing `a_12` stops its eve
 while eleven ads keep emitting, and resume brings it back in ~6 s. The simulator holds no durable
 state of its own (D40-A) — without a successful poll it emits nothing at all.
 
-**What stage 3 has left: B34 (the 7-day backfill) and B35 (the `T0` seam).** Both are single-gated
-and carry the owed list below — and **B34's two unratified assumptions must be answered before it
-starts** (the seed's home and the catch-up window; see "What is open"). Until B34 there is no seeded
-history, so φ ≈ 1.0 and ν sits near its peak — correct for a store where nothing has been burned
-yet, and the reason §7.2's table is not yet the live check.
+**B34 is closed and it changed the world.** `npm run seed` now writes **seven days of history**:
+1.6M events generated forward through the real `ingest()`, `received_at = ts + reporting lag`,
+sorted by arrival, `source = 'backfill'`. **φ was 1.000 on every ad and now spans 0.126–0.938**, and
+measured `F` matches §7.2's designed accrual to within 0.854–1.049 per pair — so **§7.2's table is
+the live check now, and it holds**. D16's orphan path is real for the first time (1,337 resolved,
+8 provisional). It also landed **D60** (the seed lives in the store), **D61** (60 s ratified) and
+**D62** (conversion is a per-click Bernoulli keyed by `click_id`).
+
+**One thing is broken and it is NOT the store: `/api/verify` returns 409.** `verify.ts` rebuilds in
+`ingest_seq` order but resolves attribution against the WHOLE `signals` table, so it can never
+produce an orphan and reports divergence on a correct store. Latent in **B22** since it shipped and
+unobservable until a store contained an orphan. **This is the first thing to fix** — see
+"Next action".
+
+**What stage 3 has left: B35 (the `T0` seam)**, single-gated.
 
 **How stage 3 is verified, and it has not changed:** `SIMULATOR.md` is the spec and is complete to
 the parameter, so each chunk is a comparison against a table already in that document rather than a
@@ -129,7 +139,12 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 ```
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
-npm run seed          # B15: the 12-ad world, as 24 backdated decisions. ONCE, on an empty store
+npm run seed          # B15 + B34: the 12-ad world as 24 backdated decisions, THEN seven days of
+                      # history — ~1.6M events. ONCE, on an empty store. **~5m20s** and ~750 MB:
+                      #   249s generate · 0.3s sort · 70s write, peak RSS ~703 MB
+                      # SIM_BACKFILL_DAYS=5 is §15.2's stated fallback lever if that is too long
+                      # SIM_SEED=<x> forks the world AT SEED TIME only — the emitter reads the seed
+                      # back out of GET /api/sim/world and has none of its own (D60)
 npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
 npm run sim           # the simulator alone, against an already-running server.
                       # SINCE B31b IT NEEDS ONE: no world poll -> no emission at all, by design.
@@ -357,6 +372,13 @@ one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind
   not exist. At 1.6 the whole portfolio ran **1.19–1.47×** §2.3's stated `Impr/day`.
   **`SIMULATOR.md` §9 and §21 are amended in place** with the measurement, as D56 amended §3.
 
+- **D60–D62 (2026-09-04, at B34)** — the seed lives in `sim_run` and is served in the world poll,
+  so the emitter cannot continue a seeded history under a seed that history was not generated with ·
+  the 60 s catch-up window is ratified, because the re-emission IS the demonstration that derived
+  ids make restart safety free · conversion becomes a per-click `Bernoulli(p_cvr)` keyed by
+  `click_id`, which is what makes §15.3(b)'s *"derivable, not stored"* true as written. `SIMULATOR.md`
+  §10, §14, §16 and §21 amended in place.
+
 **The three that most shape the build**, if you only reload three: **D27** (a conversion counts in
 its *click's* minute — this is why CPA/ROAS lag and CTR does not), **D7** (nothing writes a
 projection except the replay/apply function), **D30/D34** (the server owns all arithmetic; the raw
@@ -397,8 +419,10 @@ raised it: D52's pacing baselines were set against `base_impr_per_day`, so a per
 absorbed as `ρ` throttling on `a_08` and `a_12` — and `a_08` is the ad D56 had already cut from 53%
 to 20% of hourly-CPA headroom.
 
-**Two unratified assumptions**, both labelled in code, both blocking nothing now. Neither is a
-`DECISIONS.md` entry yet, and neither should be settled by drift:
+**B11's two unratified assumptions are now ANSWERED** — **D60** put the world seed in the store
+(`sim_run`, served in the world poll, so the emitter holds no seed of its own) and **D61** ratified
+the 60 s catch-up window. The table below is kept for the record of what they were; **nothing in it
+is open.**
 
 | What | Current value | Needs sign-off before |
 |---|---|---|
@@ -411,14 +435,14 @@ to 20% of hourly-CPA headroom.
 | | |
 |---|---|
 | **Current stage** | **Stage 3 · the simulator (B25–B35) is RUNNING.** Stage 2 closed with B24. |
-| **Last completed chunk** | **B32 + B33** (one commit, `6638ccc`, at Seno's instruction — "you can commit the full group, not chunk by chunk"), behind **D58** `24c991a` and **D59** `5ba2e2d`. Before them **B31b** — the emitter's 1 Hz world poll and emission gating. **HR3 is satisfied**: a `pause` stops that ad's events within one tick, verified live on a seeded store. Before it **B31a** `42ee197` (the endpoint), **B30** `f7390d6`, **B29** `76d9e3e`, **B28** `47e0d41`, behind **D57** `fdd2e1e`. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
-| **Next gate** | **B34, single-gated.** The 7-day backfill. **It is BLOCKED until the two unratified assumptions in "What is open" are answered** — the seed's home and the catch-up window — both of which STATUS has said must be signed off before B34 since B11. It also owes the D39 seed-budget revisit, the D56 gate-margin check on `a_08`, the `converted?` key, and a flush guard. |
-| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ · ~~**B31a**~~ · ~~**B31b**~~ · ~~**G9** B32+B33~~ — all closed. **B34 and B35 remain, both single-gated.** |
+| **Last completed chunk** | **B34** `5d411b8` — the 7-day backfill, plus D60/D61/D62's consequences. Behind it **D60–D62** `acdba39`. Before that **B32 + B33** (one commit, `6638ccc`, at Seno's instruction — "you can commit the full group, not chunk by chunk"), behind **D58** `24c991a` and **D59** `5ba2e2d`. Before them **B31b** — the emitter's 1 Hz world poll and emission gating. **HR3 is satisfied**: a `pause` stops that ad's events within one tick, verified live on a seeded store. Before it **B31a** `42ee197` (the endpoint), **B30** `f7390d6`, **B29** `76d9e3e`, **B28** `47e0d41`, behind **D57** `fdd2e1e`. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
+| **Next gate** | **The `/api/verify` prefix fix — proposed, not yet a numbered chunk.** It threads an `ingest_seq` bound through `attribute.ts` → `apply.ts` → `verify.ts` so the rebuild sees the same log prefix the live path saw. `replay.ts` (B23) already does this and its comment is the spec. **Then B35**, single-gated. Both are Seno's call on ordering; B35's seam check leans on verify, so the fix should come first. |
+| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ · ~~**B31a**~~ · ~~**B31b**~~ · ~~**G9** B32+B33~~ · ~~**B34**~~ — closed. **Only B35 remains in stage 3.** |
 | **G9, for the record** | B32+B33. **It stopped mid-build TWICE under D48** — once before the first line for **D58**, once after B32 built and ran for **D59**. That is the stop clause firing on its two distinct triggers: a decision (§3) and *"the chunk reveals the design was wrong"*. Both were caught by measuring rather than trusting: D58 by pricing the divergence before writing the code, D59 by comparing delivered volume against §2.3's own column. |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **36 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32, B33) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **37 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B34) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits, cont.** | **B31 split into B31a/B31b** (2026-09-04, Seno's call): B31 was ~240 diff lines across four files, and B09 at ~230 is what prompted the B10 split. Its verify column already named two separable checks. B31a is the shared account-local clock + `GET /api/sim/world`; B31b is the poll and emission gating. **65 chunks now.** |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
@@ -444,7 +468,24 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 plan. **Each produces wrong or slow output with no error.** Twenty-eight now — the Phase 5 ones were
 found against the real store and are in no design document.
 
-**The three newest (B32/B33), all found by measuring rather than trusting:**
+**The newest (B34), and the first is a live defect rather than a hazard:**
+
+- **`/api/verify` reports divergence on a CORRECT store, and the store is not wrong.** `verify.ts`
+  replays `FROM main.signals ORDER BY ingest_seq`, but `apply()` calls `resolveAttribution(db, …)`
+  which reads the **whole** `signals` table with no prefix bound — so every conversion in the
+  rebuild resolves against clicks that had not yet arrived, and the rebuild **cannot produce an
+  orphan at all**. Latent in B22 since it shipped; unobservable until a store held an orphan, which
+  is B34. Measured: `resolved_at` live `16:34:02.841` vs rebuilt `16:30:14.254`.
+  **`replay.ts` (B23) bounds the prefix on BOTH reads and its comment is the spec for the fix.**
+  The tempting wrong fix is to drop `resolved_at` from the diff.
+- **The out-of-order check must use a window function, not a self-join.** The B33 form
+  (`JOIN signals a, signals b ON a.ingest_seq < b.ingest_seq AND a.ts > b.ts`) is quadratic — fine
+  on 2,700 rows, never returns on 1.58M. Use `LAG(received_at) OVER (ORDER BY ingest_seq)`.
+- **The backfill's state must run FORWARD.** φ from accumulated `F`, ν from first exposure inside
+  the run, ρ from spend so far that account-local day. Freeze any one and the seed writes seven days
+  of history with no history in it — every number plausible and §7.2's table meaningless.
+
+**The three before those (B32/B33), all found by measuring rather than trusting:**
 
 - **`ρ_pacing` is the one λ factor that is not a pure function of `t`.** D58 keeps the consequence
   to append-or-omit; **anything that reintroduces a count-dependent field into an event body reopens
@@ -652,6 +693,18 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 - **The Phase 5 SQLite findings are not in `BRIEF_GAPS.md`** and should not be — they are driver and
   engine behaviours, not defects in the brief. **I19 is** in the register (B05): a delivery with no
   usable `event_id`, keyed `(no event_id):<payload_hash>`.
+- **D39's seed budget is RE-MEASURED (B34), and the surprise is where the cost is.** 249 s
+  generate · 0.3 s sort · 70 s write — **5:20 wall, 703 MB peak RSS, 746 MB store**. §18.4's
+  ~12 s / ~315 MB measured the STORE and B06's 27.5 s measured the WRITE PATH; neither measured the
+  model. `SIM_BACKFILL_DAYS=5` is the wired lever. **This supersedes the older entry below.**
+- **The D56 gate-margin check on `a_08` is still owed and is now MEASURABLE.** Its hourly-CPA
+  headroom (12.0 against a bar of 10) needs the read-side gates, which are stage 4 — but the history
+  it needs now exists, where before B34 it did not.
+- **`INJECT_FAULTS_INTO_BACKFILL` is a READING, not a ratified decision.** §13 was written about a
+  live transport; in a constructed arrival order a transport fault becomes an adjustment to
+  `received_at`, never to emission. Named as a constant in `seed-history.ts` so it can be flipped;
+  the cost of disagreeing is one reseed. Without it the seeded week is clean and the live week
+  dirty, §13's orphan rows never fire, and no bucket carries `restated_at` from frame one.
 - **B34 owes the D39 revisit.** The seed is ~28 s and ~716 MB through the real write path, not ~12 s
   and ~315 MB. Nothing regressed — §18.4 measured the store, not the write path — and the full
   accounting plus **five levers with their costs** (the fifth costs B55's trace a body on seeded
@@ -789,10 +842,40 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Next is B34, and it is SINGLE-GATED and BLOCKED.** Two unratified assumptions must be answered
-first — the world seed's home and the emitter's catch-up window (see "What is open"; both have said
-"needs sign-off before B34" since B11). Surface them as a decision batch **before** announcing B34,
-along with the `converted?` key the handover contract is short of.
+**Next is the `/api/verify` prefix fix, and it is not yet a numbered chunk** — Seno decides whether
+it becomes B34a or displaces something. It should come before **B35**, because B35's `T0` seam check
+leans on verify being trustworthy, and today verify says 409 on a correct store.
+
+**The fix, in one paragraph so it need not be re-derived:** `verify.ts` rebuilds by walking
+`FROM main.signals ORDER BY ingest_seq` and calling `apply(db, …)` per row. `apply()` resolves
+attribution through `resolveAttribution(db, ev, at)` in `attribute.ts`, which queries `signals` for
+the click **with no upper bound on `ingest_seq`**. During a rebuild that table is already complete,
+so a conversion whose click arrived later still finds it, no orphan is ever created, and
+`resolved_at` is stamped at the conversion's own arrival instead of the promoting click's. The fix
+threads a prefix bound (`ingest_seq <= current`) through `attribute.ts` → `apply.ts` → `verify.ts`.
+**`replay.ts` (B23) already does exactly this and its comment states the rule:** *"The prefix is
+taken with `ingest_seq <= as_of` on BOTH reads — the events being counted and the clicks used to
+attribute them."* Note `apply()` is also the live writer, so the bound must be optional and default
+to unbounded, or the live path changes behaviour.
+
+**What B34 established, so a cold resume does not re-derive it:**
+
+- **The world has a past.** 604,800 ticks → 1,600,177 events generated, 1,597,876 seeded, **2,301
+  handed to the live emitter** because they arrive after `T0`. 1,582,985 accepted, 12,522
+  dup-identical, **798 dup-conflicting** (the channel B33 could not observe is now real), 1,571
+  rejected.
+- **§7.2's table is the live check and it holds.** φ spans **0.126–0.938** where it was 1.000
+  everywhere. Measured `F` against the designed accrual spans **0.854–1.049** per pair; the two
+  lowest are `vl_04 × cold_us` and `hl_04 × cold_us`, both `a_12`'s slots, which under-delivers by
+  D52's deliberate throttling. `a_01`'s φ_ad of 0.126 is exactly `0.2514 × 0.2514^0.5`.
+- **`ingest_seq` is monotone in `received_at`: 0 violations** over 1.58M rows, so §15.3(b) holds and
+  `as_of_ingest_seq` can reconstruct a past screen.
+- **10 buckets carry `restated_at` from frame one**, and D16's orphan path is real: **1,337
+  resolved, 8 `orphan_provisional`**. B33's two orphan injectors fire for the first time — 75
+  released, 98 never delivered.
+- **`npm run agree` is OK in 3.8 s** on the seeded store. **`/api/verify` is 409** — see above.
+- **The emitter continues on top of the seeded week**, adopting the seed from the world with no
+  `SIM_SEED` in its environment, and `source` distinguishes the two populations.
 
 **What B32 + B33 established, so a cold resume does not re-derive it:**
 
@@ -898,7 +981,7 @@ along with the `converted?` key the handover contract is short of.
   one ad and still regardless of status until B31. `PHI_AD` is frozen at the nominal `T0` accrual —
   an `ASSUMPTION (unratified)` in `index.ts`, replaced by B31's polled `F`.
 
-**Stage 3's remaining chunks are B34 and B35.**
+**Stage 3's remaining chunk is B35.**
 
 **B34 and B35 are single-gated and must not be grouped.** `BUILD_PLAN.md` §5's gate table covered
 stage 2 only, so stage 3's remaining two are governed by D48's exception list directly.
