@@ -13,6 +13,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import { tx } from './db.ts';
 import { apply, type BucketKey } from './apply.ts';
 import type { Disposition, IngestResult, SignalKind, SignalSource } from '../shared/types.ts';
+// B20a: the timestamp invariant lives in ONE place. Re-exported below because B12's D43 test
+// and `stream.ts` import it from here, and B20a is a move with no behaviour change —
+// including no change to who can import what.
+import { isCanonicalIso } from '../shared/time.ts';
+
+export { isCanonicalIso };
 
 /** Kinds this build ingests — all four of the brief's, complete as of B18. */
 const SUPPORTED: readonly SignalKind[] = ['impression', 'click', 'spend', 'conversion'];
@@ -51,27 +57,6 @@ function isCents(value: unknown): value is number {
  * a false arrival history — a dozen unrelated bodies presented as redeliveries of one event.
  */
 const NO_EVENT_ID_PREFIX = '(no event_id):';
-
-/**
- * Canonical ISO-8601 UTC, millisecond precision — exactly `new Date().toISOString()`.
- *
- * Enforced rather than normalised, because `ts_effective` is `MIN(ts, received_at)` over TEXT and
- * SQLite's MIN on TEXT is LEXICOGRAPHIC: MIN('…09:00:00.500Z', '…09:00:00Z') returns the .500Z
- * value, which is the LATER instant. Mixed precision would silently invert I10's clamp. Same-shape
- * strings make lexicographic order chronological order, so the whole problem disappears — and
- * `signals.ts` stays "as emitted, never altered".
- *
- * EXPORTED for its D43 test (B12) and for no other caller. Loosened — a `Z`-less or second-
- * precision `ts` let through — the event is ACCEPTED, `ts_effective` silently takes the later
- * instant, and B24's sweep re-derives from that same column and agrees with itself. Our own
- * emitter only ever sends the canonical form, so neither the sweep nor hand verification can see
- * it: the definition of a wrong answer that is invisible.
- */
-export function isCanonicalIso(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const parsed = new Date(value);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
-}
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;

@@ -21,6 +21,11 @@ import { fold, precondition, type FoldErrorCode, type FoldState } from './fold.t
 // half-initialised. The alternative — attribution resolved by the caller — is the one
 // the doc comment on apply() rules out.
 import { resolveAttribution, settledAt } from './attribute.ts';
+// B20a: one implementation of the timestamp invariant. Re-exported because `attribute.ts`,
+// `seed-world.ts` and the tests import `floorMinute` from here — a move, not a re-plumbing.
+import { floorMinute } from '../shared/time.ts';
+
+export { floorMinute };
 import type { AdConfig, Decision, DecisionBody } from '../shared/decisions.ts';
 
 /**
@@ -46,22 +51,6 @@ export type AppliedSignal = {
 
 /** The bucket a signal moved. Returned so B09 can collect the dirty set without reaching in here. */
 export type BucketKey = { ad_id: string; minute_start: string };
-
-/**
- * Floor a canonical ISO instant to its minute: `2026-09-04T12:03:45.678Z` -> `…T12:03:00.000Z`.
- *
- * String surgery, not a `Date` round-trip, because every timestamp reaching a projection is
- * already canonical — ingest rejects anything else (B05), and `MIN()` of two canonical strings is
- * canonical. Keeping `minute_start` in the same shape is what makes `ix_rollup_time`'s range
- * queries and `ts_effective` comparisons byte-order == time-order.
- */
-export function floorMinute(iso: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(iso)) {
-    throw new Error(`floorMinute: '${iso}' is not canonical ISO — a non-canonical value reached a
-projection, which means the B05 boundary was bypassed`);
-  }
-  return `${iso.slice(0, 17)}00.000Z`;
-}
 
 /**
  * D29's upsert, one statement for every additive kind (B16 generalised B06's impression-only

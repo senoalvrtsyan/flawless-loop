@@ -12,7 +12,8 @@
 // function instead of through a second implementation of the same rule.
 
 import type { DatabaseSync } from 'node:sqlite';
-import { floorMinute } from './apply.ts';
+import { floorMinute } from '../shared/time.ts';
+import { MINUTE_MS } from '../shared/time.ts';
 
 /**
  * `conversion_attribution.state`.
@@ -152,7 +153,7 @@ export const HORIZON_MS = 72 * 60 * 60 * 1000;
  * a bucket is live for the full horizon and settles the instant after.
  */
 export function settledAt(minute_start: string, at: string, horizon_ms: number = HORIZON_MS): boolean {
-  return Date.parse(at) - (Date.parse(minute_start) + 60_000) > horizon_ms;
+  return Date.parse(at) - (Date.parse(minute_start) + MINUTE_MS) > horizon_ms;
 }
 
 /**

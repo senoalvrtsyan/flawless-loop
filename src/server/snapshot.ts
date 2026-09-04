@@ -10,6 +10,10 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
+// B20a: the read side's half of the timestamp invariant — it CANONICALISES where the write
+// side rejects, and both halves now live in one file so the asymmetry is legible instead of
+// looking like two modules disagreeing.
+import { HAS_EXPLICIT_OFFSET, ceilToMinute, floorToMinute } from '../shared/time.ts';
 import type { BucketKey } from './apply.ts';
 
 /**
@@ -58,18 +62,6 @@ export type Snapshot = {
 };
 
 export type ParsedQuery = { ok: true; query: SnapshotQuery } | { ok: false; error: string };
-
-const MINUTE_MS = 60_000;
-
-/** Minute boundaries as canonical ISO. A multiple of 60 000 ms always renders `…:00.000Z`. */
-const floorToMinute = (ms: number): string =>
-  new Date(Math.floor(ms / MINUTE_MS) * MINUTE_MS).toISOString();
-const ceilToMinute = (ms: number): string =>
-  new Date(Math.ceil(ms / MINUTE_MS) * MINUTE_MS).toISOString();
-
-/** An ISO instant carrying an EXPLICIT UTC offset: `Z`, `±HH:MM`, or `±HHMM`. Rule 1 below. */
-const HAS_EXPLICIT_OFFSET =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:?\d{2})$/;
 
 /**
  * Resolve `?from&to&ads`. Two rules, both there because the alternative is a wrong answer that
