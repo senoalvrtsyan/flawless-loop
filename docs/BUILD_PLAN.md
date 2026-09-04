@@ -211,7 +211,8 @@ throughout; the stage-1 number keeps moving.
 | [x] | **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, applied to CTR only, on the pair's first exposure | `src/sim/fatigue.ts` | Dry-run: `a_07` at ν ≈ 1.06, `a_01` at 1.00 — the two ends of a creative's life at one moment | S§8 | **HR7** |
 | [x] | **B29** | Conversion lag: fast/slow mixture by `p_fast`, separate reporting lag, 7-day hard cutoff, schedule re-derived from the keyed RNG rather than stored | `src/sim/lag.ts` | Dry-run prints median / p95 / past-72 h share per temperature and **matches S§11.2**: rt 0.3 h / 1.87 d / 2.3%, cold 7.5 h / 2.85 d / 4.6% | S§11 | **HR4 HR7** |
 | [x] | **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to channel demand | `src/sim/noise.ts` | Dry-run: variance/mean grows with λ; the channel factor moves every ad on that channel together; autocorrelation at the stated τ | S§12 | **HR7** |
-| [ ] | **B31** | `GET /api/sim/world` + the emitter's 1 Hz poll: ads and status, `last_decision_seq`, `F` per pair **recomputed from the signal log**, `spend_so_far_today`, pending backfilled clicks, pending scenarios | `src/server/sim-world.ts`, `src/sim/world.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; the endpoint's `F` matches B26's internal state because both come from the log | D§11; S§16 | **HR3** |
+| [x] | **B31a** | **The account-local clock moved to `src/shared/time.ts`** (forced: `spend_so_far_today` needs the `America/New_York` day boundary on the SERVER, and the only `Intl` offset logic was the simulator's — B20a's argument, one file later) **+ `GET /api/sim/world`**: ads and status, `last_decision_seq`, `F` per pair **recomputed from the log**, `spend_so_far_today`, pending backfilled clicks, pending scenarios | `src/shared/time.ts`, `src/shared/config.ts`, `src/server/sim-world.ts` | `curl` it against a seeded store: 12 ads from the fold, `spend_so_far_today` equals `sum(click_cost_cents + spend_cents)`, `F` per pair equals the rollup, and **a mid-run `swap_component` splits the video pair while leaving the headline pair whole** — 126 + 18 = 144, the temporal join and §7.2's third claim in one check | D§8, §11; S§16 | **HR3** |
+| [ ] | **B31b** | The emitter's **1 Hz poll** and emission gating: status decides whether an ad emits at all, `F` from the poll replaces the frozen nominal accrual, ν and `spend_so_far_today` likewise | `src/sim/world.ts`, `src/sim/index.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; φ and ν stop being frozen at `T0` | D§11; S§16 | **HR3** |
 | [ ] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
 | [ ] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
 | [ ] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'`. **Owed from B09: the seeder must NOT call `stream.markDirty()`** — measured, one batch across 20,000 minutes gave a **6.20 MiB** frame and a **142 ms** event-loop stall; ~17 MiB / ~400 ms at 56,160 seeded buckets | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
@@ -261,6 +262,18 @@ detail — the first four are free of evidence loss, the fifth is not:
    disposition and hash. **Costs B55's `trace` a body on seeded events, which is an HR5 cost and a
    real one** — the walk-back would show the delivery row and its disposition but not the payload,
    on exactly the six days of history a reviewer is most likely to click into.
+
+### B31 split into B31a / B31b — 2026-09-04, Seno's call
+
+B31 as written was ~240 diff lines across four files. **B09 ran ~230 and that is what prompted the
+B10 split**, so the same rule applied here — and B31's verify column already named two separable
+checks: the endpoint's `F` against the log, and the live pause behaviour. **B31a** is the shared
+account-local clock plus `GET /api/sim/world`; **B31b** is the 1 Hz poll and emission gating.
+Lettered, not renumbered, for the same reason B10a/B10b and B20a were: `B32`–`B62` are cited by id
+across four documents. **Total chunks: 65.**
+
+Every other reference to "B31" in this plan and in `SIMULATOR.md` means the pair unless it names a
+letter. **HR3 is not satisfied until B31b** — the endpoint alone changes no emission.
 
 ### The gate-margin check B34 owes — carried from D56
 

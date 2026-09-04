@@ -46,7 +46,8 @@ import {
 } from './fatigue.ts';
 import { demand, demandConstants, demandFactor } from './noise.ts';
 import { purchaseLagMs, reportingLagMs } from './lag.ts';
-import { diurnal, dowVolume, localHour, localMs, localWeekday, lambdaPerSecond, negBinomial } from './rate.ts';
+import { diurnal, dowVolume, lambdaPerSecond, negBinomial } from './rate.ts';
+import { localHour, localMs, localWeekday } from '../shared/time.ts';
 import {
   beta,
   betaBinomial,

@@ -40,8 +40,9 @@ import { DEMAND } from './params.ts';
  * minute to minute" lines up with the granularity the store aggregates at and the UI shows, rather
  * than being a number chosen to be affordable.
  *
- * **ASSUMPTION (unratified):** Δ = 60 s. Blocks nothing; needs sign-off before **B34**, where the
- * seed bakes seven days of these factors into ~1.6M events.
+ * **RATIFIED 2026-09-04 (D57):** Δ = 60 s. In Seno's words: *"τ/Δ of 45 and 20 resolves the
+ * autocorrelation fully and nothing observable is finer than D28's minute bucket."* It is also the
+ * grid the click rate is drawn on, so the model has one per-minute schedule rather than two.
  */
 type DemandKind = 'channel' | 'ad';
 

@@ -27,7 +27,7 @@ import {
   SPEND_TICK_S,
   TEMPERATURE,
 } from './params.ts';
-import { localWeekday } from './rate.ts';
+import { localWeekday } from '../shared/time.ts';
 import type { AdFixture } from './fixtures.ts';
 
 const TEMPERATURE_OF = new Map(AUDIENCES.map((a) => [a.audience_id, a.temperature]));

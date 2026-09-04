@@ -22,6 +22,8 @@
 // Do not "unify" the two directions: rejecting a bound would break the API, and normalising a `ts`
 // would silently rewrite what a source told us.
 
+import { ACCOUNT_TZ } from './config.ts';
+
 const MINUTE_MS = 60_000;
 
 /**
@@ -100,3 +102,94 @@ export function toCanonicalIso(value: unknown): string | null {
 
 /** One minute, in ms. Exported so the settlement arithmetic does not re-type `60_000`. */
 export { MINUTE_MS };
+
+// ---------------------------------------------------------------------------------------------
+// The ACCOUNT-LOCAL clock. Moved here at B31a; landed at B25 inside `src/sim/rate.ts`.
+//
+// **This is a MOVE. No behaviour changes.** `d_c(h)` and `w_dow` must read exactly as they did.
+//
+// It moved for the reason this file exists at all. `GET /api/sim/world` owes
+// `spend_so_far_today` on the **account-local** day (D22/I2, SIMULATOR §9), and the only `Intl`
+// offset logic in the repo was the simulator's — so the server would have been the SECOND copy of
+// a rule whose first four copies are what created this module (see the header). B20a's own note
+// says B21 "would otherwise be the fourth copy"; this is the same argument one file later.
+//
+// `ACCOUNT_TZ` is used for exactly one thing, per `config.ts`: the day boundary at which
+// `daily_budget_cents` resets and the simulator's diurnal curve turns over. Minute buckets are UTC
+// and stay UTC.
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+const OFFSET_PARTS = new Intl.DateTimeFormat('en-US', {
+  timeZone: ACCOUNT_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * `America/New_York`'s offset from UTC at an instant, in ms — negative, since New York is behind.
+ *
+ * Cached per UTC hour. The offset can only change at a DST boundary, which falls on an hour, so
+ * the cache is exact rather than approximate; and it has to exist, because a 24-hour dry-run calls
+ * this ~1 M times and `Intl` formatting is two orders of magnitude more expensive than the
+ * arithmetic around it.
+ */
+const offsetCache = new Map<number, number>();
+
+function tzOffsetMs(ms: number): number {
+  const bucket = Math.floor(ms / HOUR_MS);
+  const hit = offsetCache.get(bucket);
+  if (hit !== undefined) return hit;
+
+  const parts = new Map(OFFSET_PARTS.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+  const asUtc = Date.UTC(
+    Number(parts.get('year')),
+    Number(parts.get('month')) - 1,
+    Number(parts.get('day')),
+    Number(parts.get('hour')),
+    Number(parts.get('minute')),
+    Number(parts.get('second')),
+  );
+  // Truncated to the second by `Intl`, so re-add what the instant carries below a second.
+  const offset = asUtc - (ms - (((ms % 1000) + 1000) % 1000));
+  offsetCache.set(bucket, offset);
+  return offset;
+}
+
+/** Account-local wall-clock ms — the instant an `America/New_York` clock would read as UTC. */
+export function localMs(ms: number): number {
+  return ms + tzOffsetMs(ms);
+}
+
+/** Fractional hour of the account-local day, `[0, 24)`. §4.1's `h`. */
+export function localHour(ms: number): number {
+  const local = localMs(ms);
+  return (((local % DAY_MS) + DAY_MS) % DAY_MS) / HOUR_MS;
+}
+
+/** Account-local day of week, `0` = Sunday — the index `SIMULATOR.md` §4.2's `w_dow` is written against. */
+export function localWeekday(ms: number): number {
+  return new Date(localMs(ms)).getUTCDay();
+}
+
+/**
+ * The UTC instant at which the account-local day containing `ms` began.
+ *
+ * What `spend_so_far_today` sums from, and what `daily_budget_cents` resets at. Derived by
+ * subtracting the local fractional hour, which is exact to the millisecond — so this is one
+ * subtraction rather than a second date-formatting round trip.
+ *
+ * **Stated limit, inherited from `config.ts`:** no DST transition falls inside a September 7-day
+ * window, so the DST path is correct by construction and untested in the demo window. On a spring
+ * transition the local day is 23 h and this still returns its true start, because the offset is
+ * read at `ms` rather than assumed.
+ */
+export function localDayStartMs(ms: number): number {
+  return ms - localHour(ms) * HOUR_MS;
+}

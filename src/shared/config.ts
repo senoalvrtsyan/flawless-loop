@@ -18,6 +18,22 @@
 export const HORIZON_MS = 72 * 60 * 60 * 1000;
 
 /**
+ * `SIMULATOR.md` §11.1's hard cutoff on the purchase lag: **7 days**, beyond which no conversion is
+ * emitted at all.
+ *
+ * It lives here rather than only in the simulator's parameters because **both sides need it**.
+ * `GET /api/sim/world` answers §16's *"backfilled clicks still inside the 7-day lag window"*, so
+ * the server bounds that query by it, and `src/sim/lag.ts` truncates by it. Two copies of a
+ * boundary that decides which rows are handed over would diverge silently — the same argument that
+ * put the account-local clock in `time.ts`.
+ *
+ * Distinct from `HORIZON_MS`, and the two must not be conflated: this bounds what the MODEL emits,
+ * the horizon bounds when a bucket is treated as settled. §11.2's whole point is that p95 sits
+ * inside the horizon while the tail crosses it.
+ */
+export const CONVERSION_LAG_CUTOFF_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * The account timezone — **`America/New_York`** (**D22/I2**), used for exactly ONE thing: the day
  * boundary at which `daily_budget_cents` resets and the simulator's diurnal curve turns over.
  *

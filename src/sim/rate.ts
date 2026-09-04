@@ -15,7 +15,7 @@
 // which is what keeps §3's "six multiplicative factors" a single readable line here instead of a
 // history of edits.
 
-import { ACCOUNT_TZ } from '../shared/config.ts';
+import { localHour, localWeekday } from '../shared/time.ts';
 import { draw } from './rng.ts';
 import {
   BASE_IMPR_PER_DAY,
@@ -26,66 +26,6 @@ import {
   NEGBINOMIAL_ALPHA,
 } from './params.ts';
 import type { Channel } from '../shared/decisions.ts';
-
-const HOUR_MS = 3_600_000;
-const DAY_MS = 86_400_000;
-
-const OFFSET_PARTS = new Intl.DateTimeFormat('en-US', {
-  timeZone: ACCOUNT_TZ,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hourCycle: 'h23',
-});
-
-/**
- * `America/New_York`'s offset from UTC at an instant, in ms — negative, since New York is behind.
- *
- * Cached per UTC hour. The offset can only change at a DST boundary, which falls on an hour, so
- * the cache is exact rather than approximate; and it has to exist, because a 24-hour dry-run calls
- * this ~1 M times and `Intl` formatting is two orders of magnitude more expensive than the
- * arithmetic around it.
- */
-const offsetCache = new Map<number, number>();
-
-function tzOffsetMs(ms: number): number {
-  const bucket = Math.floor(ms / HOUR_MS);
-  const hit = offsetCache.get(bucket);
-  if (hit !== undefined) return hit;
-
-  const parts = new Map(OFFSET_PARTS.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
-  const asUtc = Date.UTC(
-    Number(parts.get('year')),
-    Number(parts.get('month')) - 1,
-    Number(parts.get('day')),
-    Number(parts.get('hour')),
-    Number(parts.get('minute')),
-    Number(parts.get('second')),
-  );
-  // Truncated to the second by `Intl`, so re-add what the instant carries below a second.
-  const offset = asUtc - (ms - (((ms % 1000) + 1000) % 1000));
-  offsetCache.set(bucket, offset);
-  return offset;
-}
-
-/** Account-local wall-clock ms — the instant an `America/New_York` clock would read as UTC. */
-export function localMs(ms: number): number {
-  return ms + tzOffsetMs(ms);
-}
-
-/** Fractional hour of the account-local day, `[0, 24)`. §4.1's `h`. */
-export function localHour(ms: number): number {
-  const local = localMs(ms);
-  return (((local % DAY_MS) + DAY_MS) % DAY_MS) / HOUR_MS;
-}
-
-/** Account-local day of week, `0` = Sunday — the index `DOW_VOLUME` is written against. */
-export function localWeekday(ms: number): number {
-  return new Date(localMs(ms)).getUTCDay();
-}
 
 /**
  * §4.1's `d_c(h)`. Two Gaussians on a floor, divided by the channel's `Z`.

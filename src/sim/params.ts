@@ -10,6 +10,7 @@
 // and the fatigue pool (B26) and the channel/temperature matrices (B27) append their own columns.
 // What is here is what something already reads.
 
+import { CONVERSION_LAG_CUTOFF_MS } from '../shared/config.ts';
 import type { Channel } from '../shared/decisions.ts';
 
 /**
@@ -237,8 +238,9 @@ export const LAG = {
   /** Slow component: `LogNormal(median 14 h, σ = 1.1)`. */
   slowMedianMs: 14 * 3_600_000,
   slowSigma: 1.1,
-  /** §11.1: truncated hard at 7 days — nothing is emitted beyond it. */
-  cutoffMs: 7 * 86_400_000,
+  /** §11.1: truncated hard at 7 days — nothing is emitted beyond it. Shared with the server,
+   * which bounds §16's pending-click window by the same boundary. */
+  cutoffMs: CONVERSION_LAG_CUTOFF_MS,
   /** Reporting lag: `LogNormal(median 90 s, σ = 0.9)`. */
   reportMedianMs: 90_000,
   reportSigma: 0.9,

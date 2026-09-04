@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · G8 CLOSED · 32 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · B31a CLOSED · 33 / 65 chunks**
 
 ---
 
@@ -420,15 +420,16 @@ to 20% of hourly-CPA headroom.
 | | |
 |---|---|
 | **Current stage** | **Stage 3 · the simulator (B25–B35) is RUNNING.** Stage 2 closed with B24. |
-| **Last completed chunk** | **B30** — §12's two log-AR(1) demand factors, the `E[m] = 1` drift and the per-minute click rate, commit `f7390d6`. G8's others: B29 `76d9e3e`, B28 `47e0d41`, with **D57 first** (`fdd2e1e`) because B30 was built on the answer. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
-| **Next gate** | **B31 — `GET /api/sim/world` + the emitter's 1 Hz poll. MANDATORY FOR THE DEMO, not optional** (Seno, 2026-09-04): *"without the world poll a paused ad keeps emitting and HR3's 'the world responds' fails on camera."* Single-gated by that importance, not by §5's list — its verify is one live behavioural check (`curl` a pause → emission stops within a second) that should not be batched with pacing and fault injection. It also ends the frozen-φ/ν assumption and supplies the pending-click set B29 left to it. |
+| **Last completed chunk** | **B31a** — the shared account-local clock and `GET /api/sim/world`. Before it, **B30** `f7390d6` — §12's two log-AR(1) demand factors, the `E[m] = 1` drift and the per-minute click rate. G8's others: B29 `76d9e3e`, B28 `47e0d41`, with **D57 first** (`fdd2e1e`) because B30 was built on the answer. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
+| **Next gate** | **B31b — the emitter's 1 Hz poll and emission gating.** **HR3 IS NOT SATISFIED UNTIL THIS LANDS** — B31a's endpoint changes no emission. Mandatory for the demo, in Seno's words: *"without the world poll a paused ad keeps emitting and HR3's 'the world responds' fails on camera."* It also ends the frozen-φ/ν assumption. |
 | **Gate after that** | **B32 + B33** (budget pacing, injected misbehaviours). **B34 and B35 stay single-gated.** |
 | **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ — *"the remaining stochastic structure"*. Both closed. |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **32 / 64** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **33 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
+| **Plan edits, cont.** | **B31 split into B31a/B31b** (2026-09-04, Seno's call): B31 was ~240 diff lines across four files, and B09 at ~230 is what prompted the B10 split. Its verify column already named two separable checks. B31a is the shared account-local clock + `GET /api/sim/world`; B31b is the poll and emission gating. **65 chunks now.** |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
 | **Plan edits, cont.** | **B20a added** (2026-09-04, Seno's call, after B07): `src/shared/time.ts` — one implementation of the timestamp invariant (`isCanonicalIso` / `toCanonicalIso` / `floorMinute`), inserted immediately **before B21** because B21's horizon sweep would otherwise be the *fourth* copy of that rule (ingest's round-trip B05, `apply()`'s regex B06, snapshot's inline snap B07). Lettered, not renumbered: `B21`–`B62` are cited by id across four documents. |

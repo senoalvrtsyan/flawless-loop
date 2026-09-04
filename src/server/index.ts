@@ -8,6 +8,7 @@
 import { createServer } from 'node:http';
 import { openDb, DB_PATH } from './db.ts';
 import { createRouter, readBody, sendJson, type Route } from './http.ts';
+import { simWorld } from './sim-world.ts';
 import { verify, type VerifyResult } from './verify.ts';
 import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
@@ -140,6 +141,20 @@ const routes: readonly Route[] = [
       // 200 for a clean bill, 409 for a divergence: a reviewer refreshing this should not have to
       // read the body to know the answer, and a script should not have to either.
       sendJson(res, result.ok ? 200 : 409, result);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/sim/world',
+    handler: (_req, res) => {
+      // B31a / D40-A. The simulator's one window onto the world, polled once per tick: config and
+      // status, the fold's high-water mark, §7's F per pair recomputed from the log,
+      // `spend_so_far_today` on the account-local day, pending backfilled clicks and pending
+      // scenarios — all in one read transaction, because the emitter acts on all of it at once.
+      //
+      // A GET the Workbench half-wants anyway (DESIGN §8): cumulative delivery per
+      // (lineage, audience) is the temporal reverse join, not a simulator-only query.
+      sendJson(res, 200, simWorld(db));
     },
   },
   {
