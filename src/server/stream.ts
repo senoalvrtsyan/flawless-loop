@@ -14,9 +14,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
 import { openSse, type SseConnection } from './http.ts';
-import { readTx } from './db.ts';
 import { bucketReader, bucketsSinceReader, type BucketRow } from './snapshot.ts';
+import { decideReplay, readCursor, RESNAPSHOT_ROWS, type ResnapshotReason } from './resume.ts';
+import type { Tail } from './tail.ts';
 import type { BucketKey } from './apply.ts';
+
+// B44 (c): the resume half lives in `resume.ts` now. Re-exported so every existing importer —
+// `stream.test.ts`'s seven `readCursor` assertions among them — keeps working unchanged.
+export { readCursor, RESNAPSHOT_ROWS };
+export type { ResnapshotReason };
 
 /**
  * 250 ms — the fast end of §5.5's 250–500 ms range, chosen because the flush is also the render
@@ -33,19 +39,21 @@ const FLUSH_MS = 250;
 const KEEPALIVE_MS = 15_000;
 
 /**
- * D47. Past this many rows the server sends `resnapshot` instead of replaying.
+ * **B44 (a) — rows per BUCKET frame, with the remainder spilled to the next tick.**
  *
- * The threshold is on ROW COUNT because that is what costs — 325 B and 7.1 µs per row, measured at
- * B09. Seq distance and cursor age both mispredict by orders of magnitude in either direction:
- * 100,000 impressions inside one minute dirty ONE bucket, while 20,000 late conversions spread over
- * 20,000 minutes dirty 20,000, at identical seq distance.
+ * Owed from B09, which had no cap at all and said so: the frame is built in full before any socket
+ * is written to, so B44's socket-buffer cap does not cover it. The unbounded case is real and it is
+ * not the busy one — a `late_cascade` scenario (§17) or a horizon shortening (P16/B49) dirties
+ * thousands of OLD buckets at once, and a single frame carrying them all is a multi-megabyte write
+ * that stalls every subscriber's socket in the same tick.
  *
- * 2,000 rows is 0.65 MiB and 14 ms, pinned to the cost of the fallback it chooses against: the
- * client re-snapshots its VISIBLE WINDOW, which portfolio-wide is 12 ads × 60 minutes = 720 rows.
- * Above roughly one portfolio-hour, replaying transfers more than re-snapshotting would — and
- * unlike the snapshot, the replay is unbounded in time. Moves to `src/shared/config.ts` at B21.
+ * 400 rows is ~130 KB at B09's measured 325 B a row, and at a 250 ms tick that drains 1,600 rows a
+ * second — faster than any sustained arrival rate this world produces, so the spill is a smoothing
+ * mechanism rather than a queue that grows. **Spilled keys go back into the dirty set**, which is
+ * coalesced by construction, so a bucket touched again while it waits is still sent once.
  */
-const RESNAPSHOT_ROWS = 2_000;
+const ROWS_PER_FRAME = 400;
+
 
 /** What a flush puts on the wire. One frame per tick, carrying every bucket that moved. */
 export type BucketsFrame = { rows: BucketRow[]; as_of_ingest_seq: number };
@@ -61,60 +69,12 @@ export type Stream = {
   size: () => number;
 };
 
-/** Why a connect is being answered with `resnapshot` rather than a replay. D47. */
-export type ResnapshotReason = 'cursor_ahead_of_log' | 'cursor_not_a_number' | 'too_many_rows';
-
 /**
- * The cursor the client is claiming, as `max(?cursor=N, Last-Event-ID)` — **D47**.
- *
- * It arrives two ways because `EventSource` **cannot set a request header**: its constructor takes
- * `withCredentials` and nothing else. So `Last-Event-ID` exists only on the browser's own
- * reconnect, never on the first connect after a snapshot — and treating an absent header as "go
- * live" would silently drop the snapshot-to-subscribe gap on **every refresh** (events landing
- * between §3.1 step 1 and step 2 are flushed to other subscribers and gone, leaving those buckets
- * stale until they next move). `?cursor=N` is the client's own channel for the cursor the snapshot
- * gave it.
- *
- * `max` and not `min`: both are TRUE statements of "I hold everything up to X" — the query param
- * because the snapshot returned it, the header because the browser only replays an id it actually
- * dispatched — so the max is the tightest true lower bound and loses nothing. `min` would replay
- * redundantly, and on a long session the extra rows could trip RESNAPSHOT_ROWS for no reason.
- *
- * `null` means no cursor at all: nothing to replay, go straight live.
+ * `createStream(db, tail)` — the tail is optional so a test can drive the flush without one, and
+ * so `stream.ts` has no opinion about where deliveries are recorded. When present, every flush tick
+ * also pushes a `tail` frame (§11: *"sample the raw tail, capped per tick"*).
  */
-export function readCursor(
-  header: string | string[] | undefined,
-  param: string | null,
-): { cursor: number } | { invalid: string } | null {
-  const raw: string[] = [];
-  // `Array.isArray` cannot happen for `last-event-id` (Node joins duplicates into one string), but
-  // present-and-unusable must never fall through to the absent branch — see below.
-  if (Array.isArray(header)) return { invalid: header.join(',') };
-  if (typeof header === 'string') raw.push(header);
-  if (param !== null) raw.push(param);
-  if (raw.length === 0) return null;
-
-  let cursor = -1;
-  for (const value of raw) {
-    // **Validate the INPUT, not the result.** Two bugs, one cause — both found by Seno at B10a:
-    //
-    //  1. `Number()` reintroduces exactly the hazard `parseInt()` was rejected for. On a store at
-    //     log position 2001, `?cursor=1e3` yields 1000 and replays 1001 rows — byte-identical to a
-    //     legitimate `?cursor=1000`, silently skipping buckets 1–1000. `0x3`, `+2`, `2.0` and a
-    //     space all pass too, because `Number.isInteger` inspects the OUTPUT.
-    //  2. A present-but-empty cursor (`?cursor=`, or `last-event-id: ''`) read as ABSENT, so it
-    //     went live with no replay — the precise gap this chunk exists to close, and one
-    //     `?cursor=${''}` away in B10b. Present-and-empty is invalid, not absent.
-    //
-    // Decimal digits only, tested against the raw string. Absent stays the ONLY path to "go live".
-    if (!/^\d+$/.test(value)) return { invalid: value };
-    const n = Number(value);
-    if (n > cursor) cursor = n;
-  }
-  return { cursor };
-}
-
-export function createStream(db: DatabaseSync): Stream {
+export function createStream(db: DatabaseSync, tail?: Tail): Stream {
   const readBucket = bucketReader(db);
   const readSince = bucketsSinceReader(db);
   const subscribers = new Set<SseConnection>();
@@ -142,6 +102,8 @@ export function createStream(db: DatabaseSync): Stream {
    */
   const dirty = new Map<string, BucketKey>();
   let lastKeepalive = Date.now();
+  /** Connections already warned about a full socket — B44 (b), one line per connection. */
+  const warned = new WeakSet<SseConnection>();
 
   const highWater = db.prepare('SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals');
   const currentSeq = (): number => (highWater.get() as { seq: number }).seq;
@@ -172,8 +134,17 @@ export function createStream(db: DatabaseSync): Stream {
       return;
     }
 
-    const keys = [...dirty.values()];
+    // B44 (a): take at most a frame's worth and LEAVE the rest dirty. Taken before the clear, so
+    // the remainder survives the tick rather than being dropped — which is the difference between
+    // a cap and a data loss.
+    const all = [...dirty.values()];
+    const keys = all.slice(0, ROWS_PER_FRAME);
     dirty.clear();
+    if (all.length > keys.length) {
+      const spilled = all.slice(keys.length);
+      for (const key of spilled) dirty.set(`${key.ad_id}\n${key.minute_start}`, key);
+      tail?.noteSpill(spilled.length);
+    }
 
     // Read the rows AFTER clearing: anything ingested from here on re-dirties its bucket and is
     // caught by the next tick. Clearing after the read would lose a bucket touched in between.
@@ -197,11 +168,28 @@ export function createStream(db: DatabaseSync): Stream {
     const frame: BucketsFrame = { rows, as_of_ingest_seq: currentSeq() };
     for (const conn of subscribers) {
       // `false` means the socket buffer is full (§11 backpressure point 2). Rows are coalesced but
-      // NEVER dropped, so nothing is discarded here; Node keeps buffering. The hard buffer cap
-      // that closes a hopeless connection, and the "N events not shown" tail treatment, are B44's.
+      // NEVER dropped, so nothing is discarded here; Node keeps buffering.
+      //
+      // **B44 (b): warned ONCE per connection, and counted every time.** `res.write` returns
+      // `false` for any frame over the socket high-water mark, which a client that is reading
+      // perfectly normally will hit — so the per-tick warning it used to print was four lines a
+      // second of noise about nothing, and noise on this channel is how a real stall goes unnoticed.
+      // The counter is the honest signal and it is on the telemetry block.
       if (!conn.send('buckets', frame, frame.as_of_ingest_seq)) {
-        console.warn('[stream] subscriber socket is full — buffering, not dropping');
+        tail?.noteBackpressure();
+        if (!warned.has(conn)) {
+          warned.add(conn);
+          console.warn('[stream] a subscriber socket filled — buffering, not dropping (once per connection)');
+        }
       }
+    }
+    // B44: the tail rides the same tick. A frame of its own, so a client that does not want it can
+    // ignore the event type, and so it can never be mistaken for a bucket row.
+    if (tail !== undefined) {
+      const tailFrame = tail.frame(db);
+      // No `id:` — the tail is a SAMPLE, not a log position (D34). Giving it one would let a
+      // reconnect ask to resume the tail, which is a promise this design does not make.
+      if (tailFrame !== null) for (const conn of subscribers) conn.send('tail', tailFrame);
     }
     lastKeepalive = Date.now();
   }
@@ -231,47 +219,18 @@ export function createStream(db: DatabaseSync): Stream {
         resumed_from: claimed !== null && 'cursor' in claimed ? claimed.cursor : null,
       });
 
-      if (claimed === null) return; // no cursor at all: nothing to replay, go live
-
-      if ('invalid' in claimed) {
-        // Not `400`: an `EventSource` would retry the same bad URL forever. D47.
-        resnapshot(conn, 'cursor_not_a_number', { cursor: claimed.invalid });
+      // B44 (c): the whole decision now lives in `resume.ts` — one read transaction, three
+      // `resnapshot` conditions, D47 unchanged. This block is the transport half of it.
+      const decision = decideReplay(db, claimed, currentSeq, readSince);
+      if (decision.kind === 'live') return;
+      if (decision.kind === 'resnapshot') {
+        resnapshot(conn, decision.reason, decision.detail);
         return;
       }
-
-      // One read transaction for the rows AND the high-water mark, for B07's reason: a cursor read
-      // outside it can land ahead of the rows it is stamped on, and the client then never learns
-      // about the gap.
-      const replay = readTx(db, () => {
-        const seq = currentSeq();
-        if (claimed.cursor > seq) return { ahead: seq } as const;
-        // limit = threshold + 1, so a full result IS the "too many" signal and the count costs no
-        // extra pass (D47).
-        return { rows: readSince(claimed.cursor, RESNAPSHOT_ROWS + 1), seq } as const;
-      });
-
-      if ('ahead' in replay) {
-        // The silent one, and it is reachable by the SUPPORTED reset (U8): `rm -rf data/`,
-        // re-migrate, and the browser reconnects with a cursor from the old store. Every bucket
-        // then has `max_ingest_seq` below it, the replay is empty, and the client sits on stale
-        // numbers forever believing it is current. D47 makes it a resnapshot instead.
-        resnapshot(conn, 'cursor_ahead_of_log', {
-          cursor: claimed.cursor,
-          log_position: replay.ahead,
-        });
-        return;
-      }
-
-      if (replay.rows.length > RESNAPSHOT_ROWS) {
-        resnapshot(conn, 'too_many_rows', {
-          cursor: claimed.cursor,
-          exceeded: RESNAPSHOT_ROWS,
-        });
-        return;
-      }
-      if (replay.rows.length === 0) return; // caught up already
-
-      const frame: BucketsFrame = { rows: replay.rows, as_of_ingest_seq: replay.seq };
+      const frame: BucketsFrame = {
+        rows: decision.rows,
+        as_of_ingest_seq: decision.as_of_ingest_seq,
+      };
       conn.send('buckets', frame, frame.as_of_ingest_seq);
     },
     markDirty,

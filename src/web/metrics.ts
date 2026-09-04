@@ -15,6 +15,7 @@
 
 import type { MetricTotals, TotalsResponse } from '../server/snapshot.ts';
 import type { RestatementEntry } from '../server/restatements.ts';
+import type { FatigueReport } from '../server/fatigue-flag.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
 export const METRIC_LABELS: Record<MetricKey, string> = {
@@ -179,4 +180,14 @@ export async function fetchRestatements(
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`restatements: ${res.status} ${res.statusText}`);
   return (await res.json()) as { entries: RestatementEntry[] };
+}
+
+/**
+ * **B45 — the fatigue flag** (`GET /api/fatigue`). No window parameter, deliberately: the peak is a
+ * property of the pair's whole life, so a windowed answer would change with the viewport.
+ */
+export async function fetchFatigue(signal: AbortSignal): Promise<FatigueReport> {
+  const res = await fetch('/api/fatigue', { signal });
+  if (!res.ok) throw new Error(`fatigue: ${res.status} ${res.statusText}`);
+  return (await res.json()) as FatigueReport;
 }

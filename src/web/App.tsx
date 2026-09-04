@@ -25,6 +25,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // them across the boundary until then beats moving an approved file in a chunk about the client.
 import type { AdRow, Snapshot, TotalsResponse } from '../server/snapshot.ts';
 import type { RestatementEntry } from '../server/restatements.ts';
+import type { TailFrame } from '../shared/wire.ts';
+import type { FatigueReport } from '../server/fatigue-flag.ts';
 import {
   applyRows,
   createStore,
@@ -40,6 +42,7 @@ import { isRatio, type MetricKey } from '../shared/metrics.ts';
 import {
   METRIC_NOTES,
   combined,
+  fetchFatigue,
   fetchRestatements,
   fetchTotals,
   formatCents,
@@ -52,6 +55,8 @@ import { Portfolio } from './Portfolio.tsx';
 import { Chart } from './Chart.tsx';
 import { Maturity } from './Maturity.tsx';
 import { Timeline } from './Timeline.tsx';
+import { Tail } from './Tail.tsx';
+import { FatigueFlag } from './FatigueFlag.tsx';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
@@ -140,6 +145,18 @@ export function App() {
    * a refresh, one tick late.
    */
   const [entries, setEntries] = useState<readonly RestatementEntry[]>([]);
+  /**
+   * **B44** — the newest tail frame. Replaced wholesale rather than accumulated: the server already
+   * keeps the ring and says how much of it this frame is a sample of, and a client-side buffer
+   * would be a second, differently-sized ring nobody could reason about.
+   */
+  const [tail, setTail] = useState<TailFrame | null>(null);
+  /**
+   * **B45** — the fatigue flag, per component pair. Read once per snapshot rather than on the
+   * 5-second tick: it is a 6-hour EWMA against a lifetime peak, so it cannot move meaningfully
+   * inside a tick, and it costs two whole-store joins (114 ms measured).
+   */
+  const [fatigue, setFatigue] = useState<FatigueReport | null>(null);
 
   /**
    * Toggling from "all" selects that ad ALONE rather than deselecting it out of twelve.
@@ -216,6 +233,9 @@ export function App() {
         void fetchRestatements(snapshot.query, selected, controller.signal)
           .then((response) => setEntries(response.entries))
           .catch(() => setEntries([]));
+        void fetchFatigue(controller.signal)
+          .then(setFatigue)
+          .catch(() => setFatigue(null));
 
         // Steps 2-4. The cursor closes the snapshot-to-subscribe gap: anything ingested between
         // the read transaction above and this line is replayed by B10a.
@@ -229,6 +249,7 @@ export function App() {
                 : prev,
             );
           },
+          onTail: setTail,
           onResnapshot: resnapshot,
           onError: () => setLink('down'),
         });
@@ -594,6 +615,17 @@ export function App() {
         {/* B43 — §5.6's timeline. Below the chart, because an entry explains a mark on it. */}
         <h2 className="section">Restatements — settled buckets that moved</h2>
         <Timeline entries={entries} />
+
+        {/* B45 — §19's one heuristic, with its four limits underneath it rather than in the
+            README only. Above the tail, below the numbers it interprets. */}
+        <h2 className="section">Fatigue — component pairs losing their click-through rate</h2>
+        <FatigueFlag report={fatigue} />
+
+        {/* B44 — the raw tail and, in its own treatment, the transport telemetry (D34's named
+            exception). Last on the page, below every performance number, so the quarantine is
+            spatial as well as structural. */}
+        <h2 className="section">Raw event tail — the feed itself</h2>
+        <Tail frame={tail} />
 
         {/* §11's stream telemetry, quarantined by treatment (D45) so it can never be misread as a
             performance metric. B44 gives it its three counters; this is the same treatment. */}

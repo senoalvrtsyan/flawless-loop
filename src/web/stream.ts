@@ -4,11 +4,14 @@
 // resume path on this side, which is the point of D30's absolute rows.
 
 import type { BucketRow } from '../server/snapshot.ts';
+import type { TailFrame } from '../shared/wire.ts';
 
 /** The frames B09/B10a send. `resnapshot` means: go back to step 1 (D47). */
 export type StreamHandlers = {
   onReady: (as_of_ingest_seq: number) => void;
   onBuckets: (rows: readonly BucketRow[], as_of_ingest_seq: number) => void;
+  /** B44 — the raw tail sample and the transport telemetry, pushed on the same tick. */
+  onTail: (frame: TailFrame) => void;
   onResnapshot: (reason: string) => void;
   onError: () => void;
 };
@@ -41,6 +44,13 @@ export function subscribe(cursor: number, handlers: StreamHandlers): () => void 
       as_of_ingest_seq: number;
     };
     handlers.onBuckets(data.rows, data.as_of_ingest_seq);
+  });
+
+  // B44. Deliberately a SEPARATE event type: a client that does not want the tail ignores it, and
+  // nothing about a tail frame can be mistaken for a bucket row. It carries no `id:`, so it can
+  // never move the resume cursor (D34 — the tail is a sample, not a log position).
+  source.addEventListener('tail', (ev) => {
+    handlers.onTail(JSON.parse((ev as MessageEvent<string>).data) as TailFrame);
   });
 
   source.addEventListener('resnapshot', (ev) => {

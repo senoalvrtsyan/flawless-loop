@@ -207,6 +207,55 @@ and the gated count is always on screen.
 indicator (B41) says *the data is still arriving*. A young cohort trips both, for different reasons,
 and the surface has to say which.
 
+### The fatigue flag, and the four things it cannot tell you (B45)
+
+**Say:** *"One heuristic, and its limits are on the screen next to it — that is the whole claim.
+A well-chosen heuristic honestly presented beats an opaque model, and this is what honest looks
+like."*
+
+7. **Read the fatigue list.** Ten of nineteen component pairs are flagged, because the seeded week
+   burned them: `vl_04 × rt_us` sits at a CTR of 0.46% against its own peak of 6.23% — **93% below
+   peak** — and that pair is `a_01`'s and `a_05`'s video. The rule is §19's, verbatim: a 25% fall in
+   the trailing-6h EWMA CTR against the pair's **lifetime** peak, counting only points that clear
+   the 500-impression gate, with at least three qualifying points in each window.
+8. **Point at `a_09`.** Not flagged — and the row says *why*: fewer than three points clear 500
+   impressions in any six-hour window, so **the gate suppresses this pair**. Say it out loud: *"the
+   ads most likely to be burned out are the ones we are slowest to flag. That is in the design
+   document as a known limit, and it is on the screen rather than in a footnote."*
+9. **Point at `a_12` or `a_07`.** One slot flagged, the other with no reading — §19's fourth limit:
+   the flag measures the **pair**, not the ad, so an ad whose headline is burned and whose video is
+   fresh shows a partial signal and the row attributes it to the slot.
+10. **Read the limits block.** Four of them, as prominent as the list itself. The first is the one
+    that matters most: it cannot separate fatigue from an audience-quality shift or a platform
+    delivery change — because §12's two AR(1) processes make them look the same for the first few
+    hours, by construction, *because they do in reality*.
+11. **Say what it is not.** A display flag, never a recommendation. There is no
+    `system:fatigue_rule` actor and no automatic lever — D26 cut #6 — so every entry in the decision
+    log was pulled by a human with a rationale attached.
+
+### The raw tail, and why nothing on it can become a metric (B44)
+
+**Say:** *"The bottom of the page is the feed itself. It is the one place raw events reach the
+browser, and it is structurally incapable of producing a number on the chart."*
+
+12. **Watch the tail scroll.** One frame per 250 ms flush tick, capped at 25 rows, and the line
+    above it says what it is a sample of — *"newest 25 of 500 deliveries in the ring"*. A tail that
+    quietly showed 25 of 500 without saying so would imply the other 475 did not happen.
+13. **Find a non-accepted row.** They arrive at about 1% because §13 injects them: a
+    `rejected_invalid` carrying `ad_id_missing_or_not_a_string`, or a `duplicate_identical` from the
+    emitter's own catch-up. **That row never became a `signals` row** — the tail is built from the
+    posted body, which is the only reason a rejected delivery is visible anywhere.
+14. **Point at an amount: `"$0.62"`.** It is a *string* on the wire, not an integer, and that is
+    D34's first layer. Then say what enforces it: `src/server/tail.test.ts` holds two
+    `@ts-expect-error` lines, so **summing a tail frame does not compile**, and minting a tail value
+    from a plain string does not compile either. Verified by removing the brand and watching
+    `npm run typecheck` fail.
+15. **Point at the stream-health block and read its heading.** *"Transport, not performance."* Those
+    are numbers, they are D34's **named exception**, and they describe the feed: events/sec, last
+    event age, dispositions, rows spilled, frames backpressured, orphans unresolved. The scope line
+    says they are measured over the last N deliveries this process has seen and reset on restart —
+    correct for transport figures, and said rather than implied.
+
 ---
 
 ## Beat 5 — a late conversion restates a settled bucket (B41, B42, B43)

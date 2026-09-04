@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · stage 4 · G11 CLOSED — RATIOS, THE GATE AND A LIVE VIEWPORT · 46 / 68 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · STAGE 4 IS CLOSED — THE SIGNAL SURFACE IS BUILT · 51 / 68 chunks**
 
 ---
 
@@ -137,9 +137,15 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/server/replay.ts`** | B23. `replay(descriptor)` — pure over a log prefix, **raw `signals` only, never `rollup_minute`** (§10.2: the display path and the check path must differ, or the walk-back compares the code to itself). The prefix bounds attribution as well as counting. Returns the counts **and** `contributing_event_ids`, which is the evidence half. No HTTP — the drill-down is B52/B53. |
 | **`src/shared/metrics.ts`** | B38. **The ratio arithmetic, one implementation for two callers** — the server divides window totals, the chart divides per point. `MetricCounts`, `addCounts`, `spendTotalCents` (L79-80's read-time sum), `ctr` / `cpaCents` / `roas` (all `null`, never 0, on an empty denominator), `isEmpty` (B39's gate turns on it), `metricValue`, `derive`. **`provisional_*` is never added in** — §14's trap. Nothing here is stored. |
 | **`src/web/metrics.ts`** | B38/B40. **Formatting and the refresh fetch, never an independent number** (D46). `METRIC_LABELS`, `METRIC_NOTES` (§4.5's cohort caveat, on screen), `formatCents` / `formatCtr` / `formatRoas`, `combined` / `perAd`, `fetchTotals` (**D66's `?include=totals`**), and **B40's `ewma`** — decayed in TIME at D20's 15-minute half-life, so the rung the gate picked changes the weight and not the meaning. |
+| **`src/server/maturity.ts`** | B41. D33's indicator: the empirical attribution-lag CDF (`received_at − click.ts`) over **settled cohorts only** — the survivorship correction, and the one thing about this file that is invisible when wrong. `maturityCurve()`, `shareAt()` (a step function that never claims 100%), `maturityFor()` (the window's newest and oldest minute). `MIN_SAMPLE = 30` gates D33's cold-start fallback, which never fires with seven days of backfill. |
+| **`src/server/restatements.ts`** | B43. §5.6's timeline. `restatements(db, query, horizonMs)` — buckets with `restated_at` in the window, each with the late arrivals that explain it, `before` derived by subtraction and `after` as stored, the lateness measured from the **bucket's own minute**, and `explained: false` when the arrivals do not account for `restatement_count`. The horizon is a **parameter**, which is what makes P16/B49 a sweep. |
+| **`src/server/tail.ts`** | B44. The raw tail's ring (500 deliveries) and the health counters, fed from the **posted body** at the ingest route so a `rejected_invalid` delivery is visible at all. `createTail()` → `record` / `frame` / `noteSpill` / `noteBackpressure`. Amounts and lateness are pre-rendered `Display` strings (D34 layer 1). |
+| **`src/server/resume.ts`** | B44 (c). The resume half split out of `stream.ts`: `readCursor` (D47's `max(?cursor, Last-Event-ID)`, validating the RAW string), `RESNAPSHOT_ROWS`, and `decideReplay()` — one read transaction, the three `resnapshot` conditions. **`stream.ts` re-exports `readCursor`**, so no importer moved. |
+| **`src/server/fatigue-flag.ts`** | B45. §19's heuristic, server-side because the peak is a property of the pair's **whole life** and the pair comes from §8's temporal reverse join. `fatigueReport(db)` → per `(lineage × audience)` pair per slot: current, lifetime peak, drop, flagged, qualifying points, and the **reason it is not flagged** when it is not. Reads `BARS.ctr` and `HALF_LIFE_MS` rather than re-declaring either. Writes nothing. |
+| **`src/shared/wire.ts`** | B44. `Display` — a branded string, so arithmetic on a tail value does not compile and minting one from a plain string does not either. `TailEvent`, `TailFrame`, `StreamHealth` (D34's **named exception**: transport numbers, in their own treatment). |
 | **`src/web/gate.ts`** | B39. **D20's bars and ladder, D67's constant.** `BARS` (500 impressions · 10 **conversions**), `LADDER` (60/300/900/3600, capped), `CLEARING_SHARE = 0.5`, `clears` (per point), `tally` (empty vs gated — the §14 trap), `admissible`, `planChart` (the rung, the drawn ads, the dropped ads, the gated count) and `rungLabel`. The component decides nothing. |
 | **`src/web/series.ts`** | B37/B39. `pointCounts()` — **the one re-bucketing**, count sets per point, `null` before `launched_at` and zero inside the ad's life (D64) — plus `metricColumn()` (the division, after the aggregation, with the gate's suppression as a predicate) and `toColumns()`, now a projection of `pointCounts` so B37's tests guard both. **D46 lands here at B51**: the aggregation must then bind to the descriptor's own `granularity_s`, and the comment is the hook. |
-| **`src/server/*.test.ts`, `src/web/*.test.ts`, `src/shared/*.test.ts`** | B12/B13/B17–B23, B37–B40. `npm test` = `node --test`, **114 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), `conversion.test.ts` (11 — B18/B19, ingest→apply end to end), `restate.test.ts` (8 — B20, promotion and the D38 clock), `settlement.test.ts` (5 — B21), **`verify.test.ts` (7 — B22, including D55's build-failing tripwire)**, **`replay.test.ts` (6 — B23, including its own no-projection guard)**, `series.test.ts` (8 — B37), **`store.test.ts` (6 — B38a, the roll)**, **`metrics.test.ts` in `shared/` (8 — B38, including a grep proving no migration declares a ratio column)**, **`gate.test.ts` (10 — B39)**, **`metrics.test.ts` in `web/` (4 — B40)**. D43's criterion governs what goes here, not a list. |
+| **`src/server/*.test.ts`, `src/web/*.test.ts`, `src/shared/*.test.ts`** | B12/B13/B17–B23, B37–B40. `npm test` = `node --test`, **139 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), `conversion.test.ts` (11 — B18/B19, ingest→apply end to end), `restate.test.ts` (8 — B20, promotion and the D38 clock), `settlement.test.ts` (5 — B21), **`verify.test.ts` (7 — B22, including D55's build-failing tripwire)**, **`replay.test.ts` (6 — B23, including its own no-projection guard)**, `series.test.ts` (8 — B37), **`store.test.ts` (6 — B38a, the roll)**, **`metrics.test.ts` in `shared/` (8 — B38, including a grep proving no migration declares a ratio column)**, **`gate.test.ts` (10 — B39)**, **`metrics.test.ts` in `web/` (4 — B40)**, **`maturity.test.ts` (6 — B41)**, **`restatements.test.ts` (6 — B43)**, **`tail.test.ts` (7 — B44, including D34's two `@ts-expect-error` tripwires)**, **`fatigue-flag.test.ts` (6 — B45)**. D43's criterion governs what goes here, not a list. |
 | **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
 | **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. **~2 µs a draw** — see the note in "Next action". |
 | **`src/sim/params.ts`** | B25/B26/B27. **§21's parameter appendix, transcribed** — diurnal weights and `Z`, `w_dow`, `α = 8`, `base_impr_per_day`, `served_fraction`, the `FATIGUE` constants, §5's channel matrix, §6's temperature matrix, the `NOISE` concentrations, `SPEND_TICK_S`. Nothing here is a choice and each number names its section. `p_fast` is the one §6 column still absent — B29 reads it. |
@@ -182,7 +188,7 @@ npm run sim -- --dry-run --hours 1      # ~12 s; everything but the hour-by-hour
                                         # AR(1) ensemble, neither of which scales with --hours
                                         # --from <iso> anchors the window; default is local midnight
 npm run typecheck     # tsc --noEmit, must be clean
-npm test              # node --test — 114 tests (D43's targets plus the write path and the read side)
+npm test              # node --test — 139 tests (D43's targets plus the write path and the read side)
 
 open http://localhost:5173        # the number, live. Ctrl-C the runner and it comes back.
 
@@ -464,17 +470,18 @@ is open.**
 
 | | |
 |---|---|
-| **Current stage** | **Stage 4 · the Signal surface (B36–B45) is RUNNING.** Stages 0–3 are CLOSED; stage 3 closed with B35 and `SIMULATOR.md` is fully implemented. |
-| **Last completed chunk** | **G11 = B38a + B38 + B39 + B40**, **one commit** at Seno's instruction (*"commit entire work done all together with 1 commit"*), behind **D65–D67** `96e727d`. Before it **B37** `2f33d59` (the chart) behind **D64** `bbed0c4`; **B36** `137081e` (the shell); **B35a** `6055298`. |
-| **Next gate** | **B41 — the maturity indicator** (`src/server/maturity.ts`, `src/web/Maturity.tsx`): the empirical attribution-lag CDF over settled cohorts, global, always shown with its sample size **and the seeded share**. Then **B42** (settlement treatment, HR4, and the greyscale-screenshot check D45 owes), **B43** (restatement timeline), **B44** (the raw tail + the three items owed from B09), **B45** (the fatigue flag). A natural group is **B41+B42+B43** — they are the three chunks that make restatement legible — with B44+B45 behind it. None is single-gated. |
-| **Stage 4's gates so far** | ~~**B36**~~ · ~~**B37**~~ (both single-gated, both closed) · ~~**G11** B38a+B38+B39+B40~~ — closed. **No chunk in stage 4 is single-gated from here.** |
+| **Current stage** | **Stage 5 · the decision loop (B46–B50) is NEXT.** Stages 0–4 are CLOSED; stage 4 closed with B45 and the whole Signal surface is built. |
+| **Last completed chunk** | **B45**, closing stage 4. Two batches: **G12b** = B44+B45 and **G12a** `912042d` = B41+B42+B43, behind **G11** `baf18c2` (B38a+B38+B39+B40) and **D65–D67** `96e727d`. |
+| **Next gate** | **Stage 5, B46–B50 — the decision loop.** B46 the action console, B47 the decision log surface, B48 generation/diff display, **B49 the horizon sweep (P16)** and **B50 the scenario controls (P17)**. **B49 and B50 are the two remaining single-gated chunks** per §13. **And the stage-4 → 5 seam owes D49's one named question, unanswered as of this line: *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"*** — that is `SCOPE.md`'s list, not `BUILD_PLAN.md` §12's, and they number differently. |
+| **Stage 4's gates** | ~~**B36**~~ · ~~**B37**~~ (both single-gated) · ~~**G11** B38a+B38+B39+B40~~ · ~~**G12a** B41+B42+B43~~ · ~~**G12b** B44+B45~~ — **all closed. Stage 4 is done.** |
+| **G12, for the record** | Seno widened the gate again mid-stage: *"carry on through the end of stage 4, B41 → B45, in one or two batches rather than gates of 3–5 … announce the batch in a line, build it, report once."* Run as 3 + 2, which is still inside D48's five-chunk cap, so nothing needed amending. **Neither batch stopped mid-build** — the first time since G7 that a group has not hit the stop clause. |
 | **G11, for the record** | It **stopped before the first line** under D48's clause, for the third distinct trigger: not a decision arising mid-build, but three decisions the announcement itself surfaced — and one of them (**D65**) came out of *measuring a claim about the app before writing it down*, which found that the read side was live for at most one minute. The stop clause has now fired seven times. |
 | **Stage 3's gates** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ · ~~**B31a**~~ · ~~**B31b**~~ · ~~**G9** B32+B33~~ · ~~**B34**~~ — closed. **Only B35 remains in stage 3.** |
 | **G9, for the record** | B32+B33. **It stopped mid-build TWICE under D48** — once before the first line for **D58**, once after B32 built and ran for **D59**. That is the stop clause firing on its two distinct triggers: a decision (§3) and *"the chunk reveals the design was wrong"*. Both were caught by measuring rather than trusting: D58 by pricing the divergence before writing the code, D59 by comparing delivered volume against §2.3's own column. |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **46 / 68** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, **B38a**, B39, B40) — 68 because **B20a**, **B31a/b**, **B35a** and now **B38a** were added and **B10 was split into B10a/B10b** |
+| **Chunks ticked** | **51 / 68** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, **B38a**, B39–B45) — 68 because **B20a**, **B31a/b**, **B35a** and now **B38a** were added and **B10 was split into B10a/B10b** |
 | **Cut line status** | nothing cut |
 | **Plan edits, cont.** | **B38a added** (2026-09-04, at the G11 announcement): **D65** was ratified before any code and no numbered chunk owned the rolling viewport it created; folding it into B38 would have put two concerns in one chunk. Lettered, not renumbered — `B39`–`B62` are cited by id across four documents. |
 | **Plan edits, cont.** | **B31 split into B31a/B31b** (2026-09-04, Seno's call): B31 was ~240 diff lines across four files, and B09 at ~230 is what prompted the B10 split. Its verify column already named two separable checks. B31a is the shared account-local clock + `GET /api/sim/world`; B31b is the poll and emission gating. **65 chunks now.** |
@@ -498,8 +505,35 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Thirty-three now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Forty-two now — the Phase 5 ones were
 found against the real store and are in no design document.
+
+**The newest (G12 — B41–B45):**
+
+- **A maturity curve measured over ALL resolved conversions is biased short, flatteringly** —
+  recent cohorts have given their fast conversions and not their slow ones. Settled cohorts only;
+  measured, 0.30 against 0.67 at the same evaluation point on a fixture.
+- **The maturity lag is `received_at − click.ts`.** From the conversion's own `ts` it reads zero on
+  events that arrive at their own `ts`, and the curve claims completeness instantly.
+- **A restatement's `before` is derived, and subtracting every credited conversion instead of only
+  the LATE ones reports 1 → 2 as 0 → 2.** Both render an ordinary sentence. An entry whose arrivals
+  do not account for `restatement_count` says **UNEXPLAINED** rather than guessing.
+- **`Display`'s brand carries MINTING, not summing.** Summing fails to typecheck because the value
+  is a string at all; unbrand the type and that still fails. What the brand stops is fabricating a
+  tail value from a plain string. Two `@ts-expect-error` lines, and only the second one detects the
+  brand's removal — verified by removing it.
+- **The tail must be built from the POSTED BODY, not the store**, or a rejected delivery is
+  invisible and §13's injected-fault channel has no surface.
+- **A frame cap without a spill is data loss.** Take at most 400 keys and put the rest BACK before
+  clearing the dirty set. Measured: 500 buckets arrive as 400 + 100, all distinct.
+- **The fatigue peak must be the pair's LIFE, not the trailing window**, or the current value is one
+  of the candidates for the peak it is compared against and nothing is ever flagged. And gating on
+  every point instead of D20's bar lets a quiet night set the peak.
+- **"No reading" is not "healthy."** Fewer than three gate-clearing points means no verdict, and
+  §19's third limit is that the ads most likely to be burned are the ones we flag slowest.
+- **A SQL alias that disagrees with its TypeScript type is invisible** (found at B45): `audience_id
+  AS audience` against a type declaring `audience_id` arrived `undefined` with a clean typecheck.
+  Same family as the `sendJson` entry.
 
 **The newest (G11 — B38a, B38, B39, B40):**
 
@@ -1020,6 +1054,37 @@ needs:
   weight is 0.5 at the 15-min rung and **0.0625 at the hour**, so the toggle visibly acts on CTR and
   barely acts on CPA. Stated on the surface, not hidden.
 
+**STAGE 4 IS CLOSED — B41 through B45 landed in two batches** (G12a: B41+B42+B43 · G12b: B44+B45),
+at Seno's instruction to stop gating every three to five chunks. What the Signal surface now does,
+in the order the page reads:
+
+- **The headline** — six server-computed figures with the cohort caveat under CPA and ROAS, the
+  provisional conversions held apart and named, and a per-ad table that sums to it by construction.
+- **The maturity line (B41)** — *"newest minute in view 0% mature · oldest 100% · measured over 805
+  settled conversions (805 seeded, 0 live) · half arrive within 21 min, 95% within 42 h"*. Settled
+  cohorts only, which is the load-bearing word; the exclusion is stated on the surface.
+- **The chart (B37–B42)** — one series per selected ad at the rung the gate picked, gated points
+  drawn as gaps, a **dashed vertical rule at the 72 h horizon** labelled `settled ◂ ▸ live`, and
+  **restated buckets marked with a hollow square and a hairline** that survive every repaint.
+- **The gate caption (B39)** — the rung, whether it coarsened, the bar, the gated count and the
+  reason, and every ad dropped to counts named.
+- **The restatement timeline (B43)** — eight entries on the seeded week, at the **bucket's own
+  time**, each with ROAS before → after, the added conversions and value, the lateness, the bucket's
+  own spend, when we learned, and the `event_id`s as evidence.
+- **The fatigue flag (B45)** — nineteen pairs, ten flagged, `a_09` explicitly *not* flagged because
+  the gate suppresses its points, and §19's **four limits rendered as prominently as the list**.
+- **The raw tail and transport telemetry (B44)** — 25 of the last 500 deliveries, money as display
+  strings, rejected deliveries visible because the tail is built from the posted body, and the
+  health block under a heading that says **transport, not performance**.
+
+**Three plan deviations, all stated in `BUILD_PLAN.md`'s own rows:** B41 grew `src/server/maturity.ts`
+into the totals path rather than a separate endpoint (it qualifies the totals, so splitting them
+across two reads is how they come to describe different windows); B43 needed
+`src/server/restatements.ts` beside the named `Timeline.tsx`; and **B45 is server-side**, not
+`src/web/fatigue-flag.ts` — the peak is a property of the pair's whole life and the pair needs §8's
+temporal reverse join, so the client would have had to fetch seven days per pair (24 MB) to compute
+one boolean.
+
 **Two readings that are NOT ratified decisions**, both flagged at the G11 report:
 
 1. **EWMA smooths the plotted series** — the ratio after the division, not the counts before it.
@@ -1029,7 +1094,17 @@ needs:
    expected, realised under 500). Recorded rather than tuned; §18.3's own note says its figures are
    expectations.
 
-**The one verification step G11 did NOT run: the browser.** Everything above is the shipped client
+**Two more readings from G12, same status — flagged, not ratified:**
+
+1. **`MIN_SAMPLE = 30`** in `maturity.ts` decides when D33's cold-start curve stands in. D33
+   ratified the fallback's existence, not its trigger. **It never fires with seven days of backfill**
+   (this store has 805), so it is a judgement about a path the demo does not take.
+2. **B45's 15-minute point grid.** §19 fixes the 25% drop, the 6-hour window, the ≥3 points and
+   D20's bar, but not the granularity the EWMA runs on. §19's own stated lag — *"flagged 15–30
+   minutes after it starts"* — is only true at a 15-minute grid, so the grid is derived from the
+   document rather than chosen; said out loud because it is still an inference.
+
+**The one verification step neither batch ran: the browser.** Everything above is the shipped client
 modules driven headlessly against the real store. `npm run dev` → :5173 and the metric buttons, the
 `raw` / `EWMA 15m` toggle and the caption under the chart are eyeball work.
 

@@ -14,7 +14,9 @@ import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
 import { parseSnapshotQuery, snapshot, totalsOnly, type Snapshot, type TotalsResponse } from './snapshot.ts';
 import { restatements, type RestatementEntry } from './restatements.ts';
+import { fatigueReport, type FatigueReport } from './fatigue-flag.ts';
 import { createStream } from './stream.ts';
+import { createTail } from './tail.ts';
 import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -40,7 +42,16 @@ const startedAt = Date.now();
 
 // One stream for the process: one flush tick, one dirty set, N subscribers (DESIGN §11). A timer
 // per connection would multiply the reads by the number of open browser tabs.
-const stream = createStream(db);
+/**
+ * **B44** — the raw tail's ring, fed at the ingest boundary and sampled by the flush tick (§11).
+ *
+ * Created here rather than inside `createStream` because the INGEST route is what feeds it: a
+ * delivery that was rejected never became a `signals` row, and the tail is the only surface it is
+ * ever visible on. Reading the store instead would show only accepted events, and §13's injected
+ * faults would be invisible on the one screen built to show them.
+ */
+const tail = createTail();
+const stream = createStream(db, tail);
 
 const routes: readonly Route[] = [
   {
@@ -64,11 +75,18 @@ const routes: readonly Route[] = [
       }
       // `source` is server-assigned (E15/D38): the wire cannot set it. Live POSTs are 'live';
       // 'backfill' belongs to the in-process seeder alone.
-      const { result, dirty } = ingest(db, parsed, 'live');
+      // The SAME clock the ingest transaction stamps `received_at` with, threaded so the tail
+      // cannot show a second, slightly different arrival time for the same delivery.
+      const receivedAt = new Date().toISOString();
+      const { result, dirty } = ingest(db, parsed, 'live', () => receivedAt);
       // AFTER the ingest transaction has committed, and before the response: the flush tick will
       // pick these up within FLUSH_MS. Only `result` goes on the wire — the bucket set is internal
       // (B09).
       stream.markDirty(dirty);
+      // B44: every delivery, accepted or not, in the posted order. After the commit, like the
+      // dirty set — a tail entry for a transaction that rolled back would be a fact that never
+      // happened.
+      tail.record({ events: parsed, outcomes: result.outcomes, source: 'live', received_at: receivedAt });
       // ANNOTATED on purpose. `sendJson` takes `unknown`, so the response shape is invisible to
       // `tsc`: B09 changed `ingest()`'s return and would have shipped `{result,dirty}` to the
       // emitter with a clean typecheck. The annotation is what makes the next such change an
@@ -156,6 +174,21 @@ const routes: readonly Route[] = [
         query: parsed.query,
         entries: restatements(db, parsed.query),
       };
+      sendJson(res, 200, body);
+    },
+  },
+  {
+    method: 'GET',
+    /**
+     * **B45 — the fatigue flag** (`SIMULATOR.md` §19). Per `(lineage × audience)` pair, both slots.
+     *
+     * No window parameter, deliberately: the PEAK is a property of the pair's whole life, so a
+     * windowed version of this question would report a different answer for the same pair depending
+     * on what was on screen. It is a display flag and never a recommendation (D26 cut #6).
+     */
+    path: '/api/fatigue',
+    handler: (_req, res) => {
+      const body: FatigueReport = fatigueReport(db);
       sendJson(res, 200, body);
     },
   },
