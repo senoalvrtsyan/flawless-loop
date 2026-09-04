@@ -10,6 +10,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
+import type { BucketKey } from './apply.ts';
 
 /**
  * One `rollup_minute` row, 1:1 with the table (DESIGN §2.4). The mapping is deliberately
@@ -165,6 +166,24 @@ const SELECT_ALL_ADS = `SELECT ${BUCKET_COLUMNS} FROM rollup_minute
 
 /** `MAX(signals.ingest_seq)`, the same high-water mark `/api/health` reports (D12/E2). */
 const SELECT_LOG_POSITION = `SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals`;
+
+/**
+ * Read one bucket's CURRENT absolute row. The SSE flush tick's reader (B09).
+ *
+ * Lives here rather than in `stream.ts` so `BUCKET_COLUMNS` has one reader and the stream cannot
+ * drift into sending a differently-shaped row than the snapshot does — the client merges the two
+ * by `(ad_id, minute_start)` (B10), so a column present in one and absent from the other would
+ * show up as a field that intermittently goes undefined, not as an error.
+ *
+ * Returns a factory so the statement is prepared once per connection-set, not once per bucket per
+ * tick. D28's `WITHOUT ROWID` primary key makes each read one B-tree seek (verified at B03).
+ */
+export function bucketReader(db: DatabaseSync): (key: BucketKey) => BucketRow | undefined {
+  const stmt = db.prepare(
+    `SELECT ${BUCKET_COLUMNS} FROM rollup_minute WHERE ad_id = ? AND minute_start = ?`,
+  );
+  return (key) => stmt.get(key.ad_id, key.minute_start) as unknown as BucketRow | undefined;
+}
 
 export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
   const perAd = db.prepare(SELECT_ONE_AD);

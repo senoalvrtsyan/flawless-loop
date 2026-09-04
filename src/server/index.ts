@@ -9,7 +9,9 @@ import { createServer } from 'node:http';
 import { openDb, DB_PATH } from './db.ts';
 import { createRouter, readBody, sendJson, type Route } from './http.ts';
 import { ingest } from './ingest.ts';
+import type { IngestResult } from '../shared/types.ts';
 import { parseSnapshotQuery, snapshot } from './snapshot.ts';
+import { createStream } from './stream.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -31,6 +33,10 @@ const logPosition = db.prepare(`
 `);
 
 const startedAt = Date.now();
+
+// One stream for the process: one flush tick, one dirty set, N subscribers (DESIGN §11). A timer
+// per connection would multiply the reads by the number of open browser tabs.
+const stream = createStream(db);
 
 const routes: readonly Route[] = [
   {
@@ -54,7 +60,17 @@ const routes: readonly Route[] = [
       }
       // `source` is server-assigned (E15/D38): the wire cannot set it. Live POSTs are 'live';
       // 'backfill' belongs to the in-process seeder alone.
-      sendJson(res, 200, ingest(db, parsed, 'live'));
+      const { result, dirty } = ingest(db, parsed, 'live');
+      // AFTER the ingest transaction has committed, and before the response: the flush tick will
+      // pick these up within FLUSH_MS. Only `result` goes on the wire — the bucket set is internal
+      // (B09).
+      stream.markDirty(dirty);
+      // ANNOTATED on purpose. `sendJson` takes `unknown`, so the response shape is invisible to
+      // `tsc`: B09 changed `ingest()`'s return and would have shipped `{result,dirty}` to the
+      // emitter with a clean typecheck. The annotation is what makes the next such change an
+      // error instead of a rule someone has to remember.
+      const responseBody: IngestResult = result;
+      sendJson(res, 200, responseBody);
     },
   },
   {
@@ -75,6 +91,15 @@ const routes: readonly Route[] = [
   },
   {
     method: 'GET',
+    path: '/api/stream',
+    handler: (_req, res) => {
+      // Never returns: the response becomes a long-lived SSE stream (DESIGN §3.1 step 2-4).
+      // B09 is the happy path — `Last-Event-ID` resume and the `resnapshot` frame are B10.
+      stream.subscribe(res);
+    },
+  },
+  {
+    method: 'GET',
     path: '/api/health',
     handler: (_req, res) => {
       sendJson(res, 200, {
@@ -82,6 +107,7 @@ const routes: readonly Route[] = [
         db_path: DB_PATH,
         schema_version: version,
         log_position: logPosition.get(),
+        stream_subscribers: stream.size(),
         uptime_s: Math.round((Date.now() - startedAt) / 1000),
       });
     },
@@ -99,6 +125,10 @@ server.listen(PORT, () => {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     console.log(`[server] ${signal} — closing`);
+    // SSE connections MUST be closed first. `server.close()` waits for open connections to end,
+    // and a subscriber never ends on its own — so without this, Ctrl-C hangs forever with a
+    // browser tab open, which is a regression of B04's verified clean shutdown.
+    stream.shutdown();
     server.close(() => {
       db.close();
       process.exit(0);

@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { tx } from './db.ts';
-import { apply } from './apply.ts';
+import { apply, type BucketKey } from './apply.ts';
 import type { Disposition, IngestResult, SignalKind, SignalSource } from '../shared/types.ts';
 
 /** Kinds this build ingests. B12 widens it; until then the rest are rejected, not ignored. */
@@ -99,12 +99,23 @@ function validate(raw: unknown): string | null {
  * today, written down nowhere, and wrong the moment someone moves the call inside the accepted
  * branch. The index removes the invariant rather than documenting it. The HTTP path ignores it.
  */
+/**
+ * What one ingest call produced: the wire result, plus the buckets it moved.
+ *
+ * `dirty` is separate from `IngestResult` on purpose — `IngestResult` IS the HTTP response body,
+ * and the bucket set is internal plumbing for the SSE flush (B09), not something the emitter is
+ * told. It is returned rather than pushed through a callback so that publishing happens in the
+ * CALLER, after `tx()` has committed: a frame announcing a bucket from a transaction that then
+ * rolls back would advertise a row the store never had.
+ */
+export type IngestOutcome = { result: IngestResult; dirty: BucketKey[] };
+
 export function ingest(
   db: DatabaseSync,
   raw: readonly unknown[],
   source: SignalSource,
   now: (index: number) => string = () => new Date().toISOString(),
-): IngestResult {
+): IngestOutcome {
   const insertDelivery = db.prepare(`
     INSERT INTO signal_deliveries (event_id, received_at, payload_json, payload_hash, disposition)
     VALUES (?, ?, ?, ?, ?)
@@ -124,7 +135,11 @@ export function ingest(
   `);
   const highWater = db.prepare('SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals');
 
-  return tx(db, () => {
+  // Accumulated OUTSIDE `tx()` on purpose (see IngestOutcome above) — safe only because `tx()`
+  // has no retry loop. If it ever gains one, this array double-accumulates on the second attempt.
+  const dirty: BucketKey[] = [];
+
+  const result = tx(db, () => {
     // Read inside the transaction, under BEGIN IMMEDIATE's write lock: no other writer can be
     // allocating sequence numbers concurrently, so an in-memory counter is safe for the batch.
     let seq = (highWater.get() as { seq: number }).seq;
@@ -180,10 +195,14 @@ export function ingest(
         // Same transaction, immediately: D29's incremental upsert. A reader can never observe a
         // signal whose bucket has not moved (DESIGN §11), and a late arrival is just an event
         // whose bucket happens to be old — restatement stops being a subsystem (§4.3).
-        apply(db, {
-          event_id: eventId, ingest_seq: seq, ts_effective: stored.ts_effective,
-          ad_id: e['ad_id'] as string, kind,
-        }, receivedAt);
+        // apply() returns the bucket it moved; B09 collects it here. Coalescing is the flush
+        // tick's job (DESIGN §5.5) — one batch can touch the same bucket many times.
+        dirty.push(
+          apply(db, {
+            event_id: eventId, ingest_seq: seq, ts_effective: stored.ts_effective,
+            ad_id: e['ad_id'] as string, kind,
+          }, receivedAt),
+        );
       }
 
       result[disposition] += 1;
@@ -194,4 +213,8 @@ export function ingest(
     result.ingest_seq = seq;
     return result;
   });
+
+  // Rolled back? `tx()` rethrew and we never get here, so `dirty` is only ever handed back for a
+  // batch that committed.
+  return { result, dirty };
 }

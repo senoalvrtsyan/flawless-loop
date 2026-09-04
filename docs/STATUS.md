@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, a number on screen · 8 / 63 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, the number is pushed · 9 / 64 chunks**
 
 ---
 
@@ -44,18 +44,19 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 63 chunks `B01`–`B62` **plus `B20a`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · §7 the D44/D45 gate before B36 · §11 scope coverage · §12 cut line · §13 schedule risk · **§14 the traps**. |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · §7 the D44/D45 gate before B36 · §11 scope coverage · §12 cut line · §13 schedule risk · **§14 the traps**. |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
 | **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
 | **`src/server/migrate.ts`** | B02. Migration runner + CLI. `PRAGMA user_version`, no bookkeeping table. |
 | **`migrations/001_logs.sql`** | B02. `components`, `audiences`, `signal_deliveries`, `signals`, `decisions`. |
 | **`migrations/002_projections.sql`** | B03. `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios`. |
-| **`src/server/http.ts`** | B04. `createRouter()` (method+pathname match, 404, handler error → 500), `sendJson()`, `readBody()`, `openSse()`. D42: no framework. |
+| **`src/server/http.ts`** | B04/B09. `createRouter()` (method+pathname match, 404, handler error → 500), `sendJson()`, `readBody()`, `openSse()` — plus **`comment()`** (B09: a keepalive that dispatches no event and does not move `Last-Event-ID`). D42: no framework. |
 | **`src/server/index.ts`** | B04/B05. One `DatabaseSync` for the process; refuses to boot on an unmigrated store; `GET /api/health` (log position), `POST /api/ingest`; clean close on SIGINT/SIGTERM. Port **8787**, `PORT` overrides. |
 | **`scripts/dev.mjs`** | B04. Server + simulator as two OS processes (D32). A crash in either tears the other down; a **clean** exit does not — which is what lets the empty B11 simulator placeholder return immediately. |
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
-| **`src/server/ingest.ts`** | B05. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
+| **`src/server/ingest.ts`** | B05/B09. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
+| **`src/server/stream.ts`** | B09. `createStream(db)` — the process-wide dirty set (coalesced by `Map`), the **250 ms** flush tick, `subscribe`/`markDirty`/`shutdown`/`size`. **One frame per tick** carrying every touched bucket as an absolute row; `id:` = high-water `ingest_seq`. Happy path only — resume is B10a. |
 | **`src/server/snapshot.ts`** | B07. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
 | **`index.html`, `vite.config.ts`** | B08. Vite dev-serves `src/web` alone on **:5173** and proxies `/api` to :8787 (D41-A). Client fetches relative paths, so no CORS and one configuration. Unstyled: D45 deferred. |
 | **`src/web/main.tsx`, `src/web/App.tsx`** | B08. Fetch the snapshot for the last hour, render **one bucket's `impressions` verbatim** plus the resolved window, `as_of_ingest_seq` and a raw-response `<details>`. No sum — see **D46**. Nothing durable client-side (§3). |
@@ -90,7 +91,7 @@ empty. `node:sqlite` prints an `ExperimentalWarning` on every run — that is **
 
 ## The build plan in one paragraph
 
-Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B08 done) is the walking skeleton and the whole
+Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B09 done) is the walking skeleton and the whole
 point of the ordering**: one simulated event, persisted, aggregated, transported over SSE, on screen,
 surviving a refresh *and* a restart of both processes — impressions only, one hard-coded ad, before
 any breadth. Stage 2 (B12–B24) is the full write path — fold, generations, all four signal kinds,
@@ -142,7 +143,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B09 to B35.**
+**Nothing blocks any chunk from B10a to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -164,12 +165,13 @@ obligations come with that, both of which bite silently if dropped, and both are
 | | |
 |---|---|
 | **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
-| **Last completed chunk** | **B08** — client shell, one number on screen, commit `f050dae`. |
-| **Next chunk** | **B09** — `GET /api/stream`: SSE transport, per-minute **absolute** bucket rows on a flush tick, `Last-Event-ID` resume from `as_of_ingest_seq`. Spec `DESIGN.md` §3.1 steps 2–4, §5.5 (D30). **D46 fixes its wire shape:** per-minute absolute rows only — no display-granularity variant, or D30 consequence 2's idempotent resume breaks. |
+| **Last completed chunk** | **B09** — SSE `GET /api/stream`, the live push (happy path). |
+| **Next chunk** | **B10a** — server-side SSE resume: read `Last-Event-ID`, replay from the store, `resnapshot` when the cursor is too old. File `src/server/stream.ts`. Spec `DESIGN.md` §3.1, §5.5. **Resume is a store query (`max_ingest_seq > cursor`), never a replay of buffered frames** — see the traps list. Verify with `curl -N -H 'Last-Event-ID: <n>'` and diff the replayed rows against `sqlite3`. |
 | **In flight** | nothing |
-| **Chunks ticked** | **8 / 63** (B01–B08) — 63 because B20a was added, see below |
+| **Chunks ticked** | **9 / 64** (B01–B09) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
+| **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
 | **Plan edits, cont.** | **B20a added** (2026-09-04, Seno's call, after B07): `src/shared/time.ts` — one implementation of the timestamp invariant (`isCanonicalIso` / `toCanonicalIso` / `floorMinute`), inserted immediately **before B21** because B21's horizon sweep would otherwise be the *fourth* copy of that rule (ingest's round-trip B05, `apply()`'s regex B06, snapshot's inline snap B07). Lettered, not renumbered: `B21`–`B62` are cited by id across four documents. |
 
 **The convention.** A chunk is done when: it is announced, built, reported, and Seno says ok. Then
@@ -193,6 +195,20 @@ against the real store, and are not in any design document.
   descriptor does not name makes the drill-down replay a *different question* — and it can **pass by
   coincidence**. The HMAC catches a client-minted descriptor; nothing catches this. **B53's
   drill-down is the check that makes D46 safe**, so it is not optional.
+- **`sendJson(body: unknown)` hides every response shape from `tsc`** (found at B09). Changing
+  `ingest()`'s return to `{ result, dirty }` typechecked clean while silently changing the emitter's
+  response body. The mechanism, not just the rule: **annotate at the call site** —
+  `const responseBody: IngestResult = result;`.
+- **An SSE subscriber makes `server.close()` hang** unless connections are closed first (found at
+  B09; regresses B04's verified shutdown). Measured: close callback had not fired after 1000 ms;
+  with `stream.shutdown()` first, 14 ms (23 ms with four subscribers). Presents as "Ctrl-C hangs
+  sometimes", only with a tab open.
+- **The SSE resume is a store query, never a replay of buffered frames** (Seno's constraint at B09,
+  built in **B10a**). `max_ingest_seq > cursor`, a full scan — fine once per connect, impossible
+  per tick. The flush drops its dirty set when nobody is subscribed, and **§3.1 step 3** is what
+  makes that safe, *not* the snapshot: the snapshot precedes the subscribe, so it cannot cover the
+  gap. Built from memory instead, the bucket it loses is a **late conversion restating an old minute
+  that never moves again** — wrong on screen, forever, no error.
 - **B24's agreement sweep must be a single whole-log pass**, not `replay()` called per bucket. The
   obvious implementation is O(buckets × N): 4 seconds becomes hours.
 - **Settlement is evaluated at the arriving event's `received_at`, never at wall-clock `now`**
@@ -267,6 +283,15 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 - **B33 owes a fault split.** Malformed (0.1%) and dual click-id (0.05%) both read `rejected_invalid`
   and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
   bodies, which is only correct once `SUPPORTED` covers all four kinds.
+- **B34 owes a flush guard, measured by Seno at B09**: the **seeder must not call
+  `stream.markDirty()`**. One batch spanning 20,000 minutes produced a **6.20 MiB** frame and a
+  **142 ms** event-loop stall after `ingest()` returned; at 56,160 seeded buckets that is ~17 MiB /
+  ~400 ms.
+- **B44 owes two items from B09.** (a) **Cap rows per frame and spill to the next tick** — the flush
+  has no cap, and B44's socket-buffer cap does *not* cover it, because the frame is built before any
+  socket is written to. (b) `[stream] subscriber socket is full` fires for clients reading normally
+  (`res.write` returns `false` for any frame over the socket high-water mark) — log once per
+  connection, or make it a counter.
 - **B59 owes a named limit**: `payload_json` is a re-serialisation of the parsed element, not the
   received bytes — `JSON.parse` has already collapsed duplicate keys and rewritten `1e2` and `\u0041`.
   The DDL comment and `DESIGN.md` §2.2 both promised "exactly as received" and were corrected at B05.
@@ -295,6 +320,9 @@ reproducible with the commands in "How to run what exists".
 | **B07** — API JSON byte-identical to `sqlite3` for the same window; rollup impressions == raw `COUNT(*)`; per-ad plan `SEARCH … USING PRIMARY KEY`, portfolio `USING INDEX ix_rollup_time` + `USE TEMP B-TREE FOR ORDER BY`; server restart → same snapshot and same `as_of`; a write commits after a read tx; `grep` finds no write statement in `snapshot.ts` | **passes** |
 | **B07** — the bound traps: `…T12:00:00` (no offset) resolved to `08:00:00.000Z` here; an unsnapped `…12:00:00Z` returned **1 of 3** buckets; `[12:00:00Z,12:00:30Z)` over-counted and `[12:00:20Z,13:00:00Z)` under-counted the same 12:00:50 impression. After snapping, raw == buckets on all three windows | **measured, then fixed** |
 | **B07** — `Z`, `+HH:MM`, `+HHMM`, `-HH:MM` all resolve to the same instant; V8 returns `NaN` for hour-only `+02`; date-only and space-separated forms rejected | **passes** |
+| **B09** — 3 events in one batch → **one** frame, **2** rows, `a_12` coalesced to `impressions:2`; repeated POSTs gave **3 → 4 → 5** (absolute, never a repeated delta); ids monotonic; a **duplicate produced no frame**; 20 s idle gave 0 bucket frames, 2 keepalive comments, **0** `id:` lines; two subscribers, one **through Vite's proxy**, identical frames | **passes** |
+| **B09** — shutdown with a subscriber attached: port released in **14 ms**. Isolated repro of the counterfactual: with the response left open, `server.close()`'s callback had **not fired after 1000 ms** | **measured** |
+| **B09** — Seno's independent run: coalescing across batches in one tick · duplicate/rejected/mixed batches · the **old-minute restatement frame** · `ready` and keepalive carry no `id:` · subscriber accounting · D7 · shutdown **23 ms with 4 subscribers** | **passes** |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that
@@ -302,23 +330,21 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B09, build it, report, wait.** Nothing needs deciding first.
+**Announce B10a, build it, report, wait.** Nothing needs deciding first.
 
-B09 is `GET /api/stream` — SSE. Read `DESIGN.md` §3.1 steps 2–4 and §5.5 before writing it. Three
-things already fixed that it must respect:
+B10a is the **server-side** half of resume — B10 was split at B09 because the whole thing was
+oversized. Read `DESIGN.md` §3.1 (steps 2–4) and §5.5. The constraint is already on its plan row and
+in the traps list, and it is the thing to get right: **resume is a store query over `rollup_minute`
+(`max_ingest_seq > cursor`), not a replay of buffered frames.** Full scan, no index on that column —
+correct once per connect, impossible per tick.
 
-- **D30: absolute rows, never deltas.** For every bucket touched by a signal with
-  `ingest_seq > cursor`, send the bucket's **current** row. A delta replayed after a reconnect
-  double-counts; an absolute row is idempotent, and the reviewer *will* refresh.
-- **D46 (new): the stream stays per-minute.** No display-granularity rows on the wire — that is
-  exactly what D46 rejected, because it breaks D30 consequence 2's idempotent resume. Totals and
-  ratios are the snapshot's job.
-- `openSse()` already exists in `src/server/http.ts` from B04, unused until now; `apply()` already
-  returns the `BucketKey` it moved, so the dirty set needs no new plumbing.
+`resnapshot` belongs to this chunk too: §3.1 says a cursor the server cannot serve cheaply gets a
+`resnapshot` frame and the client returns to step 1. Decide and state what "cheaply" means as a
+number rather than leaving it to a timeout.
 
-The client's cursor is `as_of_ingest_seq` from the snapshot, handed back as `Last-Event-ID` (D18).
-`§3.1` also specifies the `resnapshot` frame for a cursor the server cannot serve cheaply — state
-whether B09 implements it or B10 does.
+Verify with `curl -N -H 'Last-Event-ID: <n>' localhost:8787/api/stream` and diff the replayed rows
+against `sqlite3`. B10b — the client subscribing, merging by `(ad_id, minute_start)` and
+reconnecting — is the chunk after.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 

@@ -114,8 +114,9 @@ appears in B15 from the decision log, and never before.
 | [x] | **B06** | `apply()` — the single writer. Rollup upsert for impressions, in B05's transaction. Establishes the rule the rest of the build obeys | `src/server/apply.ts` | POST three impressions spanning two minutes → `rollup_minute` has exactly two rows with the right counts and `max_ingest_seq`; grep proves no other file writes a projection | D§4.3, §1 | **HR2 HR6** |
 | [x] | **B07** | `GET /api/snapshot?from&to&ads` — one read transaction, returns buckets + `as_of_ingest_seq` | `src/server/snapshot.ts` | `curl` after B06 and diff the JSON against `sqlite3` output by hand | D§3.1 | **HR2** |
 | [x] | **B08** | Client shell: fetch the snapshot, render one number. No chart, no styling | `src/web/main.tsx`, `src/web/App.tsx`, `index.html` | Number appears in the browser; **refresh → same number**; stop the server, restart it, refresh → still there | D§3, §3.1 | **HR1 HR8** |
-| [ ] | **B09** | SSE `GET /api/stream`: dirty-set collection, 250–500 ms flush tick, **absolute** bucket rows, `id:` = high-water `ingest_seq` | `src/server/stream.ts` | `curl -N /api/stream` in one terminal, POST in another; one absolute row per touched bucket per tick, never a delta | D§5.5, §11 | **HR2** |
-| [ ] | **B10** | Client subscribes, merges absolute rows by `(ad_id, minute)`, resumes on `Last-Event-ID` | `src/web/stream.ts`, `src/web/store.ts` | Number ticks up live; kill the server mid-stream and restart → the client reconnects and the number is **not** double-counted | D§3.1, §5.5 | **HR1 HR2** |
+| [x] | **B09** | SSE `GET /api/stream`: dirty-set collection, 250–500 ms flush tick, **absolute** bucket rows, `id:` = high-water `ingest_seq` | `src/server/stream.ts` | `curl -N /api/stream` in one terminal, POST in another; one absolute row per touched bucket per tick, never a delta | D§5.5, §11 | **HR2** |
+| [ ] | **B10a** | **Server-side resume.** Read `Last-Event-ID`, replay from the store, `resnapshot` frame when the cursor is too old. **Constraint (Seno, at B09): resume is a store query over `rollup_minute` (`max_ingest_seq > cursor`), not a replay of buffered frames** — there is no index on `max_ingest_seq`, so it is a full scan, which is fine once per connect and is exactly why it cannot be per-tick | `src/server/stream.ts` | `curl -N -H 'Last-Event-ID: <n>' localhost:8787/api/stream`, check the replayed rows against `sqlite3`; a cursor the server cannot serve cheaply gets `resnapshot` | D§3.1, §5.5 | **HR1 HR2** |
+| [ ] | **B10b** | **Client subscribes**, merges absolute rows by `(ad_id, minute_start)`, reconnects | `src/web/stream.ts`, `src/web/store.ts` | Number ticks up live; kill the server mid-stream and restart → the client reconnects and the number is **not** double-counted | D§3.1, §5.5 | **HR1 HR2** |
 | [ ] | **B11** | Simulator as a separate process: 1 s tick, keyed RNG (`splitmix64`, named streams), a constant impression rate for one ad, batched POST | `src/sim/index.ts`, `src/sim/rng.ts` | `npm run sim`; the browser number climbs at the expected rate; kill and restart the simulator → the re-emitted events dedupe as `duplicate_identical` because ids are derived, not remembered | D§11; S§14, §15.1 | **HR2 HR7** |
 
 > ### ▶ Demo checkpoint 1 — *"the world is real"*
@@ -199,7 +200,7 @@ throughout; the stage-1 number keeps moving.
 | [ ] | **B31** | `GET /api/sim/world` + the emitter's 1 Hz poll: ads and status, `last_decision_seq`, `F` per pair **recomputed from the signal log**, `spend_so_far_today`, pending backfilled clicks, pending scenarios | `src/server/sim-world.ts`, `src/sim/world.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; the endpoint's `F` matches B26's internal state because both come from the log | D§11; S§16 | **HR3** |
 | [ ] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
 | [ ] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
-| [ ] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'` | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
+| [ ] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'`. **Owed from B09: the seeder must NOT call `stream.markDirty()`** — measured, one batch across 20,000 minutes gave a **6.20 MiB** frame and a **142 ms** event-loop stall; ~17 MiB / ~400 ms at 56,160 seeded buckets | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
 | [ ] | **B35** | The `T0` handover seam: anything whose `received_at` falls after the seed boundary is **not** seeded but handed to the live emitter; progress printing during the seed | `src/sim/seed-history.ts`, `src/sim/index.ts` | Boot on an empty DB: the seed prints progress and finishes in ~28 s (B06 measurement; ~12 s was §18.4's
 narrower benchmark), then conversions from before `T0` keep arriving live for minutes afterwards — a real in-flight population, not a manufactured one | S§15.3(b) | **HR4 HR7** |
 
@@ -285,7 +286,7 @@ The deep surface, per D1. Read-only — no levers yet.
 | [ ] | **B41** | Maturity indicator: empirical attribution-lag CDF over settled cohorts, global, always shown with its sample size **and the seeded share** | `src/server/maturity.ts`, `src/web/Maturity.tsx` | Label reads e.g. "68% mature · measured over 1,432 settled conversions (1,180 seeded)"; both counts match a `sqlite3` count | D§4.5; S§15.4 | — |
 | [ ] | **B42** | Settlement treatment on the chart: `live` / `settled` / `restated`, persistent rather than transient | `src/web/Chart.tsx` | The frame-one restated buckets from B34 are marked days back on the chart, and stay marked | D§5.6 | **HR4** |
 | [ ] | **B43** | Restatement entries on a timeline **at the bucket's own time**, with the delta and the lateness | `src/web/Timeline.tsx` | An entry reads "14:02 Tue — ROAS 1.8 → 2.4 · +3 conversions · $412 · arrived 2 d 4 h late" and sits at Tuesday, not at now | D§5.6 | **HR4** |
-| [ ] | **B44** | Raw event tail with the `TailFrame` quarantine types, plus the stream-health telemetry block (events/sec, last-event age, frames dropped, deduped, conflicts, orphans) in its own distinct treatment | `src/web/Tail.tsx`, `src/shared/wire.ts` | The tail scrolls; **write a line that sums a `TailFrame` and watch `tsc` reject it**; telemetry never shares a surface with a performance metric | D§11 (D34) | **HR2** |
+| [ ] | **B44** | Raw event tail with the `TailFrame` quarantine types, plus the stream-health telemetry block (events/sec, last-event age, frames dropped, deduped, conflicts, orphans) in its own distinct treatment. **Owed from B09, two items.** (a) **Cap rows per frame and spill the remainder to the next tick** — the flush has no such cap today, and B44's socket-buffer cap does **not** cover it: the frame is built before any socket is written to. (b) `[stream] subscriber socket is full` fires for clients that are reading normally — `res.write` returns `false` for any frame over the socket high-water mark — so log it **once per connection** or make it a counter | `src/web/Tail.tsx`, `src/shared/wire.ts` | The tail scrolls; **write a line that sums a `TailFrame` and watch `tsc` reject it**; telemetry never shares a surface with a performance metric | D§11 (D34) | **HR2** |
 | [ ] | **B45** | The fatigue flag: −25% vs the pair's peak trailing-6 h EWMA CTR, ≥3 gated points per window, with its four limits stated on the surface | `src/web/fatigue-flag.ts` | `a_01` is flagged; `a_09` is not, and the surface says it is because the gate suppresses its points — the honest failure mode, visible | S§19 | **HR7** |
 
 > ### ▶ Demo checkpoint 4 — *"the cockpit"*
@@ -549,6 +550,31 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   HMAC catches the second and nothing catches the first, so it is a rule. The check that makes D46
   safe is **B53's drill-down**, which is therefore not optional: it is where a client aggregation
   bug becomes a visible **FAIL** instead of a plausible number.
+
+- **`sendJson(body: unknown)` makes every response shape invisible to `tsc`.** Found at B09:
+  changing `ingest()`'s return to `{ result, dirty }` typechecked **clean** while silently changing
+  what `POST /api/ingest` returns to the emitter. The rule is cheap to forget, so it is also a
+  mechanism — **annotate the value at the call site** (`const responseBody: IngestResult = result;`)
+  and the next such change is a compile error instead of a rule. Every route that returns a typed
+  body does this.
+
+- **An SSE subscriber makes `server.close()` hang forever unless the connections are closed first.**
+  Found at B09, and it is a regression of B04's *verified* clean shutdown, not a new feature's
+  problem. `server.close()` waits for open connections and a subscriber never ends on its own:
+  measured in isolation, the close callback had **still not fired after 1000 ms**. With
+  `stream.shutdown()` closing subscribers first, the real server released the port in **14 ms**
+  (23 ms with four subscribers attached, Seno's independent run). It would have presented as
+  "Ctrl-C hangs sometimes" — only ever with a browser tab open.
+
+- **The SSE resume must be a store query, never a replay of buffered frames** (Seno's constraint at
+  B09, built in **B10a**). `rollup_minute` where `max_ingest_seq > cursor` — a full scan, since
+  there is no index on that column, which is fine **once per connect** and is exactly why it cannot
+  be the per-tick mechanism. The flush's in-memory dirty set is dropped when no subscriber is
+  attached, and what makes that safe is this query (**§3.1 step 3**), *not* the snapshot: the
+  snapshot is taken **before** the subscribe, so it cannot cover an event landing in the gap —
+  measured, an event posted with no subscriber attached is never pushed once one connects. If
+  resume is ever built from memory instead, the bucket it loses is **a late conversion restating an
+  old minute that never moves again**: wrong on screen, forever, with no error anywhere.
 
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.

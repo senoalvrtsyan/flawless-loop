@@ -54,6 +54,14 @@ export async function readBody(req: IncomingMessage, limit = 8 * 1024 * 1024): P
 export type SseConnection = {
   /** Returns false when the socket buffer is full — backpressure point 2 (DESIGN §11). */
   send: (event: string, data: unknown, id?: number) => boolean;
+  /**
+   * Send an SSE COMMENT — bytes on the wire that dispatch no event and, crucially, do not move
+   * the client's `Last-Event-ID`. Added at B09 for the keepalive: an idle stream can be dropped by
+   * an intermediary (in dev, Vite's `/api` proxy), and a keepalive sent as a real event would
+   * either need a client handler or, if given an id, would advance the resume cursor past rows the
+   * client never received.
+   */
+  comment: (text: string) => boolean;
   close: () => void;
 };
 
@@ -81,6 +89,10 @@ export function openSse(res: ServerResponse): SseConnection {
         `event: ${event}\n` +
         `data: ${JSON.stringify(data)}\n\n`;
       return res.write(frame);
+    },
+    comment(text) {
+      if (res.writableEnded) return false;
+      return res.write(`: ${text}\n\n`);
     },
     close() {
       if (!res.writableEnded) res.end();
