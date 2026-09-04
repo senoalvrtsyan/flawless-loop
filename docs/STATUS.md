@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, resume works · 10 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1 all but closed · 11 / 64 chunks**
 
 ---
 
@@ -13,17 +13,18 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 document is provisional.
 
 **Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stage 0 (B01–B03) is
-closed** — the store. **Stage 1 (B04–B11) is five chunks in of eight**: B04–B08. The spine now runs
-end to end in one direction. An event POSTed to `/api/ingest` is stamped, validated, deduped,
-persisted and rolled up into `rollup_minute` in one transaction; `GET /api/snapshot` returns that
-bucket's row for a minute-aligned window plus the cursor, in one read transaction; and a React page
-on **:5173** puts the number on screen, where it survives a refresh and a restart of both processes.
-Eight commits, one per chunk, each approved before it landed.
+closed** — the store. **Stage 1 (B04–B11) is seven chunks of eight**: B04–B10b are in, and
+**the walking skeleton is complete except for its event source**. End to end, today:
 
-**Next is B09/B10** — make it live over SSE; then B11 replaces `curl` with the simulator process and
-stage 1 closes. `BUILD_PLAN.md` §4 calls stage 1 *"the riskiest thing in the build"*: everything
-after it is width on a proven spine. **What is still missing from the skeleton is only the live
-push** — the number is correct and durable, but it moves only on a refresh.
+`POST /api/ingest` stamps, validates, dedupes, persists and rolls up an event in one transaction ·
+`GET /api/snapshot` returns that bucket's row for a minute-aligned window plus a cursor, in one
+read transaction · `GET /api/stream` pushes the **current absolute row** of every touched bucket on
+a 250 ms tick, and replays from a cursor on connect · a React page on **:5173** renders one
+server-computed number that **moves without a refresh**, survives a refresh, and survives a restart
+of both processes.
+
+**Only B11 remains in stage 1**: replace `curl` with the simulator process. Eleven commits, one per
+chunk, each approved before it landed.
 
 **No decision blocks anything from here to B35.** For the first time since Phase 0 the path is
 clear. D44/D45 are *deferred* (**F4**) and come back at the stage 3 → 4 seam; see "What is open".
@@ -53,13 +54,15 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`migrations/002_projections.sql`** | B03. `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios`. |
 | **`src/server/http.ts`** | B04/B09. `createRouter()` (method+pathname match, 404, handler error → 500), `sendJson()`, `readBody()`, `openSse()` — plus **`comment()`** (B09: a keepalive that dispatches no event and does not move `Last-Event-ID`). D42: no framework. |
 | **`src/server/index.ts`** | B04/B05. One `DatabaseSync` for the process; refuses to boot on an unmigrated store; `GET /api/health` (log position), `POST /api/ingest`; clean close on SIGINT/SIGTERM. Port **8787**, `PORT` overrides. |
-| **`scripts/dev.mjs`** | B04. Server + simulator as two OS processes (D32). A crash in either tears the other down; a **clean** exit does not — which is what lets the empty B11 simulator placeholder return immediately. |
+| **`scripts/dev.mjs`** | B04/B08. **Three** OS processes: server, simulator (D32), and Vite on :5173. A crash in any tears the rest down; a **clean** exit does not — which is what lets the empty B11 simulator placeholder return immediately, and B11 must not change that. |
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
 | **`src/server/ingest.ts`** | B05/B09. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
-| **`src/server/stream.ts`** | B09. `createStream(db)` — the process-wide dirty set (coalesced by `Map`), the **250 ms** flush tick, `subscribe`/`markDirty`/`shutdown`/`size`. **One frame per tick** carrying every touched bucket as an absolute row; `id:` = high-water `ingest_seq`. Happy path only — resume is B10a. |
-| **`src/server/snapshot.ts`** | B07. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
+| **`src/server/stream.ts`** | B09/B10a. **273 lines — B44 splits it** (§14/B44 row). `createStream(db)` — the process-wide dirty set (coalesced by `Map`), the **250 ms** flush tick, `subscribe`/`markDirty`/`shutdown`/`size`. **One frame per tick** carrying every touched bucket as an absolute row; `id:` = high-water `ingest_seq`. Plus B10a: `readCursor()` = `max(?cursor, Last-Event-ID)` validated as `/^\d+$/` on the RAW string, the store replay (`bucketsSinceReader`, `LIMIT 2001`), and the three `resnapshot` conditions. **Subscribes before replaying** — duplicates are free, gaps are not. |
+| **`src/server/snapshot.ts`** | B07/B09/B10a. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Also **`bucketReader()`** (the flush's single-bucket read) and **`bucketsSinceReader()`** (the resume read) — both here so the snapshot, the flush and the resume cannot drift into three row shapes. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
 | **`index.html`, `vite.config.ts`** | B08. Vite dev-serves `src/web` alone on **:5173** and proxies `/api` to :8787 (D41-A). Client fetches relative paths, so no CORS and one configuration. Unstyled: D45 deferred. |
-| **`src/web/main.tsx`, `src/web/App.tsx`** | B08. Fetch the snapshot for the last hour, render **one bucket's `impressions` verbatim** plus the resolved window, `as_of_ingest_seq` and a raw-response `<details>`. No sum — see **D46**. Nothing durable client-side (§3). |
+| **`src/web/main.tsx`, `src/web/App.tsx`** | B08/B10b. Snapshot for the last hour, then subscribe from its cursor; renders **one bucket's `impressions` verbatim** plus the server's window, the cursor and a link state. No sum — see **D46**. Nothing durable client-side (§3). A `resnapshot` bumps a generation counter that re-runs the whole effect, so §3.1's "return to step 1" is literally a re-mount. |
+| **`src/web/store.ts`** | B10b. The render cache. `createStore` / `applyRows` / `inWindow` / `latestBucket` / `bucketKey`. **The merge is an ASSIGNMENT keyed by `(ad_id, minute_start)`, never an addition** — absolute rows (D30) — and **out-of-window rows are dropped**, because the replay is unwindowed while the snapshot is windowed. |
+| **`src/web/stream.ts`** | B10b. `subscribe(cursor, handlers)` → `EventSource('/api/stream?cursor=N')`. **`?cursor=` is mandatory (D47)**: `EventSource` cannot set a header, so without it every refresh drops the snapshot-to-subscribe gap. |
 | **`src/server/apply.ts`** | B06. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert. Impressions only; B16/B18 widen it. |
 | **`src/sim/index.ts`** | B01 placeholder, still empty — B11 fills it. Exits cleanly, which the dev runner tolerates by design. |
 
@@ -69,18 +72,33 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
 npm run dev           # THREE processes: server :8787, Vite client :5173, sim (empty until B11)
-                      # then open http://localhost:5173 — StrictMode fetches the snapshot TWICE
-                      # in dev, so two GET /api/snapshot per load is expected, not a bug
 npm run typecheck     # tsc --noEmit, must be clean
 npm test              # node --test — no test files yet (D43), exits 0
-sqlite3 data/loop.sqlite ".schema"
 
-curl -s localhost:8787/api/health        # status, schema_version, log_position, uptime
-TS=$(node -e "console.log(new Date(Date.now()-3600e3).toISOString())")   # PAST — see the clamp note
+open http://localhost:5173        # the number, live. Ctrl-C the runner and it comes back.
+
+curl -s localhost:8787/api/health                       # log position + stream_subscribers
+T=$(node -e "console.log(new Date(Date.now()-30e3).toISOString())")     # PAST — see the clamp note
 curl -s -X POST -H 'content-type: application/json' localhost:8787/api/ingest \
-  -d '[{"event_id":"e1","ts":"'$TS'","ad_id":"a_12","event":"impression"}]'
-sqlite3 data/loop.sqlite "SELECT * FROM rollup_minute; SELECT event_id,disposition FROM signal_deliveries;"
+  -d '[{"event_id":"e1","ts":"'$T'","ad_id":"a_12","event":"impression"}]'
+#   -> the browser number moves within ~250 ms, no refresh
+
+F=$(node -e "console.log(new Date(Date.now()-3600e3).toISOString())"); TO=$(node -e "console.log(new Date().toISOString())")
+curl -s "localhost:8787/api/snapshot?from=$F&to=$TO"    # buckets + as_of_ingest_seq
+curl -sN "localhost:8787/api/stream?cursor=0"           # ready frame, then absolute rows per tick
+curl -sN -H 'Last-Event-ID: 999999' localhost:8787/api/stream    # resnapshot cursor_ahead_of_log
+sqlite3 data/loop.sqlite "SELECT ad_id,minute_start,impressions,max_ingest_seq FROM rollup_minute ORDER BY max_ingest_seq;"
 ```
+
+**In dev, `StrictMode` runs every effect twice**, so ONE browser tab produces two
+`GET /api/snapshot` calls and `stream_subscribers: 2`. Harmless — absolute rows, identical frames —
+but it reads as a bug if you are not expecting it.
+
+**Driving the client without a browser.** `src/web/store.ts` and `src/web/stream.ts` are JSX-free,
+and `node --experimental-eventsource --experimental-strip-types` gives a real `EventSource`, so the
+shipped client modules can be exercised against the running server headlessly. That is how B10b was
+verified; the harness only has to shim `EventSource` to absolutise the relative URL, because Node
+has no page origin.
 
 **Hand-verifying bucketing needs `ts` in the PAST.** A future `ts` is clamped to `received_at` by
 I10, so future-dated test events all collapse into the current minute — correct behaviour, and it
@@ -123,6 +141,10 @@ one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind
   "compare the client to itself" is about the rejected D30-A (the client aggregating RAW events)**,
   not a ban on all client arithmetic — what forbids an undescribed total is **§10.1**, because
   B52's `<Metric>` cannot render a value with no descriptor.
+- **D47 (2026-09-04, at B10a)** — the resume contract: cursor is **`max(?cursor=N,
+  Last-Event-ID)`**, replay is a store query with `LIMIT 2001`, and `resnapshot` fires past **2,000
+  rows**, above the log's high-water mark, or on a non-numeric cursor. The threshold is on rows
+  because seq distance mispredicts the cost by orders of magnitude in both directions.
 - **U1–U7**, and **U8–U9** (2026-09-04) — store path `data/loop.sqlite`; `ExperimentalWarning` left
   visible.
 - **8 cheap defaults** — ratified as a block.
@@ -143,7 +165,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B10b to B35.**
+**Nothing blocks any chunk from B11 to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -165,10 +187,10 @@ obligations come with that, both of which bite silently if dropped, and both are
 | | |
 |---|---|
 | **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
-| **Last completed chunk** | **B10a** — server-side SSE resume, `max(?cursor, Last-Event-ID)`, `resnapshot` at 2,000 rows (D47). |
+| **Last completed chunk** | **B10b** — the client subscribes, merges absolute rows, reconnects. Commit `9b15738`. |
 | **Next chunk** | **B10b** — the client subscribes: `EventSource` with **`?cursor=<as_of_ingest_seq>`** (D47 — it cannot set a header), merge absolute rows by `(ad_id, minute_start)`, **drop out-of-window rows** (the replay is unwindowed, the snapshot is windowed), handle `resnapshot` by returning to step 1. Files `src/web/stream.ts`, `src/web/store.ts`. |
 | **In flight** | nothing |
-| **Chunks ticked** | **10 / 64** (B01–B09, B10a) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **11 / 64** (B01–B09, B10a, B10b) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -292,6 +314,12 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 - **B33 owes a fault split.** Malformed (0.1%) and dual click-id (0.05%) both read `rejected_invalid`
   and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
   bodies, which is only correct once `SUPPORTED` covers all four kinds.
+- **B12's test surface has grown to three named targets** under D43's criterion (*"tests only where
+  a wrong answer is invisible"*): `isCanonicalIso` (B05), **`readCursor` (B10a — `Number('1e3')` is
+  1000, and a present-but-empty cursor read as absent; both were silent)**, and whatever B12 itself
+  needs for the fold. `readCursor` is exported for this reason.
+- **B44 also owes the `stream.ts` split** — 273 lines holding two concerns (the flush loop, and
+  resume/cursor parsing). Agreed with Seno to land it with B44's caps, not as a drive-by.
 - **B34 owes a flush guard, measured by Seno at B09**: the **seeder must not call
   `stream.markDirty()`**. One batch spanning 20,000 minutes produced a **6.20 MiB** frame and a
   **142 ms** event-loop stall after `ingest()` returned; at 56,160 seeded buckets that is ~17 MiB /
@@ -335,6 +363,8 @@ reproducible with the commands in "How to run what exists".
 | **B10a** — `?cursor=14` replays exactly seqs 15/16/17 (matches `sqlite3`); `max()` correct both directions; no cursor and caught-up send `ready` only; `Last-Event-ID: 500` → `cursor_ahead_of_log`; **2000 dirty buckets replay (638,934 B) and 2001 → `too_many_rows`**; resume works through Vite's proxy; shutdown 16 ms mid-replay; D7 grep clean | **passes** |
 | **B10a** — the cursor-coercion hazards Seno found, after the `/^\d+$/` fix: `1e3`, `0x3`, `+2`, `2.0`, `%20`, `''` and an empty `Last-Event-ID` all → `cursor_not_a_number`; `007` → 7, same 6 rows as `?cursor=7` | **passes** |
 | **B10a** — Seno's independent re-run: `?cursor=2` → seqs 3,4,5 · `max()` both ways · the 2000/2001 boundary (638,952 B then `too_many_rows`) · `cursor_ahead_of_log` · duplicated-header and `Infinity` rejections · resnapshot-then-live-frame · D7 · typecheck | **passes** |
+| **B10b** — the SHIPPED client modules driven headlessly (10 assertions): double-apply is idempotent · merge assigns, never accumulates · a restatement is the same key reassigned · **out-of-window rows dropped** · half-open window · `ready` frame · a live POST moves the number with no refetch · the target bucket climbs by exactly the 2 events posted · no spurious resnapshot · `cursor_ahead_of_log` drives a client resnapshot | **passes** |
+| **B10b** — **D47's gap, both directions**: an event ingested with no subscriber attached is **replayed** on subscribe with `?cursor=`, and is **not delivered at all** without it | **passes** |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that
@@ -342,21 +372,29 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B10a, build it, report, wait.** Nothing needs deciding first.
+**Announce B11, build it, report, wait.** Nothing needs deciding first.
 
-B10a is the **server-side** half of resume — B10 was split at B09 because the whole thing was
-oversized. Read `DESIGN.md` §3.1 (steps 2–4) and §5.5. The constraint is already on its plan row and
-in the traps list, and it is the thing to get right: **resume is a store query over `rollup_minute`
-(`max_ingest_seq > cursor`), not a replay of buffered frames.** Full scan, no index on that column —
-correct once per connect, impossible per tick.
+**B11 closes stage 1** — the simulator as a separate OS process, replacing `curl` as the event
+source. Read **`SIMULATOR.md` §14 and §15.1** and **`DESIGN.md` §11** before writing it. Scope from
+the plan row, and no wider: 1 s tick, keyed RNG (`splitmix64`, named streams), **a constant
+impression rate for one hard-coded ad**, batched POST. Files `src/sim/index.ts`, `src/sim/rng.ts`.
 
-`resnapshot` belongs to this chunk too: §3.1 says a cursor the server cannot serve cheaply gets a
-`resnapshot` frame and the client returns to step 1. Decide and state what "cheaply" means as a
-number rather than leaving it to a timeout.
+Three things that are already true and constrain it:
 
-Verify with `curl -N -H 'Last-Event-ID: <n>' localhost:8787/api/stream` and diff the replayed rows
-against `sqlite3`. B10b — the client subscribing, merging by `(ad_id, minute_start)` and
-reconnecting — is the chunk after.
+- **`src/sim/index.ts` is an empty B01 placeholder that exits cleanly**, and `scripts/dev.mjs`
+  tolerates a clean child exit by design. Filling it in must not change the runner.
+- **Event ids are DERIVED, not remembered** — that is the plan row's own verification: kill and
+  restart the simulator and the re-emitted events must dedupe as `duplicate_identical`. This is
+  what makes the emitter hold no durable state (§3.3).
+- **`ts` must be in the past or at `now`.** I10 clamps a future `ts` to `received_at`, so a
+  simulator running its clock ahead would collapse every event into the current minute.
+
+Verify: `npm run dev`, then the browser number climbs at the expected rate with no refresh; kill and
+restart the simulator and watch the dispositions.
+
+**After B11, stage 1 is closed and stage 2 (B12–B24) begins** — the full write path, verified by
+`curl` and `sqlite3` only. B12 is the fold, and it is the first chunk that owes automated tests
+(D43); see "What is owed" for the three targets that have accumulated.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
