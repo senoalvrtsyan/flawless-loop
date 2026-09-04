@@ -26,6 +26,7 @@ import {
   WORLD_URL,
   currentWorld,
   liveAds,
+  fetchPendingClicks,
   pendingHandover,
   pollWorld,
   takeFromHandover,
@@ -44,6 +45,15 @@ import { scheduleFor } from './lag.ts';
 import { temperatureOf } from './fixtures.ts';
 import { pacing } from './pacing.ts';
 import { FAULT_NAMES, emptyCounts, injectFaults, type Held } from './faults.ts';
+import {
+  absorb,
+  applyToWorld,
+  duplicateStorm,
+  lambdaMultiplier,
+  lateCascade,
+  orphanBurst,
+  stalledUntil,
+} from './scenarios.ts';
 import { SPEND_TICK_S } from './params.ts';
 import {
   arrivalProcess,
@@ -111,7 +121,7 @@ const MAX_PENDING = 10_000;
  * re-derive the same `event_id` with a different `ts` on restart, which is
  * `duplicate_conflicting` — a platform correction (§5.1 step 4) — rather than a duplicate.
  */
-function impressionsForTick(live: LiveAd, tick: number): number {
+function impressionsForTick(live: LiveAd, tick: number, lambdaScale = 1): number {
   const ad = live.config;
   // §3's λ at this second, then §12's draw. **φ and ν are not passed and never will be** — D56
   // puts both in `p_ctr` only, because fatigue changes what an impression is worth rather than how
@@ -127,11 +137,16 @@ function impressionsForTick(live: LiveAd, tick: number): number {
     SEED,
     ad.ad_id,
     tick,
+    // **B50: `traffic_burst` scales the Poisson MEAN**, not the drawn count and not the event list.
+    // Scaling the mean is the only form that stays inside §12's model — the burst is more demand,
+    // so its events are ordinary events with ordinary ids. Duplicating the drawn list would mint
+    // the same `event_id` twice and land as `duplicate_identical`, demonstrating the dedupe path
+    // instead of the ingest backpressure §17 asks a reviewer to watch. 1.0 when nothing is bursting.
     lambdaPerSecond(ad.ad_id, ad.channel, tick * 1_000, {
       demand: demandFactor(ad.channel, ad.ad_id, tick * 1_000),
       rho: pacing(ad.channel, tick * 1_000, live.spend_so_far_today_cents, live.daily_budget_cents)
         .rho,
-    }),
+    }) * lambdaScale,
   );
 }
 
@@ -270,9 +285,9 @@ function dueBackfillConversions(
   return { due, taken };
 }
 
-function eventsForAd(live: LiveAd, tick: number): Signal[] {
+function eventsForAd(live: LiveAd, tick: number, lambdaScale = 1): Signal[] {
   const ad = live.config;
-  const count = impressionsForTick(live, tick);
+  const count = impressionsForTick(live, tick, lambdaScale);
   const events: Signal[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -363,9 +378,9 @@ function eventsForAd(live: LiveAd, tick: number): Signal[] {
  * mid-tick takes effect on the next one rather than partway through this one. `live` is empty until
  * the first successful poll, and then nothing is emitted at all — see `world.ts`.
  */
-function eventsForTick(tick: number, live: readonly LiveAd[]): Signal[] {
+function eventsForTick(tick: number, live: readonly LiveAd[], lambdaScale = 1): Signal[] {
   const events: Signal[] = [];
-  for (const ad of live) events.push(...eventsForAd(ad, tick));
+  for (const ad of live) events.push(...eventsForAd(ad, tick, lambdaScale));
   return events;
 }
 
@@ -391,6 +406,14 @@ const FIRST_TICK =
   Math.floor((Math.floor(Date.now() / 1_000) - CATCHUP_S) / SPEND_TICK_S) * SPEND_TICK_S;
 let nextTick = FIRST_TICK;
 let pending: Signal[] = [];
+/**
+ * The last batch this process successfully POSTed — `duplicate_storm`'s source (B50).
+ *
+ * The events it replays must be ones the STORE has seen, or the "duplicate" lands as a first
+ * delivery and the dedupe counters do not move: the scenario would demonstrate ingest rather than
+ * §5.1's dedupe. In-process and not durable, like everything else on this side of D40-A.
+ */
+let lastBatch: readonly Signal[] = [];
 
 /**
  * §13's held deliveries: duplicates waiting out their 1–20 s, reordered events, and withheld
@@ -476,12 +499,78 @@ async function tick(): Promise<void> {
       SEED = world.run.seed;
     }
 
-    const live = liveAds(world, Date.now());
+    // ── B50 / P17: the scenarios ────────────────────────────────────────────────────────────
+    //
+    // Absorbed BEFORE `liveAds` is transformed, so a trigger that arrived on this very poll takes
+    // effect on the seconds this tick is about to generate — the same ordering argument that puts
+    // `pollWorld()` first for levers, and what makes the latency "≤ 1 tick" rather than "≤ 2".
+    const nowMsForScenarios = Date.now();
+    const fresh = absorb(world.pending_scenarios, nowMsForScenarios);
+
+    // `stall{seconds}`: emission stops. **Nothing is generated and nothing is queued** — a stall
+    // that buffered would deliver a burst on release and demonstrate backpressure instead of a
+    // gap. `nextTick` is left where it is, so the missed seconds are simply not emitted, which is
+    // what a real gap looks like: §6 calls it "degrades — detected, not repaired" and G21 is that
+    // we can say the stream is quiet, never why.
+    const stallEnd = stalledUntil(nowMsForScenarios);
+    if (stallEnd !== null) {
+      nextTick = now;
+      return;
+    }
+
+    // Seam 1: what the model is told about the world (φ, realised spend).
+    const live = applyToWorld(liveAds(world, Date.now()), nowMsForScenarios);
+    // Seam 2: §12's Poisson mean, scaled for the length of a `traffic_burst`.
+    const lambdaScale = lambdaMultiplier(nowMsForScenarios);
+
+    // Seam 3: direct injection. Only for triggers NEW to this process — these fire once, unlike
+    // the two seams above, which are running states re-read every tick.
+    for (const trigger of fresh) {
+      if (trigger.name === 'late_cascade') {
+        // **The FULL pending set, re-asked** — not `pendingHandover()`, which D62 has already
+        // filtered down to the clicks that will convert naturally (77 of 15,082 on the seeded
+        // store). See `fetchPendingClicks`. Awaited inside the tick because a cascade is a
+        // once-per-button-press event and the alternative is firing it a tick later than the
+        // trigger arrived, which is the latency §17 is trying to remove.
+        const candidates = await fetchPendingClicks().catch((err: unknown) => {
+          console.error(`[sim] late_cascade: could not re-read the pending set: ${String(err)}`);
+          return pendingHandover(SEED) ?? [];
+        });
+        const { events, usedClickIds } = lateCascade(
+          SEED, trigger.args, candidates, nowMsForScenarios,
+          (adId, clickId, tsMs) => {
+            const ad = world.ads.find((a) => a.ad_id === adId);
+            return ad === undefined ? 0 : orderValueCents(SEED, ad, tsMs, [clickId, 'cascade']);
+          },
+        );
+        pending.push(...events);
+        // Dropped from the handover, or the click's NATURAL conversion arrives later as well and
+        // the same click converts twice — inflating the very number the cascade is demonstrating.
+        if (usedClickIds.length > 0) takeFromHandover(SEED, new Set(usedClickIds));
+      }
+      if (trigger.name === 'orphan_burst') {
+        const injection = orphanBurst(
+          SEED, trigger.args, live, nowMsForScenarios, nextTick,
+          (adId, clickId, tsMs) => {
+            const ad = world.ads.find((a) => a.ad_id === adId);
+            return ad === undefined ? 0 : orderValueCents(SEED, ad, tsMs, [clickId, 'orphan']);
+          },
+        );
+        pending.push(...injection.now);
+        held.push(...injection.held);
+      }
+      if (trigger.name === 'duplicate_storm') {
+        // Byte-identical, from what this process actually sent — see `scenarios.ts`. A replay of
+        // events we only generated would be a replay of something the store never saw.
+        pending.push(...duplicateStorm(trigger.args, lastBatch));
+      }
+    }
+
     for (; nextTick < now; nextTick++) {
       // §13's injectors sit BETWEEN generation and the wire, which is where a delivery fault
       // belongs: the world produced the event, the transport is what mangles it. Nothing upstream
       // of this line knows faults exist, so `--dry-run`'s model sections measure the clean model.
-      const injected = injectFaults(SEED, nextTick, eventsForTick(nextTick, live), faultCounts);
+      const injected = injectFaults(SEED, nextTick, eventsForTick(nextTick, live, lambdaScale), faultCounts);
       pending.push(...injected.now);
       held.push(...injected.held);
     }
@@ -544,6 +633,8 @@ async function tick(): Promise<void> {
     if (await post(batch)) {
       if (!linkUp) console.log('[sim] ingest reachable again');
       linkUp = true;
+      // Captured AFTER the POST succeeded, for the reason in `lastBatch`'s note.
+      lastBatch = batch;
       return;
     }
     if (linkUp) console.error(`[sim] holding ${batch.length} events for the next tick`);

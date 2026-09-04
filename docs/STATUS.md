@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · STAGE 5 IS RUNNING — THE LOOP CLOSES · 54 / 68 chunks** (69 if `B50a` lands)
+**Last updated:** 2026-09-05 · **Phase 5 · STAGE 5 IS CLOSED — THE LOOP CLOSES AND THE WORLD CAN BE PROVOKED · 56 / 68 chunks** (69 if `B50a` lands)
 
 ---
 
@@ -505,8 +505,53 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Forty-nine now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Sixty-one now — the Phase 5 ones were
 found against the real store and are in no design document.
+
+**The newest (G14 — B49, B50):**
+
+- **`tsc` clean is not "the client builds."** `Horizon.tsx` imported `HORIZON_CHOICES_H` as a VALUE
+  from `sweep.ts`, which imports `db.ts`, which imports `node:sqlite`, `node:fs` and `node:path`.
+  TypeScript has nothing to say about a runtime import crossing that boundary; it failed only at
+  `vite build`, as `"resolve" is not exported by "__vite-browser-external"`. **Run the bundle, not
+  only the typechecker**, whenever a client file imports from `src/server/`. The constant now lives
+  in `shared/`, and `settlement.ts` is deliberately kept free of store imports so `bucketState` can
+  run in the browser.
+- **A persisted lateness horizon would break `/api/verify` on a correct store.** `restated_at` is
+  stamped at ingest against the horizon in force *then*; the rebuild replays against the horizon in
+  force *now*. Change it in between and verify reports divergence with nothing wrong. This is why
+  the horizon is a read parameter — it is forced, not preferred, and the tempting "make it a
+  setting" refactor reintroduces it silently.
+- **The sweep must not write `restated_at`.** "Mark what moved" reads like an instruction to stamp
+  the column. It is `apply()`'s (D7), and a swept value would be both wrong at the account horizon
+  and undoable only by a rebuild.
+- **The SSE flush tick cannot stamp settlement per subscriber** — one read serves N tabs (§11) — so
+  streamed rows carry the ACCOUNT horizon while snapshot rows carry the swept one. The client
+  re-derives with the same `bucketState`; a second copy of the rule in the browser is the silent
+  version of this, and so is leaving the two mixed in one store.
+- **A sweep sample ordered newest-first shows none of the interesting rows.** Measured: 72 h → 2 h
+  flips 40,889 buckets of which 172 are restated, and a single capped list contained **zero** of
+  them — the caption said "172 had already moved" above six examples that had not. Restated rows
+  fill the sample first.
+- **`late_cascade` must NOT draw from `pendingHandover()`.** That list is the boot-time handover
+  after D62's Bernoulli has discarded every click that will never convert: **77 held against 15,082
+  the server reports pending**. Asking for 10 and getting 1 was the measured result, and it makes
+  the flagship trigger look broken while every number stays correct. A cascade re-asks for the full
+  set — a ~2 MiB fetch that B35a rightly took off the 1 Hz path, and this is not on it.
+- **A cascade must cite a REAL click.** An invented `attributed_click_id` produces an orphan that
+  parks at its own minute and restates nothing — the flagship path replaced by the orphan path
+  wearing its clothes, with a plausible-looking screen.
+- **`traffic_burst` scales the Poisson MEAN, never the drawn event list.** Duplicating the list
+  mints the same `event_id` twice, so it lands as `duplicate_identical` and demonstrates the dedupe
+  path instead of the ingest backpressure §17 asks a reviewer to watch.
+- **`duplicate_storm` must replay what was POSTed, not what was generated.** A replay of events the
+  store never saw lands as a first delivery and the dedupe counters do not move.
+- **Marking a scenario consumed inside `readTx` takes a write lock on the 1 Hz path.** `readTx` is
+  `BEGIN DEFERRED` and upgrades on the first UPDATE — on the connection ingest is using. The stall
+  would read as backpressure rather than as a lock. The mark happens after the transaction.
+- **A `stall` must not buffer.** Queuing the suppressed seconds delivers a burst on release, which
+  demonstrates backpressure rather than a gap. `nextTick` is advanced and the seconds are simply
+  not emitted — §6's "degrades: detected, not repaired".
 
 **The newest (G13 — B46, B47, B48):**
 
@@ -814,6 +859,19 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
+- **D69 IS OWED AND IT BLOCKS `B50a`** — the D68 sub-question Seno has not answered: symmetric
+  6-hour before/after window, or pinned to the decision's own generation boundaries? See the
+  Next-action block and D68's entry. **Stage 5 landed clean, so `B50a` is due and this is the only
+  thing standing in front of it.**
+- **The scenario-consumption ASSUMPTION needs sign-off** before the README's limits section (B50).
+  See the table in the Next-action block; the analysis is in `src/server/sim-world.ts`.
+- **THE BROWSER, still, and there is more of it now.** Stages 4 and 5 were verified headlessly
+  against the real store through the shipped client modules and the real endpoints; `vite build` is
+  clean. **Nobody has clicked any of it.** Uneyeballed: the action console's form and outcome
+  banner, the ▼ generation markers and their label stacking, the horizon control and its sweep
+  caption, the scenario console, and **B42's greyscale check — which now has THREE vertical rules
+  and a ▼ to keep distinct**, not one.
+
 - **THE BROWSER, still.** G13 was verified the same way stage 4 was — headlessly, against the real
   store, through the shipped client modules (`generations.ts`, `decisions.ts`) and the real
   endpoints. `vite build` is clean, so it compiles and bundles. **Nobody has clicked the console.**
@@ -999,6 +1057,78 @@ read the same file without complaint, but if a `.schema` or a query plan ever lo
 version gap is the first thing to check.
 
 ## Next action
+
+**STAGE 5 IS CLOSED — B49 and B50 landed together at Seno's instruction ("B49,B50 next. Close the
+stage 5"), both of which `BUILD_PLAN.md` §13 had marked single-gated.** Reported per chunk.
+
+**B49 / P16 — the horizon is now swept, and it writes nothing.** F2's arithmetic was the whole
+reason this exists: at 72 h with 7 days of backfill, no bucket settles inside a demo, so P7's
+restatement path would be built, correct and **invisible**. Measured on a copy of the seeded week:
+**72 h → 2 h flips 40,881 buckets and 172 of them are restated under the new horizon, in 83 ms**,
+reading 40,881 of 71,584 rows — the band, on `ix_rollup_time`, not the table. A no-op sweep reads
+**zero** rows.
+
+**The horizon is a READ parameter and that was forced rather than chosen.** `restated_at` is
+stamped at ingest against the horizon in force *then*; `/api/verify` replays against the horizon in
+force *now*. A persisted setting would therefore make verify diverge on a correct store — the same
+failure D54 avoided for `orphan_expired`. So: the write side keeps `HORIZON_MS`, `?horizon_h=` moves
+the read side, and the sweep is read-only.
+
+**One asymmetry it forced, and it is handled rather than tolerated:** the SSE flush tick serves N
+subscribers from one read (§11), so it cannot stamp settlement at whatever horizon a tab is
+sweeping. The client re-derives every row with the **same `bucketState` the server uses** — which is
+why `settlement.ts` is now deliberately free of `node:sqlite` and the sweep lives in `sweep.ts`.
+
+**B50 / P17 — the world can be provoked.** All seven of §17 are accepted, bounds-checked and
+persisted to `sim_scenarios`; the emitter picks them up on the world poll it already makes. **Three
+fired end to end against a live server + emitter on the seeded store:**
+
+- `late_cascade{a_01, n:12, min_age_h:96}` → **restated buckets 12 → 17**, timeline entries **seven
+  days back** with real before-and-after: `conv 0 → 6`, ROAS `0.00 → 119.25`, **168.0 h late**, every
+  entry `explained`.
+- `orphan_burst{n:6}` → orphans **8 → 14**, all parked at their own minute, then **all six promoted**
+  back to 8 with `credited_minute` moving **19:59 → 19:57**. That is the two-bucket restatement the
+  plan row asks for, caused on demand.
+- `stall{20}` → **`ingest_seq` unmoved for 12 s**, then emission resumed on its own.
+
+**`/api/verify` returned 200 with all four projections hash-matched, and `npm run agree` returned OK,
+after all of it.**
+
+**Three seams and no fourth**, written into `src/sim/scenarios.ts`: a transform of `LiveAd[]` (φ for
+`fatigue_collapse`, realised spend for `budget_squeeze`), a λ multiplier (`traffic_burst` scales the
+Poisson **mean** — scaling the drawn list mints duplicate `event_id`s and demonstrates dedupe
+instead of backpressure), and direct injection (`late_cascade`, `orphan_burst`, `duplicate_storm`).
+`stall` is none of the three: it suppresses the batch and **does not buffer**.
+
+### THE ONE THING B50 OWES A DECISION — read this before the README's limits section
+
+**ASSUMPTION (unratified): the server marks a scenario `consumed_at` at SERVE time** — at-most-once
+delivery. The DDL says only *"NULL until the simulator picks it up"* and the simulator cannot write
+(D32), so the mark has to be made on its behalf. Three shapes exist, all defensible, and the full
+analysis is in the comment above `pending_scenarios` in `src/server/sim-world.ts`:
+
+| | Shape | Failure mode |
+|---|---|---|
+| **(a)** | **serve-and-mark — TAKEN** | a dropped poll RESPONSE loses the trigger silently: the reviewer presses the button and nothing happens |
+| (b) | the emitter acks (`?consumed=` on the existing poll, or an endpoint) | a lost ack re-delivers; harmless while the process lives, a second cascade after a restart |
+| (c) | never mark | the DDL's comment becomes a lie and the poll payload grows by a row per trigger forever |
+
+(a) was taken because **the emitter is idempotent by `scenario_id` anyway**, so moving to (b) later
+is purely additive — the ack becomes the mark and nothing that consumes triggers changes. **It needs
+sign-off before the README's limits section is written. It blocks nothing else.**
+
+### D68's condition
+
+**Stage 5 landed without `CLAUDE.md` §5's stop clause firing.** No chunk needed a decision mid-build,
+none revealed the design wrong, none wanted a dependency. **So D68's condition is met and `B50a` —
+decision scoring — is due.** It is NOT started, because D68 records a sub-question that blocks it and
+Seno has not answered it: **is `w` a symmetric 6-hour before/after window, or is it pinned to the
+decision's own generation boundaries?** That question is the first thing to put to Seno.
+
+**156 tests** (146 + 5 sweep + 5 scenario). `tsc` clean, `vite build` clean, tree clean. All
+verification ran on `scratchpad/g14.sqlite`, a copy — **`data/loop.sqlite` is untouched and has not
+been reseeded.**
+
 
 **G13 IS CLOSED — B46, B47, B48, one commit. STAGE 5 HAS FOUR CHUNKS LEFT, AND TWO OF THEM ARE
 SINGLE-GATED (B49, B50).** **D68 was recorded first, in its own commit (`80158a2`), before anything

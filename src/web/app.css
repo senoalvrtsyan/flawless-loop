@@ -284,3 +284,13 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
                     margin-bottom: .2rem; font-size: .8rem; }
 .boundaries__mark { color: var(--generation); }
 .boundaries__meta { color: var(--ink-muted); font-size: .76rem; }
+
+/* B49's swept buckets. Deliberately NOT the generation colour: a settlement flip and a config
+ * change are different kinds of event and share a list shape, so the left border carries the
+ * distinction — dashed and in the restated hue, matching the timeline's own treatment (D45). */
+.boundaries__item--sweep { border-left: 3px dashed var(--state-restated); }
+
+/* B50. The scenario console is visually a sibling of the action console and deliberately NOT the
+ * same: a dashed border says "this is not a lever" before any label is read. A scenario changes
+ * what the world does; a decision changes what the advertiser did. */
+.console--sim { border-style: dashed; background: var(--surface); }

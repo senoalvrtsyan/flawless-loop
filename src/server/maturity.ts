@@ -94,8 +94,13 @@ type LagRow = { received_at: string; click_ts: string; source: 'backfill' | 'liv
  * `at` is the read clock, threaded rather than taken here for the same reason `settledAt` threads
  * it (D38): two figures in one response must not be judged against two different clocks.
  */
-export function maturityCurve(db: DatabaseSync, at: string): MaturityCurve {
-  const settledBefore = floorToMinute(Date.parse(at) - HORIZON_MS);
+export function maturityCurve(
+  db: DatabaseSync,
+  at: string,
+  /** B49 — which cohorts count as settled. See `maturityFor`. */
+  horizonMs: number = HORIZON_MS,
+): MaturityCurve {
+  const settledBefore = floorToMinute(Date.parse(at) - horizonMs);
   const rows = db.prepare(SELECT_LAGS).all(settledBefore) as unknown as LagRow[];
 
   const lags: number[] = [];
@@ -160,8 +165,12 @@ export function maturityFor(
   db: DatabaseSync,
   window: { from: string; to: string },
   at: string,
+  // B49: the horizon this read is answered at. It decides which cohorts count as SETTLED, and the
+  // curve is measured over settled cohorts only — so sweeping the horizon moves the maturity line
+  // for the same reason it moves the settlement marks, rather than leaving the two disagreeing.
+  horizonMs: number = HORIZON_MS,
 ): Maturity {
-  const curve = maturityCurve(db, at);
+  const curve = maturityCurve(db, at, horizonMs);
   const now = Date.parse(at);
   // `to` is exclusive and minute-aligned (B07), so the newest minute IN the window starts one
   // minute before it. Off by one here and the label describes a minute the window does not contain.

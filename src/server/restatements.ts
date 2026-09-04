@@ -101,7 +101,10 @@ type CreditedRow = { event_id: string; received_at: string; value_cents: number;
 export function restatements(
   db: DatabaseSync,
   query: SnapshotQuery,
-  horizonMs: number = HORIZON_MS,
+  // **B49**: defaults to the horizon the QUERY was resolved at, not to `HORIZON_MS`. The explicit
+  // parameter stays for the tests that sweep it directly. A timeline answered at 72 h beside a
+  // chart drawn at 2 h is the disagreement P16 exists to avoid, and this default is what stops it.
+  horizonMs: number = query.horizon_ms,
 ): RestatementEntry[] {
   const restated = db.prepare(SELECT_RESTATED);
   const credited = db.prepare(SELECT_CREDITED);

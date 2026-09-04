@@ -46,6 +46,7 @@ import {
   combined,
   fetchFatigue,
   fetchRestatements,
+  fetchSweep,
   fetchTotals,
   formatCents,
   formatCount,
@@ -62,6 +63,15 @@ import { FatigueFlag } from './FatigueFlag.tsx';
 import { Console, fetchComponents } from './Console.tsx';
 import { DecisionLog } from './DecisionLog.tsx';
 import { boundariesIn } from './generations.ts';
+import { Horizon } from './Horizon.tsx';
+import { Scenarios, fetchScenarios } from './Scenarios.tsx';
+import type { ScenarioRow } from '../server/sim-scenario.ts';
+// Runtime import, and it must stay importable in the browser: `settlement.ts` is deliberately free
+// of `node:sqlite` so the client can re-derive a streamed row's state at a swept horizon with the
+// SAME function the server stamps with, rather than a second copy of the rule (B49).
+import { bucketState } from '../server/settlement.ts';
+import { HORIZON_MS } from '../shared/config.ts';
+import type { SweepResult } from '../server/sweep.ts';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
@@ -181,6 +191,25 @@ export function App() {
    * window roll would be four copies a minute of a constant.
    */
   const [components, setComponents] = useState<readonly ComponentRow[]>([]);
+  /**
+   * **B49 / P16 — the lateness horizon this surface is answered at**, in hours.
+   *
+   * Viewport state, like the window and the selection: `DESIGN.md` §3's boundary table puts it in
+   * column 1, and it is a READ parameter everywhere it goes. Changing it re-runs §3.1 from step 1,
+   * because every settlement fact on the page — bucket state, the dashed rule, maturity, the
+   * restatement timeline — is derived from it server-side.
+   */
+  const [horizonH, setHorizonH] = useState<number>(HORIZON_MS / 3_600_000);
+  const [sweepResult, setSweepResult] = useState<SweepResult | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  /**
+   * **B50 / P17** — the scenario record, refreshed on the same 5-second tick as the totals.
+   *
+   * On that tick and not on the stream, because the interesting transition is the one the stream
+   * cannot show: a trigger going from `pending` to picked-up is a handover between two processes
+   * that share no memory, and watching `consumed_at` fill in is how a reviewer sees the poll happen.
+   */
+  const [scenarioLog, setScenarioLog] = useState<readonly (ScenarioRow & { consumed_at: string | null })[]>([]);
 
   /**
    * Toggling from "all" selects that ad ALONE rather than deselecting it out of twelve.
@@ -218,6 +247,34 @@ export function App() {
    */
   const reload = useCallback(() => setGeneration((n) => n + 1), []);
 
+  /**
+   * **B49 / P16.** Sweep first, then re-anchor: the sweep is what says *what changed* — a bare
+   * re-fetch at the new horizon would show a different screen with no account of the difference,
+   * which is precisely the "built, correct and invisible" failure F2 describes. Changing `horizonH`
+   * re-runs §3.1 from step 1 through the effect's dependency, so this function does not fetch.
+   */
+  const changeHorizon = useCallback(
+    (hours: number) => {
+      if (hours === horizonH) return;
+      const controller = new AbortController();
+      setSweeping(true);
+      fetchSweep(horizonH, hours, controller.signal)
+        .then(setSweepResult)
+        .catch((err: unknown) => {
+          console.warn('[sweep] failed', err);
+          // The sweep is the EXPLANATION, not the mechanism. Losing it must not strand the surface
+          // at a horizon the caption cannot account for, so the horizon still moves and the
+          // account is simply absent.
+          setSweepResult(null);
+        })
+        .finally(() => {
+          setSweeping(false);
+          setHorizonH(hours);
+        });
+    },
+    [horizonH],
+  );
+
   useEffect(() => {
     const controller = new AbortController();
     let unsubscribe: (() => void) | null = null;
@@ -227,6 +284,7 @@ export function App() {
     // builds the parameter conditionally instead of joining a possibly-empty set.
     const url =
       `/api/snapshot?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` +
+      `&horizon_h=${horizonH}` +
       (selected === null ? '' : `&ads=${encodeURIComponent([...selected].join(','))}`);
 
     setLink('connecting');
@@ -268,12 +326,15 @@ export function App() {
         setTotalsFresh(true);
         // The timeline for the same window, in the same pass as step 1 — so a refresh shows the
         // restatements of the window it just read, not of the one before it.
-        void fetchRestatements(snapshot.query, selected, controller.signal)
+        void fetchRestatements(snapshot.query, selected, controller.signal, horizonH)
           .then((response) => setEntries(response.entries))
           .catch(() => setEntries([]));
         void fetchFatigue(controller.signal)
           .then(setFatigue)
           .catch(() => setFatigue(null));
+        void fetchScenarios(controller.signal)
+          .then(setScenarioLog)
+          .catch(() => setScenarioLog([]));
 
         // Steps 2-4. The cursor closes the snapshot-to-subscribe gap: anything ingested between
         // the read transaction above and this line is replayed by B10a.
@@ -305,7 +366,7 @@ export function App() {
     // snapshot, new cursor, new subscription. That is deliberately the SAME path as a refresh and
     // a `resnapshot` — D30's absolute rows are what make one path enough, and a second "adjust the
     // existing store" path is where a stale row would survive a window change.
-  }, [generation, resnapshot, windowMinutes, selected]);
+  }, [generation, resnapshot, windowMinutes, selected, horizonH]);
 
   /**
    * **B38a / D65 — walk the frame forward.** Without this the surface is live for at most the tail
@@ -368,13 +429,15 @@ export function App() {
     const id = setInterval(() => {
       const view = viewRef.current;
       if (view === null) return;
-      fetchTotals(view, selected, controller.signal)
+      fetchTotals(view, selected, controller.signal, horizonH)
         .then((response) => {
           setTotals(response);
           setTotalsFresh(true);
         })
-        .then(() => fetchRestatements(view, selected, controller.signal))
+        .then(() => fetchRestatements(view, selected, controller.signal, horizonH))
         .then((response) => setEntries(response.entries))
+        .then(() => fetchScenarios(controller.signal))
+        .then(setScenarioLog)
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           console.warn('[totals] refresh failed', err);
@@ -385,7 +448,7 @@ export function App() {
       clearInterval(id);
       controller.abort();
     };
-  }, [selected]);
+  }, [selected, horizonH]);
 
   if (state.phase === 'loading') return <p>Loading snapshot…</p>;
   if (state.phase === 'error') {
@@ -406,16 +469,38 @@ export function App() {
   // The selection's combined row, found by `ad_id === null` — a position lookup would silently
   // return an ad's totals the first time the server's ordering changed.
   const total = totals === null ? null : combined(totals.totals);
+  const chartedIds = new Set(charted.map((ad) => ad.ad_id));
+
+  /**
+   * **B49 — the one place a swept horizon has to be reconciled.**
+   *
+   * The snapshot's rows were stamped at `horizonH`; rows that arrived on the STREAM since were
+   * stamped at the account horizon, because one flush tick serves every subscriber and cannot know
+   * what any of them is sweeping (§11). At the default horizon the two agree and this is identity.
+   * Away from it, every row is re-derived with `bucketState` — the SAME function the server stamps
+   * with, imported from `settlement.ts`, which is why that file is kept free of `node:sqlite`.
+   * A second copy of the settlement rule in the browser is what this avoids.
+   */
+  const horizonMs = horizonH * 3_600_000;
+  const nowIso = new Date().toISOString();
+  const allRows = [...store.rows.values()];
+  const viewRows =
+    horizonMs === HORIZON_MS
+      ? allRows
+      : allRows.map((row) => ({ ...row, state: bucketState(row, nowIso, horizonMs) }));
   /**
    * **B39 — the gate decides the granularity, the ads and the suppression** (D20/D67), from the
    * same rows the chart draws. Computed here rather than inside `Chart.tsx` because the surface has
    * to say what it decided, and the sentence belongs next to the chart, not inside the canvas.
+   *
+   * Over `viewRows`, so the gate and the chart see one row set — B49's re-derivation changes only
+   * `state`, never a count, so it cannot move a rung; passing two different arrays would still be
+   * the kind of split that goes wrong silently later.
    */
-  const plan = planChart([...store.rows.values()], store.window, charted, metric, granularity);
+  const plan = planChart(viewRows, store.window, charted, metric, granularity);
   // B42's counts, over the rows that are actually charted. Selection, not arithmetic: `state` and
-  // `restated_at` were both derived by the server (B21), and this only tallies them.
-  const chartedIds = new Set(charted.map((ad) => ad.ad_id));
-  const inView = [...store.rows.values()].filter((row) => chartedIds.has(row.ad_id));
+  // `restated_at` were both derived (B21, and B49 at a swept horizon); this only tallies them.
+  const inView = viewRows.filter((row) => chartedIds.has(row.ad_id));
   const restatedInView = inView
     .filter((row) => row.restated_at !== null)
     .sort((a, b) => (a.minute_start < b.minute_start ? -1 : 1));
@@ -496,15 +581,25 @@ export function App() {
           </div>
         </div>
 
+        {/* **B49 / P16.** Above the chart, because it changes what every mark on it means. */}
+        <Horizon
+          horizonH={horizonH}
+          defaultH={HORIZON_MS / 3_600_000}
+          onChange={changeHorizon}
+          result={sweepResult}
+          pending={sweeping}
+        />
+
         {/* B37/B39. One series per selected ad, drawn from the SAME bucket rows the headline is
             summed from — so a reviewer comparing the two is comparing one source to itself, and
             B53's drill-down is what compares either of them to raw events. */}
         <Chart
-          rows={[...store.rows.values()]}
+          rows={viewRows}
           window={store.window}
           plan={plan}
           smooth={smooth}
           boundaries={boundaries}
+          horizonMs={horizonMs}
         />
 
         {/* **D20 requires the chart to say which rung it picked, and D67 requires the gated count
@@ -721,6 +816,21 @@ export function App() {
         {/* B47 — the authoritative log, and the config on the left is its fold. */}
         <h2 className="section">Decision log — what produced this config</h2>
         <DecisionLog decisions={decisions} generations={generations} selected={selected} />
+
+        {/* **B50 / P17.** Below the decision loop and under its own heading, because a scenario is
+            NOT a lever: it changes what the world does, never what the advertiser decided. Keeping
+            the two apart on the surface is the same rule the model keeps them apart by. */}
+        <h2 className="section">Scenario control — cause the interesting thing (the simulator, not the advertiser)</h2>
+        <Scenarios
+          ads={ads}
+          log={scenarioLog}
+          onFired={() => {
+            // Refresh the record immediately so the row appears as `pending`, before the poll that
+            // consumes it — the transition is the thing worth watching.
+            const controller = new AbortController();
+            void fetchScenarios(controller.signal).then(setScenarioLog).catch(() => undefined);
+          }}
+        />
 
         {/* B43 — §5.6's timeline. Below the chart, because an entry explains a mark on it. */}
         <h2 className="section">Restatements — settled buckets that moved</h2>

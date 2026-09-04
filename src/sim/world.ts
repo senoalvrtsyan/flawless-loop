@@ -68,6 +68,29 @@ export function takeFromHandover(seed: string, clickIds: ReadonlySet<string>): v
 }
 
 /**
+ * **B50 — the full pending set, on demand, for `late_cascade` alone.**
+ *
+ * `pendingHandover()` above is NOT this list. It is the boot-time handover after D62's Bernoulli
+ * has rejected every click that will never convert — measured on the seeded store: **77 clicks
+ * held, against 15,082 the server reports pending**, because ~25 of every 26 backfilled clicks
+ * never convert. That filtering is right for the natural population and **wrong for a scenario**,
+ * which exists precisely to cause a conversion the model would not have produced: asking
+ * `late_cascade` for 10 and getting 1 was the measured result, and it makes the flagship trigger
+ * look broken while every number stays correct.
+ *
+ * So a cascade re-asks. This is a ~2 MiB fetch and B35a took exactly that off the 1 Hz path — but
+ * it is not on the 1 Hz path: it runs once, when a human presses a button. The clicks are REAL
+ * clicks from the log either way, which is what makes the conversion attributable and the
+ * restatement genuine rather than an orphan wearing its clothes.
+ */
+export async function fetchPendingClicks(): Promise<PendingClick[]> {
+  const res = await fetch(`${WORLD_URL}?include=pending`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const world: SimWorld = (await res.json()) as SimWorld;
+  return world.pending_backfill_clicks ?? [];
+}
+
+/**
  * One poll. Returns true if the world was refreshed.
  *
  * Failures are logged once per outage rather than once per second: at 1 Hz a dead server would

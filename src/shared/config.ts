@@ -18,6 +18,18 @@
 export const HORIZON_MS = 72 * 60 * 60 * 1000;
 
 /**
+ * The horizons `B49`'s control offers, in hours. `72` is `HORIZON_MS` and is the first entry.
+ *
+ * **It lives HERE and not in `sweep.ts`, and the reason is a real defect this file's neighbour
+ * caught:** `Horizon.tsx` imports this list as a VALUE, and `sweep.ts` imports `readTx` from
+ * `db.ts`, which imports `node:sqlite`, `node:fs` and `node:path`. `tsc` was perfectly happy — a
+ * runtime import across that boundary is not a type error — and the failure appeared only at
+ * `vite build`, as `"resolve" is not exported by "__vite-browser-external"`. A constant both sides
+ * of the wire need belongs in `shared/`, which is what this file is for.
+ */
+export const HORIZON_CHOICES_H = [72, 24, 6, 2] as const;
+
+/**
  * `SIMULATOR.md` §11.1's hard cutoff on the purchase lag: **7 days**, beyond which no conversion is
  * emitted at all.
  *

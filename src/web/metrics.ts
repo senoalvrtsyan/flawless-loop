@@ -15,6 +15,7 @@
 
 import type { MetricTotals, TotalsResponse } from '../server/snapshot.ts';
 import type { RestatementEntry } from '../server/restatements.ts';
+import type { SweepResult } from '../server/sweep.ts';
 import type { FatigueReport } from '../server/fatigue-flag.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
@@ -102,9 +103,12 @@ export async function fetchTotals(
   window: { from: string; to: string },
   ads: ReadonlySet<string> | null,
   signal: AbortSignal,
+  /** **B49** — the horizon this read is answered at, in hours. Absent means D13's 72 h. */
+  horizonH?: number,
 ): Promise<TotalsResponse> {
   const url =
     `/api/snapshot?include=totals&from=${encodeURIComponent(window.from)}&to=${encodeURIComponent(window.to)}` +
+    (horizonH === undefined ? '' : `&horizon_h=${horizonH}`) +
     (ads === null ? '' : `&ads=${encodeURIComponent([...ads].join(','))}`);
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`totals: ${res.status} ${res.statusText}`);
@@ -173,9 +177,16 @@ export async function fetchRestatements(
   window: { from: string; to: string },
   ads: ReadonlySet<string> | null,
   signal: AbortSignal,
+  /**
+   * **B49** — the horizon the timeline is derived at. It MUST be the same one the chart is drawn
+   * at: a timeline answered at 72 h beside settlement marks drawn at 2 h is the disagreement P16
+   * exists to avoid, and it would look like a bug in the restatement path rather than in the wiring.
+   */
+  horizonH?: number,
 ): Promise<{ entries: RestatementEntry[] }> {
   const url =
     `/api/restatements?from=${encodeURIComponent(window.from)}&to=${encodeURIComponent(window.to)}` +
+    (horizonH === undefined ? '' : `&horizon_h=${horizonH}`) +
     (ads === null ? '' : `&ads=${encodeURIComponent([...ads].join(','))}`);
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`restatements: ${res.status} ${res.statusText}`);
@@ -190,4 +201,23 @@ export async function fetchFatigue(signal: AbortSignal): Promise<FatigueReport> 
   const res = await fetch('/api/fatigue', { signal });
   if (!res.ok) throw new Error(`fatigue: ${res.status} ${res.statusText}`);
   return (await res.json()) as FatigueReport;
+}
+
+
+/**
+ * **B49 / P16 — the settlement sweep.** Reports what changes between two horizons and what it
+ * scanned to find out. Read-only on the server; this is the call the control makes before it
+ * re-anchors the page at the new horizon.
+ */
+export async function fetchSweep(
+  fromHorizonH: number,
+  toHorizonH: number,
+  signal: AbortSignal,
+): Promise<SweepResult> {
+  const res = await fetch(
+    `/api/settlement/sweep?from_horizon_h=${fromHorizonH}&to_horizon_h=${toHorizonH}`,
+    { signal },
+  );
+  if (!res.ok) throw new Error(`sweep: ${res.status} ${res.statusText}`);
+  return (await res.json()) as SweepResult;
 }

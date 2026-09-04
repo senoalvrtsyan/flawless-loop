@@ -26,7 +26,6 @@ import type { BucketRow } from '../server/snapshot.ts';
 import { metricColumn, pointCounts } from './series.ts';
 import type { Boundary } from './generations.ts';
 import { clears, type ChartPlan } from './gate.ts';
-import { HORIZON_MS } from '../shared/config.ts';
 import { HALF_LIFE_MS, ewma, formatCents, formatCtr, formatRoas } from './metrics.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
@@ -100,6 +99,12 @@ export type ChartProps = {
    * they are tested there rather than computed here.
    */
   boundaries: readonly Boundary[];
+  /**
+   * **B49** — the horizon the dashed settlement rule is drawn at, in ms. A prop rather than the
+   * `HORIZON_MS` constant it used to read, because P16 sweeps it: a rule frozen at 72 h beside
+   * settlement marks derived at 2 h would be the same disagreement on one canvas.
+   */
+  horizonMs: number;
 };
 
 /** Axis and legend formatting per metric — the y values are raw numbers in the metric's own unit. */
@@ -122,7 +127,11 @@ function formatValue(metric: MetricKey, value: number | null): string {
  * Where the restated marks go: `[seriesIndex, pointIndex]` pairs, read through a ref so the draw
  * hook always sees the current set without the plot being rebuilt when it changes.
  */
-type Marks = { restated: readonly (readonly boolean[])[]; boundaries: readonly Boundary[] };
+type Marks = {
+  restated: readonly (readonly boolean[])[];
+  boundaries: readonly Boundary[];
+  horizonMs: number;
+};
 
 /** uPlot options. Rebuilt whenever the SERIES SET changes — uPlot cannot add a series in place. */
 function options(
@@ -157,7 +166,7 @@ function options(
 
           // 1. The settlement horizon. Drawn only when it falls inside the window — outside it the
           //    label would point off-canvas and say nothing true about what is on screen.
-          const horizonSeconds = (Date.now() - HORIZON_MS) / 1_000;
+          const horizonSeconds = (Date.now() - marks.current.horizonMs) / 1_000;
           const [min, max] = u.scales.x?.min !== undefined && u.scales.x?.max !== undefined
             ? [u.scales.x.min, u.scales.x.max]
             : [0, 0];
@@ -264,7 +273,7 @@ function options(
   };
 }
 
-export function Chart({ rows, window, plan, smooth, boundaries }: ChartProps) {
+export function Chart({ rows, window, plan, smooth, boundaries, horizonMs }: ChartProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const plot = useRef<uPlot | null>(null);
   const { data, labels, restated } = useMemo(() => {
@@ -293,8 +302,8 @@ export function Chart({ rows, window, plan, smooth, boundaries }: ChartProps) {
   // a dependency on it.
   const labelsRef = useRef<string[]>(labels);
   labelsRef.current = labels;
-  const marksRef = useRef<Marks>({ restated: [], boundaries: [] });
-  marksRef.current = { restated, boundaries };
+  const marksRef = useRef<Marks>({ restated: [], boundaries: [], horizonMs });
+  marksRef.current = { restated, boundaries, horizonMs };
   const metricRef = useRef<MetricKey>(plan.metric);
   metricRef.current = plan.metric;
 

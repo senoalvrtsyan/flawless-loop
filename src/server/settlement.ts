@@ -14,6 +14,10 @@
 //   settled   past the horizon; we assert it will not move
 //   restated  it was settled and it moved anyway — with when, and how many times
 
+// **This file stays free of `node:sqlite` and of `./db.ts`, deliberately** — B49's sweep lives in
+// `sweep.ts` for exactly that reason. `bucketState` is imported by the CLIENT (`App.tsx`) so that a
+// row arriving on the stream, which the server stamped at the account horizon, can be re-derived at
+// a swept horizon using THIS function rather than a second copy of the rule in the browser.
 import { HORIZON_MS } from '../shared/config.ts';
 import { MINUTE_MS } from '../shared/time.ts';
 

@@ -182,6 +182,37 @@ export function simWorld(
       )
       .all() as { scenario_id: string; name: string; args_json: string; ts: string }[];
 
+    // ── B50: WHO MARKS A TRIGGER CONSUMED ────────────────────────────────────────────────────
+    //
+    // ASSUMPTION (unratified): the SERVER marks `consumed_at` at SERVE time, inside this read
+    // transaction — at-most-once delivery. Needs sign-off before the README's limits section is
+    // written; it changes no schema and no other module, and reversing it is one endpoint.
+    //
+    // The DDL says only *"NULL until the simulator picks it up"*, and the simulator cannot write
+    // (D32), so the mark has to be made on its behalf. Two other shapes exist and both are
+    // defensible, which is why this is labelled rather than presented as settled:
+    //
+    //   (a) serve-and-mark — this. At-most-once: if the poll's RESPONSE is lost in flight, the
+    //       trigger is marked consumed and never applied. The reviewer presses a button and
+    //       nothing happens, silently, which is the worst failure for a control whose entire
+    //       purpose is causing the interesting thing on camera. The window is one dropped
+    //       localhost HTTP response between two processes we own.
+    //   (b) the emitter acks — a second endpoint, or `?consumed=<ids>` riding this poll. At-least-
+    //       once: a lost ack re-delivers, and `late_cascade` fires twice. Harmless because the
+    //       emitter is idempotent by `scenario_id` in-process (see `scenarios.ts`) — but a restart
+    //       loses that memory, so a re-delivery after a restart really is a second cascade.
+    //   (c) never mark — the emitter's own idempotency is the whole mechanism and this column
+    //       stays NULL forever, which makes the DDL's comment a lie and grows the poll payload by
+    //       one row per trigger for the life of the store.
+    //
+    // (a) is taken because the emitter is idempotent by `scenario_id` ANYWAY, so moving to (b)
+    // later is additive: the ack becomes the mark, and nothing that consumes triggers changes.
+    //
+    // **The mark happens OUTSIDE this transaction** — see `markConsumed` below. `readTx` is
+    // `BEGIN DEFERRED`, which would upgrade to a write lock on the first UPDATE, on the 1 Hz path
+    // that also carries ingest. A poll that can block ingest is a poll that can make the whole
+    // stream stutter once a second, and it would look like backpressure rather than like a lock.
+
     // D60: §14's first term, served so the emitter does not hold one. Read inside the same
     // transaction as everything else, so a poll cannot see the seed of one world and the ads of
     // another. `sim_run` is not a projection, so this read is unremarkable — but the SQL stays
@@ -208,4 +239,22 @@ export function simWorld(
       pending_scenarios: scenarios,
     };
   });
+}
+
+/**
+ * Mark served triggers consumed. **B50, and see the ASSUMPTION above `pending_scenarios`.**
+ *
+ * Called by the route AFTER the read transaction has committed and the response has been shaped —
+ * never inside it. One emitter polls this endpoint, so the gap between the read and this write is
+ * not a race anyone can lose; what it buys is that the 1 Hz poll never takes a write lock on the
+ * connection ingest is using.
+ */
+export function markScenariosConsumed(
+  db: DatabaseSync,
+  scenarioIds: readonly string[],
+  at: string = new Date().toISOString(),
+): void {
+  if (scenarioIds.length === 0) return;
+  const mark = db.prepare('UPDATE sim_scenarios SET consumed_at = ? WHERE scenario_id = ?');
+  for (const id of scenarioIds) mark.run(at, id);
 }

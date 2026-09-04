@@ -22,6 +22,7 @@ import { readTx } from './db.ts';
 // side rejects, and both halves now live in one file so the asymmetry is legible instead of
 // looking like two modules disagreeing.
 import { HAS_EXPLICIT_OFFSET, ceilToMinute, floorToMinute } from '../shared/time.ts';
+import { HORIZON_MS } from '../shared/config.ts';
 import { bucketState, type SettlementState } from './settlement.ts';
 import { ZERO_COUNTS, addCounts, derive, type MetricCounts, type MetricSet } from '../shared/metrics.ts';
 import { maturityFor, type Maturity } from './maturity.ts';
@@ -65,7 +66,21 @@ export type BucketRow = {
 };
 
 /** The resolved window. `ads: null` means the whole portfolio (DESIGN §2.4's second access path). */
-export type SnapshotQuery = { from: string; to: string; ads: string[] | null };
+/**
+ * **B49 adds `horizon_ms`** — the lateness horizon this read is answered at (`?horizon_h=`).
+ *
+ * It rides on the QUERY rather than on a server setting because settlement is derived at read time
+ * and must not be: a persisted horizon would leave `restated_at` stamped against one value and
+ * `/api/verify`'s rebuild replaying against another, and verify would report divergence on a
+ * correct store (see `settlement.ts`'s sweep header). Echoed back with every response, so a screen
+ * showing "settled" can always say which horizon it means.
+ */
+export type SnapshotQuery = {
+  from: string;
+  to: string;
+  ads: string[] | null;
+  horizon_ms: number;
+};
 
 /**
  * One row of the portfolio list — **B36**, and `DESIGN.md` §3.1's `ads[]`.
@@ -282,9 +297,24 @@ export function parseSnapshotQuery(params: URLSearchParams): ParsedQuery {
     return { ok: false, error: `include: '${rawInclude}' is not understood (the only value is 'totals')` };
   }
 
+  // **B49 / P16.** Absent means D13's 72 h, so every existing caller is unchanged. Bounded on both
+  // sides and refused rather than clamped: a horizon of 0 makes every bucket settled the instant it
+  // closes, and a silently clamped value would put a number on screen that the caller did not ask
+  // for and cannot see. The upper bound is the 7-day conversion-lag cutoff — past it the horizon
+  // outlives the events it is about.
+  const rawHorizon = params.get('horizon_h');
+  let horizon_ms = HORIZON_MS;
+  if (rawHorizon !== null) {
+    const hours = Number(rawHorizon);
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
+      return { ok: false, error: `horizon_h: '${rawHorizon}' must be a number of hours in (0, 168]` };
+    }
+    horizon_ms = hours * 3_600_000;
+  }
+
   return {
     ok: true,
-    query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads },
+    query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads, horizon_ms },
     totalsOnly: rawInclude === 'totals',
   };
 }
@@ -301,8 +331,8 @@ type StoredBucket = Omit<BucketRow, 'state'>;
  * so the snapshot, the SSE flush tick and the resume replay cannot label the same bucket three
  * ways. `at` is the read moment for all three.
  */
-function withState(rows: StoredBucket[], at: string): BucketRow[] {
-  return rows.map((row) => ({ ...row, state: bucketState(row, at) }));
+function withState(rows: StoredBucket[], at: string, horizonMs: number): BucketRow[] {
+  return rows.map((row) => ({ ...row, state: bucketState(row, at, horizonMs) }));
 }
 
 const BUCKET_COLUMNS = `
@@ -414,7 +444,14 @@ export function bucketReader(db: DatabaseSync): (key: BucketKey) => BucketRow | 
     const row = stmt.get(key.ad_id, key.minute_start) as unknown as StoredBucket | undefined;
     // The read clock is taken HERE rather than passed in, so the flush tick and the resume cannot
     // ship a row without a state — `stream.ts` needs no knowledge of settlement to carry it.
-    return row === undefined ? undefined : withState([row], new Date().toISOString())[0];
+    //
+    // **B49: stamped at the ACCOUNT horizon, `HORIZON_MS`, and it has to be.** The stream has no
+    // per-subscriber query — one flush tick serves N browser tabs (§11) — so it cannot stamp a row
+    // at a horizon one of them happens to be sweeping. The client re-derives `state` with
+    // `bucketState` when its horizon is not the default, which is why that function is kept free of
+    // `node:sqlite` and importable in the browser. A second copy of the rule there is what this
+    // avoids; per-subscriber stamping is what it refuses.
+    return row === undefined ? undefined : withState([row], new Date().toISOString(), HORIZON_MS)[0];
   };
 }
 
@@ -440,7 +477,9 @@ export function bucketsSinceReader(db: DatabaseSync): (cursor: number, limit: nu
     `SELECT ${BUCKET_COLUMNS} FROM rollup_minute WHERE max_ingest_seq > ? LIMIT ?`,
   );
   return (cursor, limit) =>
-    withState(stmt.all(cursor, limit) as unknown as StoredBucket[], new Date().toISOString());
+    // Account horizon, like the flush tick above and for the same reason — the resume replay is
+    // served from the same cursor for every subscriber.
+    withState(stmt.all(cursor, limit) as unknown as StoredBucket[], new Date().toISOString(), HORIZON_MS);
 }
 
 /** A summed row as SQLite returns it: the counts, plus `buckets`, plus `ad_id` on the grouped form. */
@@ -550,11 +589,11 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
       // from the one the fold replays, and `null` asks it for every ad.
       generations: generations.all() as unknown as GenerationRow[],
       decisions: listDecisions(db, null),
-      buckets: withState(buckets, new Date().toISOString()),
+      buckets: withState(buckets, new Date().toISOString(), query.horizon_ms),
       // Same transaction, same predicate, same instant as the buckets above — so "sum the rows
       // yourself and compare" is a check on the arithmetic and never a race.
       totals: readTotals(db, query),
-      maturity: maturityFor(db, query, new Date().toISOString()),
+      maturity: maturityFor(db, query, new Date().toISOString(), query.horizon_ms),
       as_of_ingest_seq: seq.seq,
     };
   });

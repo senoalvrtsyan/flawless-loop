@@ -8,7 +8,7 @@
 import { createServer } from 'node:http';
 import { openDb, DB_PATH } from './db.ts';
 import { createRouter, readBody, sendJson, type Route } from './http.ts';
-import { simWorld } from './sim-world.ts';
+import { markScenariosConsumed, simWorld } from './sim-world.ts';
 import { verify, type VerifyResult } from './verify.ts';
 import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
@@ -19,6 +19,9 @@ import { createStream } from './stream.ts';
 import { createTail } from './tail.ts';
 import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 import { listComponents, type ComponentRow } from './components.ts';
+import { HORIZON_CHOICES_H, sweep, type SweepResult } from './sweep.ts';
+import { listScenarios, postScenario, type ScenarioResult, type ScenarioRow } from './sim-scenario.ts';
+import { HORIZON_MS } from '../shared/config.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -211,6 +214,39 @@ const routes: readonly Route[] = [
   },
   {
     method: 'GET',
+    /**
+     * **B49 / P16 — the settlement sweep** (`DESIGN.md` §5.7, F2).
+     *
+     * `?to_horizon_h=2` re-evaluates settlement across the band whose state actually changes, and
+     * reports what flipped and which of those had already moved by the time the new horizon says
+     * they were settled. **Read-only**: it writes no `restated_at`, because that column is
+     * `apply()`'s (D7) and a sweep that wrote it would make `/api/verify` diverge on a correct
+     * store. `?from_horizon_h=` defaults to D13's 72 h.
+     */
+    path: '/api/settlement/sweep',
+    handler: (_req, res, url) => {
+      const parse = (name: string, fallback: number): number | null => {
+        const raw = url.searchParams.get(name);
+        if (raw === null) return fallback;
+        const hours = Number(raw);
+        return Number.isFinite(hours) && hours > 0 && hours <= 168 ? hours * 3_600_000 : null;
+      };
+      const from = parse('from_horizon_h', HORIZON_MS);
+      const to = parse('to_horizon_h', HORIZON_MS);
+      if (from === null || to === null) {
+        sendJson(res, 400, {
+          error: 'bad_request',
+          message: `from_horizon_h / to_horizon_h must be a number of hours in (0, 168]; the control offers ${HORIZON_CHOICES_H.join(', ')}`,
+        });
+        return;
+      }
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const body: SweepResult = sweep(db, from, to);
+      sendJson(res, 200, body);
+    },
+  },
+  {
+    method: 'GET',
     path: '/api/stream',
     handler: (req, res, url) => {
       // Never returns: the response becomes a long-lived SSE stream (DESIGN §3.1 steps 2-4).
@@ -232,6 +268,42 @@ const routes: readonly Route[] = [
     },
   },
   {
+    method: 'POST',
+    /**
+     * **B50 / P17 — the scenario trigger** (`SIMULATOR.md` §17). *"I need to be able to cause the
+     * interesting thing to happen live rather than wait for it."*
+     *
+     * Persists a row and returns; **no second control channel** — the simulator picks it up on the
+     * `GET /api/sim/world` poll it is already making once a second. The row is what makes §14's
+     * determinism claim true: `(seed + decision log + sim_scenarios) -> world` (D40).
+     */
+    path: '/api/sim/scenario',
+    handler: async (req, res) => {
+      const body = await readBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { error: 'malformed_json' });
+        return;
+      }
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const result: ScenarioResult = postScenario(db, parsed);
+      sendJson(res, result.status, result.body);
+    },
+  },
+  {
+    method: 'GET',
+    /** The replayable record itself — every trigger fired, and whether the simulator has it yet. */
+    path: '/api/sim/scenario',
+    handler: (_req, res) => {
+      const body: { scenarios: (ScenarioRow & { consumed_at: string | null })[] } = {
+        scenarios: listScenarios(db),
+      };
+      sendJson(res, 200, body);
+    },
+  },
+  {
     method: 'GET',
     path: '/api/sim/world',
     handler: (req, res) => {
@@ -249,7 +321,11 @@ const routes: readonly Route[] = [
       // Unrecognised `include` values are ignored rather than rejected: this endpoint has one
       // caller and a 400 here stalls the emitter, which is the worse failure.
       const include = new URL(req.url ?? '/', 'http://localhost').searchParams.get('include');
-      sendJson(res, 200, simWorld(db, Date.now(), include === 'pending'));
+      const world = simWorld(db, Date.now(), include === 'pending');
+      sendJson(res, 200, world);
+      // B50: after the read transaction and after the response is on the wire. Serve-and-mark, and
+      // the ASSUMPTION that this is the right delivery semantic is written out in `sim-world.ts`.
+      markScenariosConsumed(db, world.pending_scenarios.map((s) => s.scenario_id));
     },
   },
   {

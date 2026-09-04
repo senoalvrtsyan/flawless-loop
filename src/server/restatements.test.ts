@@ -26,6 +26,7 @@ import { openDb } from './db.ts';
 import { migrate } from './migrate.ts';
 import { ingest } from './ingest.ts';
 import { applyDecision } from './apply.ts';
+import { HORIZON_MS } from '../shared/config.ts';
 import { restatements } from './restatements.ts';
 import { ACTOR } from '../shared/decisions.ts';
 
@@ -40,6 +41,9 @@ const WINDOW = {
   from: new Date(Date.UTC(2026, 8, 1, 0, 0)).toISOString(),
   to: new Date(Date.UTC(2026, 8, 2, 0, 0)).toISOString(),
   ads: null,
+  // B49: the query now carries the horizon it was resolved at, and `restatements()` defaults to
+  // it. These fixtures assert at D13's 72 h; the sweep test below passes its own explicitly.
+  horizon_ms: HORIZON_MS,
 };
 
 function world(t: { after: (fn: () => void) => void }): DatabaseSync {
@@ -158,6 +162,7 @@ test('a window that excludes the bucket excludes the entry — the window is the
     from: new Date(Date.UTC(2026, 8, 5, 0, 0)).toISOString(),
     to: new Date(Date.UTC(2026, 8, 6, 0, 0)).toISOString(),
     ads: null,
+    horizon_ms: HORIZON_MS,
   };
   assert.equal(restatements(db, sep5).length, 0);
   assert.equal(restatements(db, WINDOW).length, 1);

@@ -361,8 +361,8 @@ The deep surface, per D1. Read-only — no levers yet.
 | [x] | **B46** | Action console: `pause` / `resume` / `set_budget` / `swap_component`, rationale required, compare-and-swap rejection surfaced honestly rather than retried | `src/web/Console.tsx`, `src/web/decisions.ts` *(the pure display half, split out for B47)*, `src/server/components.ts`, `src/server/components.test.ts`, `src/server/index.ts`, `src/server/snapshot.ts`, `src/web/App.tsx`, `src/web/app.css` | **Measured on a copy of the seeded store, through the real endpoint.** `pause a_12` → 200, `decision_seq` 24 → 25, `g_a_12_003` opened, status `paused`. **The same `decision_id` again → `replayed: true`, still seq 25** — U5's key is held across a network failure and regenerated after any server answer. **Three refusals wrote nothing**: `resume` on a live ad → 409 `illegal_transition` *"an ad in 'live' does not admit 'resume'"*, a stale `from_cents` → 409 `stale_precondition` *"expected from_cents 1, current is 9000"*, an all-whitespace rationale → 400 — and `decision_seq` was **still 24** after all three. `swap_component` `v_04 → v_05` (D3's two-version lineage) → seq 26, `set_budget` `$350 → $700` → seq 27. **The console does not mirror `fold.ts`'s transition table and does not retry a rejection**, both stated in the file | D§7, §11; S§9 | **HR3 HR6** |
 | [x] | **B47** | Decision log surface: per-ad and global, with actor, rationale, `decision_seq`, and the generation each opened | `src/web/DecisionLog.tsx`, `src/web/decisions.ts`, `src/server/snapshot.ts`, `src/web/App.tsx`, `src/web/app.css` | `DESIGN.md` §3.1's envelope is complete: `decisions[]` and `generations[]` now ride the snapshot **in the same read transaction as `ads[]` and the buckets**, which is what stops a chart annotated with a generation from describing a different instant than the log explaining it. Measured: 27 decisions, 27 generations, **27 of 27 joined through `opened_by_decision` with zero orphans**. Fold order is served and REVERSED for display, in the display and nowhere near the fold. A decision that opened no generation renders `—` with the reason (§7 opens one *only if config changed*), not a blank | D§7 | **HR6** |
 | [x] | **B48** | Generation boundaries drawn on the chart from `config_generations` | `src/web/generations.ts`, `src/web/generations.test.ts`, `src/web/Chart.tsx`, `src/web/App.tsx`, `src/web/app.css` | Three boundaries drawn in the 1 h window after the three levers above, each explained by its own decision: `a_12` gen 3 *status live → paused*, `a_12` gen 4 *video v_04 → v_05*, `a_03` gen 3 *budget $350 → $700/day*. **The change is DERIVED by diffing adjacent generations and stored nowhere.** Generation 1 is not a boundary (it is the ad coming into existence); the window is half-open on `valid_from` so a boundary is drawn in exactly one view; the previous generation is found by `seq_in_ad - 1`, **not by array position**, or `a_02`'s first change is labelled with `a_01`'s config. Five tests. Third vertical rule on the canvas, told apart from the other two by dash pattern and a ▼ glyph before colour (D45) | D§4.2, §8 | **HR6** |
-| [ ] | **B49** | **P16** — horizon control: shortening the horizon re-evaluates settlement across the affected range and restates what moves | `src/server/settlement.ts`, `src/web/Horizon.tsx` | Drop the horizon from 72 h to 2 h → buckets flip from `live` to `settled`, and any that had moved since are marked restated. Uses `ix_rollup_time`, not a full scan | D§5.7 (F2) | **HR4** |
-| [ ] | **B50** | **P17** — scenario control: the seven triggers via `POST /api/sim/scenario`, persisted to `sim_scenarios`, delivered on the existing world poll | `src/server/sim-scenario.ts`, `src/sim/scenarios.ts`, `src/web/Scenarios.tsx` | Fire `late_cascade` → settled buckets restate on screen within seconds. Fire `orphan_burst` → a two-bucket restatement. Fire `stall` → the liveness display says so. The trigger is a row, so the moment replays | S§17 | **HR4** |
+| [x] | **B49** | **P16** — horizon control: shortening the horizon re-evaluates settlement across the affected range and restates what moves | `src/server/sweep.ts`, `src/server/sweep.test.ts`, `src/server/settlement.ts`, `src/server/snapshot.ts`, `src/server/maturity.ts`, `src/server/restatements.ts`, `src/shared/config.ts`, `src/web/Horizon.tsx`, `src/web/App.tsx`, `src/web/Chart.tsx`, `src/web/metrics.ts`, `src/web/app.css` | **Measured on a copy of the seeded week.** 72 h → 2 h: **40,881 buckets flip `live` → `settled` and 172 of them are restated under the new horizon**, in **83 ms**, reading **40,881 of 71,584 buckets** — the band `ix_rollup_time` covers, not the table. 72 h → 24 h flips 26,515 with 24 restated (58 ms); 72 h → 6 h flips 39,251 with 125 (82 ms); 72 h → 72 h reads **zero rows**. **The horizon is a READ parameter and that is forced, not chosen**: `restated_at` is stamped at ingest against the horizon in force then, so a persisted horizon would make `/api/verify` diverge on a correct store. **The sweep writes nothing.** The SSE flush tick still stamps at the account horizon — one read serves N subscribers — so the client re-derives state with the SAME `bucketState`, which is why `settlement.ts` is kept free of `node:sqlite` | D§5.7 (F2) | **HR4** |
+| [x] | **B50** | **P17** — scenario control: the seven triggers via `POST /api/sim/scenario`, persisted to `sim_scenarios`, delivered on the existing world poll | `src/server/sim-scenario.ts`, `src/server/sim-scenario.test.ts`, `src/server/sim-world.ts`, `src/server/index.ts`, `src/sim/scenarios.ts`, `src/sim/index.ts`, `src/sim/world.ts`, `src/web/Scenarios.tsx`, `src/web/App.tsx`, `src/web/app.css` | **All seven accepted and persisted; three fired end to end against a live emitter.** `late_cascade{a_01, n:12, min_age_h:96}` → **12 → 17 restated buckets**, timeline entries **7 days back** with real before-and-after (`conv 0 → 6`, ROAS `0.00 → 119.25`, 168.0 h late, all `explained`). `orphan_burst{n:6}` → orphans **8 → 14**, all parked at their own minute, then **all six promoted** back to 8 with `credited_minute` moving **19:59 → 19:57** — the two-bucket restatement, on demand. `stall{20}` → **ingest_seq unmoved for 12 s**, then emission resumed. Arguments are **refused, never clamped** (`multiplier: 1000` → 400). **`/api/verify` 200 with all four projections hash-matched, and `npm run agree` OK, after all of it.** Three seams and no fourth: a `LiveAd[]` transform (φ, realised spend), a λ multiplier (`traffic_burst` scales the Poisson MEAN, or the replay mints duplicate ids), and direct injection | S§17 | **HR4** |
 
 > ### ▶ Demo checkpoint 5 — *"the loop closes"*
 >
@@ -519,6 +519,51 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+**The newest (G14 — B49, B50):**
+
+- **`tsc` clean is not "the client builds."** `Horizon.tsx` imported `HORIZON_CHOICES_H` as a VALUE
+  from `sweep.ts`, which imports `db.ts`, which imports `node:sqlite`, `node:fs` and `node:path`.
+  TypeScript has nothing to say about a runtime import crossing that boundary; it failed only at
+  `vite build`, as `"resolve" is not exported by "__vite-browser-external"`. **Run the bundle, not
+  only the typechecker**, whenever a client file imports from `src/server/`. The constant now lives
+  in `shared/`, and `settlement.ts` is deliberately kept free of store imports so `bucketState` can
+  run in the browser.
+- **A persisted lateness horizon would break `/api/verify` on a correct store.** `restated_at` is
+  stamped at ingest against the horizon in force *then*; the rebuild replays against the horizon in
+  force *now*. Change it in between and verify reports divergence with nothing wrong. This is why
+  the horizon is a read parameter — it is forced, not preferred, and the tempting "make it a
+  setting" refactor reintroduces it silently.
+- **The sweep must not write `restated_at`.** "Mark what moved" reads like an instruction to stamp
+  the column. It is `apply()`'s (D7), and a swept value would be both wrong at the account horizon
+  and undoable only by a rebuild.
+- **The SSE flush tick cannot stamp settlement per subscriber** — one read serves N tabs (§11) — so
+  streamed rows carry the ACCOUNT horizon while snapshot rows carry the swept one. The client
+  re-derives with the same `bucketState`; a second copy of the rule in the browser is the silent
+  version of this, and so is leaving the two mixed in one store.
+- **A sweep sample ordered newest-first shows none of the interesting rows.** Measured: 72 h → 2 h
+  flips 40,889 buckets of which 172 are restated, and a single capped list contained **zero** of
+  them — the caption said "172 had already moved" above six examples that had not. Restated rows
+  fill the sample first.
+- **`late_cascade` must NOT draw from `pendingHandover()`.** That list is the boot-time handover
+  after D62's Bernoulli has discarded every click that will never convert: **77 held against 15,082
+  the server reports pending**. Asking for 10 and getting 1 was the measured result, and it makes
+  the flagship trigger look broken while every number stays correct. A cascade re-asks for the full
+  set — a ~2 MiB fetch that B35a rightly took off the 1 Hz path, and this is not on it.
+- **A cascade must cite a REAL click.** An invented `attributed_click_id` produces an orphan that
+  parks at its own minute and restates nothing — the flagship path replaced by the orphan path
+  wearing its clothes, with a plausible-looking screen.
+- **`traffic_burst` scales the Poisson MEAN, never the drawn event list.** Duplicating the list
+  mints the same `event_id` twice, so it lands as `duplicate_identical` and demonstrates the dedupe
+  path instead of the ingest backpressure §17 asks a reviewer to watch.
+- **`duplicate_storm` must replay what was POSTed, not what was generated.** A replay of events the
+  store never saw lands as a first delivery and the dedupe counters do not move.
+- **Marking a scenario consumed inside `readTx` takes a write lock on the 1 Hz path.** `readTx` is
+  `BEGIN DEFERRED` and upgrades on the first UPDATE — on the connection ingest is using. The stall
+  would read as backpressure rather than as a lock. The mark happens after the transaction.
+- **A `stall` must not buffer.** Queuing the suppressed seconds delivers a burst on release, which
+  demonstrates backpressure rather than a gap. `nextTick` is advanced and the seconds are simply
+  not emitted — §6's "degrades: detected, not repaired".
 
 **The newest (G13 — B46, B47, B48):**
 
