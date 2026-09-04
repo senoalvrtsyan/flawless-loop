@@ -80,9 +80,10 @@ projection, which means the B05 boundary was bypassed`);
  */
 const UPSERT_ROLLUP = `
   INSERT INTO rollup_minute (ad_id, minute_start, impressions, clicks, click_cost_cents,
-                             spend_cents, conversions, value_cents, first_written_at,
-                             max_ingest_seq)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             spend_cents, conversions, value_cents,
+                             provisional_conversions, provisional_value_cents,
+                             first_written_at, max_ingest_seq)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT (ad_id, minute_start) DO UPDATE SET
     impressions      = impressions      + excluded.impressions,
     clicks           = clicks           + excluded.clicks,
@@ -90,6 +91,8 @@ const UPSERT_ROLLUP = `
     spend_cents      = spend_cents      + excluded.spend_cents,
     conversions      = conversions      + excluded.conversions,
     value_cents      = value_cents      + excluded.value_cents,
+    provisional_conversions = provisional_conversions + excluded.provisional_conversions,
+    provisional_value_cents = provisional_value_cents + excluded.provisional_value_cents,
     max_ingest_seq   = MAX(max_ingest_seq, excluded.max_ingest_seq)
 `;
 
@@ -133,11 +136,11 @@ function prepared(db: DatabaseSync, sql: string): StatementSync {
 /**
  * Apply one accepted signal to the projections, returning the buckets it moved.
  *
- * A LIST, not one key (B18). Until the conversion existed, every signal moved exactly one bucket —
- * its own. D27-B is where that stops being true in both directions: an orphan moves none until its
- * click arrives, and B20's promotion moves two. The flush treats a key it is given as a bucket
- * that certainly exists (`stream.ts` logs "apply/flush disagree" otherwise), so "no bucket" has to
- * be expressible rather than approximated with the key of a row nothing wrote.
+ * A LIST, not one key. Every signal moves exactly one bucket TODAY — but no longer necessarily its
+ * own, and B20's orphan promotion moves two: the provisional bucket it leaves and the click's
+ * bucket it joins. The flush treats every key it is handed as a row that certainly exists
+ * (`stream.ts` logs "apply/flush disagree" otherwise), so the count of moved buckets has to be
+ * stated by this function rather than assumed by its caller.
  *
  * MUST be called inside the caller's transaction —
  * DESIGN §11 makes ingest one synchronous transaction, so a reader can never see a signal whose
@@ -158,6 +161,8 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
   let spend_cents = 0;
   let conversions = 0;
   let value_cents = 0;
+  let provisional_conversions = 0;
+  let provisional_value_cents = 0;
 
   switch (signal.kind) {
     case 'impression':
@@ -193,26 +198,33 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
         attribution.credited_generation_id, attribution.ad_id_conflict, attribution.resolved_at,
       );
 
-      if (attribution.state !== 'resolved') {
-        // B19 credits the orphan into the `provisional_*` columns at its own minute. Until it
-        // does, an orphan moves NO bucket — and returning a key for a bucket this call did not
-        // write would trip the flush's "apply/flush disagree" guard (stream.ts), which exists to
-        // catch precisely that disagreement.
-        return [];
+      if (attribution.state === 'resolved') {
+        conversions = 1;
+        value_cents = signal.value_cents;
+      } else {
+        // D16/§5.2: with no click there is no click-minute, so the orphan is credited at its OWN
+        // minute and into the PROVISIONAL columns — held apart from the settled counts so that an
+        // orphan can never be read as an attributed conversion, and so that B20's promotion has a
+        // decrement to make rather than a discrepancy to explain.
+        provisional_conversions = 1;
+        provisional_value_cents = signal.value_cents;
       }
 
-      conversions = 1;
-      value_cents = signal.value_cents;
-      // D27-B and I8/G30 together: the CLICK's minute, on the CLICK's ad. A conversion can
-      // therefore move a bucket belonging to an ad its own body never names — that is the
-      // mechanism that makes CPA(T) and ROAS(T) cohort ratios, not a bug to reconcile.
+      // Taken from the attribution row and not recomputed: this is the placement the store now
+      // RECORDS, and it is the value B20 reads back to find the bucket to decrement. Two
+      // expressions of one placement is how they come to disagree.
+      //
+      // D27-B and I8/G30 together, for a resolved conversion: the CLICK's minute, on the CLICK's
+      // ad. A conversion can therefore move a bucket belonging to an ad its own body never names —
+      // the mechanism that makes CPA(T) and ROAS(T) cohort ratios, not a bug to reconcile.
       bucket = { ad_id: attribution.credited_ad_id, minute_start: attribution.credited_minute };
       break;
     }
   }
 
   prepared(db, UPSERT_ROLLUP).run(bucket.ad_id, bucket.minute_start, impressions, clicks,
-    click_cost_cents, spend_cents, conversions, value_cents, applied_at, signal.ingest_seq);
+    click_cost_cents, spend_cents, conversions, value_cents, provisional_conversions,
+    provisional_value_cents, applied_at, signal.ingest_seq);
   return [bucket];
 }
 

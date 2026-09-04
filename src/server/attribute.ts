@@ -7,14 +7,24 @@
 // reached for an INSERT would break the property B24's sweep exists to prove, and it would not
 // show up as a test failure.
 //
-// It has no caller yet: conversions do not enter `ingest()` until B18, because `ingest()` calls
-// `apply()` for every accepted signal and a conversion arriving before `apply()` can place it
-// would need a silent no-op branch — the exact divergence `default: throw` prevents.
+// Its caller is `apply()`, from B18 on — and it is called there, not at the ingest boundary, so
+// that B22/B23's rebuild re-derives placement by pushing raw `signals` back through the same
+// function instead of through a second implementation of the same rule.
 
 import type { DatabaseSync } from 'node:sqlite';
 import { floorMinute } from './apply.ts';
 
-/** `conversion_attribution.state`. `orphan_expired` is B19's — the horizon sweep sets it. */
+/**
+ * `conversion_attribution.state`.
+ *
+ * **The store only ever holds two of these (D54).** `orphan_expired` is DERIVED at read by
+ * `attributionStateAt()` below and is never written: a stored expiry would put a clock inside a
+ * projection, and B22's rebuild would then reproduce a different value for every row whose
+ * expiry was decided at a different moment — `/api/verify` reporting divergence on a correct
+ * store, which is the trap family `first_written_at` and D38's `restated_at` are already in
+ * (`BUILD_PLAN.md` §14). The CHECK in `002_projections.sql` still admits the value; nothing
+ * writes it. `DESIGN.md` §5.2 carries the amendment.
+ */
 export type AttributionState = 'resolved' | 'orphan_provisional' | 'orphan_expired';
 
 /** What the resolver is told about the conversion. Exactly the columns `signals` holds. */
@@ -80,7 +90,7 @@ export function resolveAttribution(
 
   if (click === undefined) {
     // D16: revenue is NEVER silently lost. With no click there is no click-minute, so it is held
-    // provisionally at its OWN minute and — at B18 — in the `provisional_*` columns, apart from
+    // provisionally at its OWN minute and — since B19 — in the `provisional_*` columns, apart from
     // the settled counts, so an orphan can never be mistaken for an attributed conversion.
     return {
       event_id: conversion.event_id,
@@ -88,7 +98,7 @@ export function resolveAttribution(
       click_event_id: null,
       // The column is NOT NULL and there is no click to be authoritative, so this is the
       // conversion's own claim — true of what we were told, not of what we have verified. It is
-      // overwritten by the click's `ad_id` the moment B19 promotes the orphan.
+      // overwritten by the click's `ad_id` the moment B20 promotes the orphan.
       credited_ad_id: conversion.ad_id,
       credited_minute: floorMinute(conversion.ts_effective),
       credited_generation_id: null,
@@ -113,4 +123,84 @@ export function resolveAttribution(
     ad_id_conflict: conversion.ad_id === click.ad_id ? 0 : 1,
     resolved_at,
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// B19 — expiry, derived. D54, D13, DESIGN.md §5.2, §5.4.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The lateness horizon — 72 h (**D13**), displayed and adjustable.
+ *
+ * **B21 moves this into `src/shared/config.ts`** with the `America/New_York` account timezone, so
+ * that the horizon and the day boundary sit in one place. It lives here for two chunks only
+ * because B19 needs the number before B21 exists, and a literal `72 * 3600e3` inlined at a call
+ * site is how two of them come to disagree.
+ */
+export const HORIZON_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * What we say about a conversion AT A GIVEN INSTANT — §5.2's third state, computed.
+ *
+ * The same arithmetic as §5.4's `settled_at(B, at)`: a bucket closes at `minute_start + 60 s`, and
+ * the horizon runs from there. An unresolved conversion whose own minute closed more than 72 h
+ * before `at` is one we no longer expect a click for — *"6 conversions, $890, no matching click"*.
+ *
+ * It is still counted and still stored (D13/D16): expiry changes what we SAY about the row, never
+ * whether we keep it, and never which bucket it sits in. A click arriving on day eight still
+ * promotes it, because age is not a state it could be stuck in.
+ */
+export function attributionStateAt(
+  row: { state: AttributionState; credited_minute: string },
+  at: string,
+  horizon_ms: number = HORIZON_MS,
+): AttributionState {
+  if (row.state === 'resolved') return 'resolved';
+  const closed = Date.parse(row.credited_minute) + 60_000;
+  return Date.parse(at) - closed > horizon_ms ? 'orphan_expired' : 'orphan_provisional';
+}
+
+/** The data-health figure §5.2 asks for: unresolved conversions, split by derived state. */
+export type OrphanTally = {
+  orphan_provisional: { conversions: number; value_cents: number };
+  orphan_expired: { conversions: number; value_cents: number };
+};
+
+/**
+ * Tally the unresolved conversions as of `at`.
+ *
+ * `state <> 'resolved'` is spelled LITERALLY because `ix_attr_unresolved` is a partial index with
+ * exactly that predicate — `state = 'orphan_provisional'` and `state IN (…)` both full-scan
+ * `conversion_attribution`, correctly and slowly (the B03 finding). Splitting the two states in
+ * JS rather than in SQL is therefore not a shortcut: it is what keeps the index in play now that
+ * one of the two states does not exist in the column.
+ *
+ * The value joins from `signals` because `conversion_attribution` holds placement, not money —
+ * the amount is a fact about the event and lives with the event.
+ */
+export function orphanTally(
+  db: DatabaseSync,
+  at: string,
+  horizon_ms: number = HORIZON_MS,
+): OrphanTally {
+  const rows = db.prepare(`
+    SELECT a.state AS state, a.credited_minute AS credited_minute, s.value_cents AS value_cents
+      FROM conversion_attribution a
+      JOIN signals s ON s.event_id = a.event_id
+     WHERE a.state <> 'resolved'
+  `).all() as { state: AttributionState; credited_minute: string; value_cents: number }[];
+
+  const tally: OrphanTally = {
+    orphan_provisional: { conversions: 0, value_cents: 0 },
+    orphan_expired: { conversions: 0, value_cents: 0 },
+  };
+  for (const row of rows) {
+    const state = attributionStateAt(row, at, horizon_ms);
+    // `resolved` is unreachable — the WHERE excluded it — but narrowing the union here is what
+    // keeps the two buckets above exhaustive if a fourth state is ever added.
+    if (state === 'resolved') continue;
+    tally[state].conversions += 1;
+    tally[state].value_cents += row.value_cents;
+  }
+  return tally;
 }

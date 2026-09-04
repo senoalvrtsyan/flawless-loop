@@ -582,9 +582,17 @@ For a conversion, resolve `attributed_click_id` against `signals.click_id`
   for an attributed conversion.
 - **A click arrives later →** `ix_signals_attr` finds every conversion waiting on it, and each is
   promoted (§5.4).
-- **Still unresolved past the horizon →** `state='orphan_expired'`. Retained, counted, and
+- **Still unresolved past the horizon →** `orphan_expired`. Retained, counted, and
   displayed as a data-health figure — *"6 conversions, $890, no matching click"*. An unresolvable
   conversion is a true fact about the stream and the cockpit should say so, not delete it.
+  **AMENDED BY D54 (B19): this state is DERIVED at read, never stored.** The column holds
+  `resolved` and `orphan_provisional` and nothing else; `attributionStateAt(row, at)` computes the
+  third from the same arithmetic §5.4 uses for settlement — `at − (credited_minute + 60 s) >
+  horizon`. Storing it would put a clock inside a projection, and B22's rebuild would then produce
+  a different value for every row whose expiry was decided at a different moment, so `/api/verify`
+  would report divergence on a correct store. Expiry changes what we *say* about the row, never
+  whether we keep it, which bucket it sits in, or whether a click arriving on day eight promotes
+  it. The CHECK in §2.4 still admits the value; nothing writes it.
 
 ### 5.3 Which bucket it lands in — D27-B
 
