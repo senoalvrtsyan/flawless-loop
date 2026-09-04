@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1–G5 closed) · 25 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · STAGE 2 CLOSED · stage 3 next · 26 / 64 chunks**
 
 ---
 
@@ -74,8 +74,22 @@ the ad, the minute, the column and both values. **`replay()`** recomputes a buck
 `signals` alone, over a log prefix, and agrees with the maintained rollup. `npm test` runs
 **76 tests**.
 
-**The rest of stage 2 is B24 alone** — the P14 agreement sweep, single-gated, the gate that guards
-everything after it.
+**STAGE 2 IS CLOSED. G6 = B24 closed it, and with it the traceability claim is now checkable two
+independent ways.** `npm run agree` recomputes every bucket from raw `signals` **without** `apply()`
+and diffs the maintained rollups — measured at **0.88–1.71 s** over 357,540 events and 56,160
+buckets, 0 mismatches, and it names its own limits on every run. `/api/verify` (3.6 s on the same
+store) replays through the real `apply()` and diffs all four projections. **Neither subsumes the
+other**: the sweep catches the code being wrong, verify catches the store having drifted from the
+code. Two of the sweep's blind spots are recorded in §14 rather than papered over.
+
+**The whole server-side model is now real.** Four signal kinds, six levers, config as a fold, click-
+time attribution, orphans, restatement, settlement, and both checks — all verified by `curl` and
+`sqlite3`, with no UI beyond stage 1's single climbing number.
+
+**Stage 3 (B25–B35) is next: the simulator.** `SIMULATOR.md` is the spec and is complete to the
+parameter, so each chunk is a comparison against a table already in that document rather than a
+judgement. Every chunk adds `--dry-run` output rather than a screen, and emission stays live
+throughout — the stage-1 number keeps moving.
 
 **No decision blocks anything from B18 to B35.** D44/D45 are *deferred* (**F4**) and come back at
 the stage 3 → 4 seam; see "What is open", which also carries the two unratified B11 assumptions.
@@ -96,7 +110,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (20). |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (22). |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
 | **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
@@ -125,6 +139,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/shared/config.ts`** | B21. `HORIZON_MS` (72 h, D13) and `ACCOUNT_TZ` (`America/New_York`, D22/I2 — the budget day boundary and the diurnal curve, and nothing else; buckets stay UTC). |
 | **`src/server/settlement.ts`** | B21. `settledAt(minute_start, at)` — §5.4's test, clocked at the arriving event's `received_at` (D38) when `apply()` asks and at the read moment when the read side does — plus `bucketState()` → `live` / `settled` / `restated`. Derived, read-side; nothing here writes. The horizon is a **parameter**, which is what makes P16/B49 a sweep rather than a hunt. |
 | **`src/server/verify.ts`** | B22. `GET /api/verify`. Rebuilds all four projections from the logs through the **real** `apply()` / `applyDecision()` into `TEMP` tables that **shadow the projection names** (**D55**), hash-compares each, and walks rows only where a hash disagrees (§7's fast path). 200 clean / 409 divergent, so a script need not read the body. Temp DDL derived from `sqlite_master`, `REFERENCES` stripped (a temp FK resolves inside `temp`), `CHECK`s kept. `decisions` **is** shadowed (B13 writes the log row in the same transaction); `signals` is **not**. **The only file allowed to schema-qualify a projection** — §14, with a build-failing tripwire. |
+| **`scripts/agree.ts`** | B24. **`npm run agree` — P14.** One ordered whole-log pass: index every click, walk `signals` in `ingest_seq` order accumulating **all** buckets at once, diff `rollup_minute`. Two linear scans, `O(2N)` — **never `replay()` per bucket**, which is `O(buckets × N)` and ~13 h at this size. Exits 1 on any mismatch, naming ad, minute, column and both values. **It states its own limits on every run** (§14): the four arrival-order columns are not diffed, and `ads` / `config_generations` / `conversion_attribution` are not read at all. |
 | **`src/server/replay.ts`** | B23. `replay(descriptor)` — pure over a log prefix, **raw `signals` only, never `rollup_minute`** (§10.2: the display path and the check path must differ, or the walk-back compares the code to itself). The prefix bounds attribution as well as counting. Returns the counts **and** `contributing_event_ids`, which is the evidence half. No HTTP — the drill-down is B52/B53. |
 | **`src/server/*.test.ts`** | B12/B13/B17–B23. `npm test` = `node --test`, **76 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), `conversion.test.ts` (11 — B18/B19, ingest→apply end to end), `restate.test.ts` (8 — B20, promotion and the D38 clock), `settlement.test.ts` (5 — B21), **`verify.test.ts` (7 — B22, including D55's build-failing tripwire)**, **`replay.test.ts` (6 — B23, including its own no-projection guard)**. D43's criterion governs what goes here, not a list. |
 | **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
@@ -139,7 +154,7 @@ npm run seed          # B15: the 12-ad world, as 24 backdated decisions. ONCE, o
 npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
 npm run sim           # the simulator alone, against an already-running server
 npm run typecheck     # tsc --noEmit, must be clean
-npm test              # node --test — 50 tests (D43's targets plus the write path)
+npm test              # node --test — 76 tests (D43's targets plus the write path)
 
 open http://localhost:5173        # the number, live. Ctrl-C the runner and it comes back.
 
@@ -153,6 +168,11 @@ F=$(node -e "console.log(new Date(Date.now()-3600e3).toISOString())"); TO=$(node
 curl -s "localhost:8787/api/snapshot?from=$F&to=$TO"    # buckets + as_of_ingest_seq
 curl -sN "localhost:8787/api/stream?cursor=0"           # ready frame, then absolute rows per tick
 curl -sN -H 'Last-Event-ID: 999999' localhost:8787/api/stream    # resnapshot cursor_ahead_of_log
+
+curl -s localhost:8787/api/verify                       # B22: 200 clean / 409 with the offending key
+npm run agree                                           # B24: exits 1 on a mismatch, 0 clean
+#   -> hand-UPDATE any rollup_minute row and BOTH catch it, for different reasons:
+#      verify rebuilds through apply() (a drifted STORE); agree recomputes without it (wrong CODE)
 # B18/B19 — a click, then its late conversion. The conversion lands in the CLICK's minute.
 CK=$(node -e "console.log(new Date(Date.now()-9000e3).toISOString())")   # 2.5 h ago
 CV=$(node -e "console.log(new Date(Date.now()-60e3).toISOString())")
@@ -378,12 +398,12 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 
 | | |
 |---|---|
-| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1–G5 closed** (B12–B23); **B24 alone** is what remains. |
-| **Last completed chunk** | **B23** — replay. G5's commits: `5bf1373` (B20a), `ec3808a` (B21), `91d1c65` (B22), `eafa9bf` (B23), on top of D55. Earlier: `412a3b8` (B20) · `beff2dc`/`061bb00`/`7a8d956` (G3) · `dfca97a`/`955a74a`/`271496b`/`58d863b` (G2) · `66afb5b`/`515a8cf`/`822cdaa` (G1). |
-| **Next gate** | **G6 = B24 ALONE — the P14 agreement sweep.** **Single-gated**: do not group it. It closes stage 2 and it is the gate that guards everything after it. Nothing blocks it. |
-| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ **five done** · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
+| **Current stage** | **Stage 2 is CLOSED** — all six gates, B12–B24. **Stage 3 · the simulator (B25–B35)** is next and has not started. |
+| **Last completed chunk** | **B24** — the agreement sweep, commit `85059f9`. **Stage 2 closed with it.** G5's were `5bf1373`/`ec3808a`/`91d1c65`/`eafa9bf`; G4's `412a3b8`; G3's `beff2dc`/`061bb00`/`7a8d956`; G2's `dfca97a`/`955a74a`/`271496b`/`58d863b`; G1's `66afb5b`/`515a8cf`/`822cdaa`. |
+| **Next gate** | **B25 — the rate equation core**, first chunk of stage 3. `BUILD_PLAN.md` §5's gate table covered stage 2 only; **stage 3 has no gate table**, so group it under D48's own rule (3–5 related chunks, never across a stage boundary) and say which chunks the group is. **B34 and B35 stay single-gated.** |
+| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **25 / 64** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B23) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **26 / 64** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B24) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -405,7 +425,7 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Twenty now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Twenty-two now — the Phase 5 ones were
 found against the real store and are in no design document.
 
 - **Nothing writes a projection except `apply()`** (D7). `ads`, `config_generations`,
@@ -494,6 +514,16 @@ found against the real store and are in no design document.
   down and `to` up and echoes the resolved window. **B53's drill-down asserts raw == buckets over
   `[from, to)`**, so unaligned it reports FAIL for a reason that is not corruption. The read side
   canonicalises where the write side rejects — a bound is a query, `signals.ts` is a fact.
+- **`npm run agree` does not read `ads`, `config_generations` or `conversion_attribution` at all**
+  (B24, found by Seno). It re-derives attribution from raw and diffs only `rollup_minute`'s counts,
+  so a corrupted `credited_generation_id` (D14) or `credited_ad_id` (I8/G30) **sweeps clean**.
+  `/api/verify` catches both — measured, `live a_99, rebuilt a_12`, 5 ms. The gap is covered; the
+  danger is the sentence *"every stored bucket agrees with the raw event log"* being read as a
+  guarantee about attribution. **The banner states its own limits on every run, and must keep to.**
+- **The sweep cannot see an INVENTED all-zero bucket, and that is accepted** (B24). A promotion
+  decrements a provisional bucket to all zeros and the row stays, so an absent recomputed bucket is
+  compared against zero rather than reported missing. It is the price of the promotion leftover and
+  cannot be distinguished from one without replaying arrival order. `/api/verify` catches it.
 - **No projection SQL may be SCHEMA-QUALIFIED** (D55, B22). `/api/verify` rebuilds through the real
   `apply()` into `TEMP` tables that shadow the projection names, which works only because every
   projection write is unqualified. **One `main.rollup_minute` turns the verifier into a corrupter**
@@ -684,43 +714,53 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B24, build it, report, wait.** Nothing needs deciding first.
+**Stage 2 is closed. Stage 3 — the simulator (B25–B35) — has not started.**
 
-**G6 = B24 ALONE. It is single-gated** (`CLAUDE.md` §5, `BUILD_PLAN.md` §13) and it **closes
-stage 2**. Read **`DESIGN.md` §10.2** and **`SIMULATOR.md` §18.4** before writing it.
+**Announce a group, build it, report once with a per-chunk block, wait.** Nothing needs deciding
+first. **`BUILD_PLAN.md` §5's gate table covered stage 2 only — stage 3 has no gate table**, so
+group under D48's own rule: **3–5 related chunks, never across a stage boundary**, and say in the
+announcement which chunks the group is. **B34 and B35 are single-gated** and must not be grouped.
+
+**A natural first group is B25 + B26 + B27** — the rate equation core, fatigue, and the
+click/CPC/spend emission that turns a rate into events. B28 (novelty) attaches to B26's file and
+could join it; that is a judgement to make in the announcement, not now.
 
 | Chunk | Scope, from the plan row and no wider | Files |
 |---|---|---|
-| **B24** | **The P14 agreement sweep** as `npm run agree`: one ordered whole-log pass, rebuild, diff every bucket, print mismatches | `scripts/agree.ts` |
+| **B25** | Rate equation core: per-channel diurnal shape, day-of-week, `NegBinomial(λ, α=8)` | `src/sim/rate.ts`, `src/sim/params.ts` |
+| **B26** | Fatigue: `F(lineage, audience)`, `φ(f) = 0.25 + 0.75·exp(−0.35f)`, `video^1.0 × headline^0.5`, 5-day idle recovery, version partial reset `r = 0.35` | `src/sim/fatigue.ts` |
+| **B27** | Channel × temperature matrices → clicks (`BetaBinomial`), CPC, order value; `spend` as a 60 s delta per live ad | `src/sim/emit.ts`, `src/sim/params.ts` |
+| **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, CTR only, on the pair's first exposure | `src/sim/fatigue.ts` |
 
-What is already true and constrains it:
+What is already true and constrains the whole stage:
 
-- **IT MUST BE A SINGLE WHOLE-LOG PASS, NOT `replay()` PER BUCKET.** The plan says so in bold and
-  §14 carries it: per-bucket is O(buckets × N) and turns seconds into hours. `replay()` exists and
-  is the obvious thing to call in a loop — that is the trap, not the solution.
-- **It is a different check from `/api/verify`, and both are needed.** B22 replays the log through
-  the real `apply()` and diffs the projections: it catches a store that has drifted from the code.
-  B24 sweeps the incrementally-maintained rollups against a recomputation that does **not** use
-  `apply()`: it catches the code itself being wrong. §10.2 is explicit that the display path and the
-  check path must differ.
-- **`replay()`'s logic is the right logic, its shape is not.** One pass that accumulates every
-  bucket at once, then diffs — the same attribution rules (D27-B credited minute, I8/G30 the click's
-  ad, D16 orphans provisional at their own minute), applied once over the log rather than once per
-  bucket.
-- **It runs on the `curl`-built dataset plus the seeded world**, which is what the plan's B24 row
-  means by *"the curl-built dataset"* — the simulator still emits impressions only, for `a_12`.
-- **Corrupt a bucket and it must be caught**, naming the key. That is the verification, and it is
-  the same hand-`UPDATE` B22's test uses.
-- Report the runtime. §18.4's claim is milliseconds on this dataset, and B24 is where that becomes
-  a measured number rather than an expectation.
-
-**After B24, stage 2 is CLOSED** and stage 3 (B25–B35, the simulator) begins. **B34 and B35 are
-single-gated**, and **B34 owes the D39 seed-budget revisit** recorded in "What is owed".
+- **`SIMULATOR.md` is the spec and it is complete to the parameter.** Every chunk's verification is
+  a comparison against a table already in that document — §21 is the parameter appendix — so *"does
+  it match"* is arithmetic, not judgement. **Read the table before writing the chunk.** Do not
+  invent a constant; if one is missing, that is a gap to raise, not a number to choose.
+- **Every chunk adds `--dry-run` output, not a screen.** `npm run sim -- --dry-run --hours 24` and
+  its siblings are the verification surface for this stage. No UI work until stage 4.
+- **Emission stays live throughout.** The stage-1 number must keep moving after every chunk; a
+  simulator that only works in dry-run is half a chunk.
+- **The emitter never opens the store (D32).** It learns the world over HTTP, and `GET
+  /api/sim/world` is **B31** — until then the emitter still emits for `a_12` only and **still emits
+  regardless of status**, so HR3's *"pausing `a_12` stops its events"* is real in the store from
+  B14 but not in the world until B31.
+- **The keyed RNG (B11, `src/sim/rng.ts`) is how determinism is kept without stored state** —
+  `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, keyed and never sequential, so a lever cannot
+  reshuffle another ad's draws. B29's conversion schedule is **re-derived** from it rather than
+  queued anywhere.
+- **B33's fault split now has its precondition** — `SUPPORTED` covers all four kinds since B18.
+- **B34 owes the D39 seed-budget revisit** (see "What is owed"): ~28 s and ~716 MB through the real
+  write path, not §18.4's ~12 s / ~315 MB, with five costed levers in `BUILD_PLAN.md`'s
+  "The seed budget, re-measured at B06".
+- **B34 must NOT call `stream.markDirty()`** — measured at B09: one batch across 20,000 minutes gave
+  a 6.20 MiB frame and a 142 ms event-loop stall.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
 1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5 as amended by D48.
-   **In progress, 25/64** — stages 0 and 1 closed, stage 2 one chunk from closed.
+   **In progress, 26/64** — stages 0, 1 and 2 closed.
 2. **Phase 6 — packaging:** README, demo script, the "life of one event" trace, the AI artifact.
    These are `BUILD_PLAN.md` stage 7 (B57–B62) rather than a separate effort.
 

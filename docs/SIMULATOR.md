@@ -745,6 +745,7 @@ through insert → attribution resolution → rollup upsert:
 |---|---|
 | Seed 1.06M events through the full write path | **7.9 s** (133,601 events/s) |
 | **P14 full agreement sweep** — one ordered pass over raw, rebuild, diff every bucket | **2.72 s** over 56,160 buckets, **0 mismatches** |
+| ↳ **re-measured at B24**, against the built sweep (`npm run agree`) | **0.88–1.71 s** over the same 56,160 buckets (357,540 events, ~1,860 backdated conversions), **0 mismatches**. Three runs: 879 / 876 / 1714 ms — the **range**, not the mean, because the spread is GC variance and the honest claim is the worst case. `/api/verify` on the same store: **3.6 s**. |
 | Hot read (D28's `WITHOUT ROWID` PK), 60-minute single-ad window | **0.08 ms** |
 | Store | 203 MB + 5 MB WAL |
 
@@ -758,9 +759,11 @@ TOTAL ~1,625,000 events  ·  seed ~12 s  ·  P14 sweep ~4.2 s  ·  store ~315 MB
 
 Two consequences:
 
-1. **P14 needs no bounded mode.** 4.2 s is something you run in front of a reviewer. But the sweep
+1. **P14 needs no bounded mode.** 4.2 s is something you run in front of a reviewer. **Confirmed
+   at B24: 0.88–1.71 s** on a store of the same shape, so the projection was conservative. The sweep
    **must be a single whole-log pass**, not `replay()` called per bucket — per-bucket would be
-   O(buckets × N) and take hours. That is already what **D7** specifies ("the rebuild path calls it
+   O(buckets × N) and take hours. **That is now a measured statement rather than an estimate: at
+   ~0.9 s per whole-log pass, per-bucket over 56,160 buckets is ~13 hours.** That is already what **D7** specifies ("the rebuild path calls it
    with the whole log from zero"); it is written here because the obvious implementation is the
    quadratic one.
 2. **The seed prints progress.** Twelve seconds of silence on the one command that is supposed to

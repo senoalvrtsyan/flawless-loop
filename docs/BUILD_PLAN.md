@@ -165,7 +165,7 @@ skeleton from stage 1 keeps working throughout and the numbers get richer.
 | [x] | **B21** | Settlement state on the read side: `live` / `settled` / `restated` per bucket, in the snapshot and the SSE row; the 72 h horizon and the `America/New_York` constant in one config module | `src/server/settlement.ts`, `src/shared/config.ts` | Snapshot rows carry a state; a 7-day-old bucket reads `settled`, a 10-minute-old one `live` | D§5.4, §5.7 | **HR4** |
 | [x] | **B22** | `GET /api/verify`: rebuild every projection from the logs into temp tables, diff row by row, return the first divergence or a clean bill with the log position; `content_hash` fast path | `src/server/verify.ts` | Runs clean; hand-`UPDATE` one `rollup_minute` row and see it caught with the offending key | D§7 | **HR5 HR6** |
 | [x] | **B23** | `replay(descriptor)` — pure function over a log prefix. Reads **raw `signals` only**, restricted to `ingest_seq <= as_of`, re-deriving attribution over that prefix. No HTTP yet | `src/server/replay.ts` | Unit test on a hand-built fixture; assert it never opens `rollup_minute` | D§10.2 | **HR5** |
-| [ ] | **B24** | **P14 agreement sweep** as `npm run agree`: one ordered whole-log pass, rebuild, diff every bucket, print mismatches | `scripts/agree.ts` | Runs clean on the curl-built dataset in milliseconds; corrupt a bucket → caught. **Must be a single pass, not `replay()` per bucket** — per-bucket is O(buckets × N) and takes hours | D§10.2; S§18.4 | **HR5** |
+| [x] | **B24** | **P14 agreement sweep** as `npm run agree`: one ordered whole-log pass, rebuild, diff every bucket, print mismatches | `scripts/agree.ts` | Runs clean on the curl-built dataset in milliseconds; corrupt a bucket → caught. **Must be a single pass, not `replay()` per bucket** — per-bucket is O(buckets × N) and takes hours | D§10.2; S§18.4 | **HR5** |
 
 **Why B20a exists, and why it is lettered rather than numbered.** Added 2026-09-04, Seno's call,
 after B07. The timestamp invariant of §14 — canonical ISO, explicit offset, minute-aligned — had
@@ -499,6 +499,20 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   **B05's validation (U6) must check JavaScript types itself and must not lean on `STRICT`** —
   STRICT catches only the genuinely unconvertible (`'not-an-int'` into an INTEGER column, which it
   does reject).
+- **The agreement sweep cannot see an INVENTED all-zero bucket, and that is accepted** (B24). A
+  promotion (B20) decrements a provisional bucket to all zeros and **the row stays** — nothing
+  deletes a bucket — so the store legitimately holds rows the from-zero recomputation never
+  creates. `agree` therefore compares an absent recomputed bucket against zero rather than
+  reporting it missing, which is the price of the promotion leftover and cannot be told apart from
+  it without replaying arrival order. **`/api/verify` catches it** — its rebuild produces no such
+  row. Verified both ways at B24.
+- **`npm run agree` does not read `ads`, `config_generations` or `conversion_attribution` at all**
+  (B24, found by Seno). It re-derives attribution from raw and compares only `rollup_minute`'s
+  counts, so a corrupted `credited_generation_id` (**D14**'s claim) or `credited_ad_id`
+  (**I8/G30**'s) **sweeps clean**. `/api/verify` catches both — measured: `live a_99, rebuilt a_12`
+  in 5 ms. The risk is not the gap, which is covered; it is the sentence *"every stored bucket
+  agrees with the raw event log"* reading as a guarantee about attribution. **The banner names its
+  own limits on every run**, and must keep doing so.
 - **No projection SQL may be SCHEMA-QUALIFIED** (D55, B22). `/api/verify` rebuilds through the real
   `apply()` into `TEMP` tables that shadow the projection names, and that works only because every
   projection write is unqualified — SQLite resolves an unqualified name to `temp` before `main`.
