@@ -1,4 +1,5 @@
-// The client shell (B08): fetch the snapshot, put ONE number on screen.
+// The client shell. B08 fetched the snapshot and rendered one number; B10b makes it LIVE —
+// snapshot, then subscribe from its cursor, then merge absolute rows as they arrive (§3.1 1-4).
 //
 // **The number is a bucket's own `impressions`, taken verbatim from the server. It is not a sum.**
 // Not because client arithmetic is forbidden — **D46** permits it — but because of what a total
@@ -15,11 +16,13 @@
 //
 // Unstyled on purpose (D45 deferred until B36, BUILD_PLAN §2). It is meant to look unfinished.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 // Type-only, therefore erased at build time — no server module, and no `node:sqlite`, reaches the
 // bundle. The wire types' permanent home is `src/shared/wire.ts`, which B44/B51 create; importing
 // them across the boundary until then beats moving an approved file in a chunk about the client.
-import type { BucketRow, Snapshot } from '../server/snapshot.ts';
+import type { Snapshot } from '../server/snapshot.ts';
+import { applyRows, createStore, latestBucket, type BucketStore } from './store.ts';
+import { subscribe } from './stream.ts';
 
 const WINDOW_MINUTES = 60;
 
@@ -40,56 +43,82 @@ function lastHour(): { from: string; to: string } {
   };
 }
 
-/**
- * The most recent bucket in the response — by `minute_start`, then `ad_id` to break a tie between
- * two ads in the same minute. Selection, not aggregation: it picks one server-computed row and
- * changes no number.
- *
- * (The rows arrive ordered by `(ad_id, minute_start)`, so the latest minute is NOT simply the last
- * element. Assuming it was would put a stale number on screen with nothing to indicate it.)
- */
-function latestBucket(buckets: readonly BucketRow[]): BucketRow | null {
-  return buckets.reduce<BucketRow | null>((best, row) => {
-    if (best === null) return row;
-    if (row.minute_start > best.minute_start) return row;
-    if (row.minute_start === best.minute_start && row.ad_id > best.ad_id) return row;
-    return best;
-  }, null);
-}
-
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
-  | { phase: 'ready'; snapshot: Snapshot };
+  | { phase: 'ready'; store: BucketStore; cursor: number };
+
+/** Why the stream is not currently feeding us, if it is not. */
+type Link = 'connecting' | 'live' | 'down';
 
 export function App() {
   const [state, setState] = useState<State>({ phase: 'loading' });
+  const [link, setLink] = useState<Link>('connecting');
+  /** Bumped to force step 1 again — a `resnapshot`, per §3.1's "the client returns to step 1". */
+  const [generation, setGeneration] = useState(0);
+
+  const resnapshot = useCallback((reason: string) => {
+    console.warn(`[stream] server asked for a resnapshot: ${reason}`);
+    setGeneration((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    let unsubscribe: (() => void) | null = null;
     const { from, to } = lastHour();
     const url = `/api/snapshot?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
 
+    setLink('connecting');
+
+    // Step 1: the snapshot. Step 2 only starts once it has landed, because its
+    // `as_of_ingest_seq` IS the cursor — subscribing first would mean subscribing from a cursor we
+    // do not have yet.
     fetch(url, { signal: controller.signal })
       .then(async (res) => {
         const body: unknown = await res.json();
         if (!res.ok) {
-          // The server's 400s say what to fix; surfacing the message beats "failed to fetch".
           const detail =
             typeof body === 'object' && body !== null && 'message' in body
               ? String((body as { message: unknown }).message)
               : res.statusText;
           throw new Error(`${res.status} — ${detail}`);
         }
-        setState({ phase: 'ready', snapshot: body as Snapshot });
+        const snapshot = body as Snapshot;
+        setState({
+          phase: 'ready',
+          // The window is the one the SERVER resolved and echoed (snapped to whole minutes), not
+          // the one we asked for. The store drops rows outside it, so using our own bounds here
+          // would disagree with the server's on the boundary minute.
+          store: createStore(snapshot.query, snapshot.buckets),
+          cursor: snapshot.as_of_ingest_seq,
+        });
+
+        // Steps 2-4. The cursor closes the snapshot-to-subscribe gap: anything ingested between
+        // the read transaction above and this line is replayed by B10a.
+        unsubscribe = subscribe(snapshot.as_of_ingest_seq, {
+          onReady: () => setLink('live'),
+          onBuckets: (rows, as_of) => {
+            setLink('live');
+            setState((prev) =>
+              prev.phase === 'ready'
+                ? { ...prev, store: applyRows(prev.store, rows), cursor: as_of }
+                : prev,
+            );
+          },
+          onResnapshot: resnapshot,
+          onError: () => setLink('down'),
+        });
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
         setState({ phase: 'error', message: err instanceof Error ? err.message : String(err) });
       });
 
-    return () => controller.abort();
-  }, []);
+    return () => {
+      controller.abort();
+      unsubscribe?.();
+    };
+  }, [generation, resnapshot]);
 
   if (state.phase === 'loading') return <p>Loading snapshot…</p>;
   if (state.phase === 'error') {
@@ -102,8 +131,8 @@ export function App() {
     );
   }
 
-  const { snapshot } = state;
-  const latest = latestBucket(snapshot.buckets);
+  const { store, cursor } = state;
+  const latest = latestBucket(store);
 
   return (
     <div>
@@ -112,7 +141,8 @@ export function App() {
       {latest === null ? (
         <p>
           No buckets in this window. Nothing is emitting yet (the simulator arrives at B11), so
-          POST an impression with a <code>ts</code> inside the window and refresh.
+          POST an impression with a <code>ts</code> inside the window and watch this update without
+          a refresh.
         </p>
       ) : (
         <>
@@ -123,6 +153,7 @@ export function App() {
           <p>
             ad <code>{latest.ad_id}</code> · minute <code>{latest.minute_start}</code> · as of
             ingest_seq <code>{latest.max_ingest_seq}</code>
+            {latest.restated_at !== null ? <> · <strong>restated</strong></> : null}
           </p>
         </>
       )}
@@ -130,16 +161,15 @@ export function App() {
       <hr />
 
       <p>
-        Window the server used: <code>{snapshot.query.from}</code> to{' '}
-        <code>{snapshot.query.to}</code> · {snapshot.buckets.length} bucket rows · log position{' '}
-        <code>{snapshot.as_of_ingest_seq}</code>
+        Window the server used: <code>{store.window.from}</code> to <code>{store.window.to}</code> ·{' '}
+        {store.rows.size} bucket rows · cursor <code>{cursor}</code> · stream{' '}
+        <strong>{link}</strong>
       </p>
 
-      {/* A hand-verification aid, not the traceability surface — that is B52/B55. It exists so the
-          number above can be compared against the response and `sqlite3` without opening devtools. */}
+      {/* A hand-verification aid, not the traceability surface — that is B52/B55. */}
       <details>
-        <summary>Raw snapshot response</summary>
-        <pre>{JSON.stringify(snapshot, null, 2)}</pre>
+        <summary>Rows in the store</summary>
+        <pre>{JSON.stringify([...store.rows.values()], null, 2)}</pre>
       </details>
     </div>
   );
