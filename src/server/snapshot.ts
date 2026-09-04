@@ -24,6 +24,7 @@ import { readTx } from './db.ts';
 import { HAS_EXPLICIT_OFFSET, ceilToMinute, floorToMinute } from '../shared/time.ts';
 import { bucketState, type SettlementState } from './settlement.ts';
 import { ZERO_COUNTS, addCounts, derive, type MetricCounts, type MetricSet } from '../shared/metrics.ts';
+import { maturityFor, type Maturity } from './maturity.ts';
 import type { BucketKey } from './apply.ts';
 
 /**
@@ -113,6 +114,14 @@ export type Snapshot = {
    */
   totals: MetricTotals[];
   /**
+   * **B41 / D33** — how much of this window has finished arriving, measured over settled cohorts.
+   *
+   * It rides with the totals rather than on its own endpoint because it qualifies them: a CPA and
+   * the statement "the newest minute in view is 4% mature" are one thought, and splitting them
+   * across two requests is how they come to disagree about which window they describe.
+   */
+  maturity: Maturity;
+  /**
    * The log position these buckets reflect — `MAX(signals.ingest_seq)`, read INSIDE the same read
    * transaction. The client hands it back as `Last-Event-ID` (§3.1 step 2, D18), so it is the one
    * number here that must not be off by one in either direction: read it before the buckets and
@@ -140,7 +149,13 @@ export type MetricTotals = MetricSet & { ad_id: string | null };
  * is exactly the undescribed number D34's quarantine exists to refuse, and B51 has only to sign an
  * envelope that already says what it answered and when.
  */
-export type TotalsResponse = { query: SnapshotQuery; totals: MetricTotals[]; as_of_ingest_seq: number };
+export type TotalsResponse = {
+  query: SnapshotQuery;
+  totals: MetricTotals[];
+  /** B41: refreshed on the same 5-second tick as the totals, because it qualifies them. */
+  maturity: Maturity;
+  as_of_ingest_seq: number;
+};
 
 /**
  * `totalsOnly` is `?include=totals` — the totals without the buckets or the portfolio.
@@ -424,7 +439,8 @@ export function totalsOnly(db: DatabaseSync, query: SnapshotQuery): TotalsRespon
   const logPosition = db.prepare(SELECT_LOG_POSITION);
   return readTx(db, () => {
     const seq = logPosition.get() as { seq: number };
-    return { query, totals: readTotals(db, query), as_of_ingest_seq: seq.seq };
+    const at = new Date().toISOString();
+    return { query, totals: readTotals(db, query), maturity: maturityFor(db, query, at), as_of_ingest_seq: seq.seq };
   });
 }
 
@@ -463,6 +479,7 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
       // Same transaction, same predicate, same instant as the buckets above — so "sum the rows
       // yourself and compare" is a check on the arithmetic and never a race.
       totals: readTotals(db, query),
+      maturity: maturityFor(db, query, new Date().toISOString()),
       as_of_ingest_seq: seq.seq,
     };
   });

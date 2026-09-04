@@ -138,3 +138,31 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
 .gate { font-size: .8rem; color: var(--ink-muted); margin: 0 0 .5rem; }
 .gate strong { color: var(--ink); }
 .gate--dropped { border-left: 3px solid var(--status-paused); padding-left: .5rem; }
+
+/* Maturity — B41 ------------------------------------------------------------------------------- */
+
+/* D33's indicator. Deliberately NOT the gate's treatment: the gate says "too little data to be a
+ * ratio", this says "the data is still arriving", and §4.5 insists the two stay distinguishable. */
+
+.maturity { font-size: .8rem; color: var(--ink-muted); margin: 0 0 .75rem;
+            border-left: 3px solid var(--state-live); padding-left: .5rem; }
+.maturity strong { color: var(--ink); }
+.maturity__note { font-style: italic; }
+
+/* Restatement timeline — B43 -------------------------------------------------------------------- */
+
+/* §5.6's entries, at the BUCKET's own time. The left rule uses the restated token, so the timeline
+ * and the chart's markers are visibly the same claim; the dash pattern is the non-colour channel
+ * D45 requires and B42 is checked on. */
+
+.section { font-size: .8rem; color: var(--ink-muted); text-transform: uppercase;
+           letter-spacing: .04em; padding: 0; margin: 1.25rem 0 .5rem; }
+
+.timeline { list-style: none; margin: 0 0 1rem; padding: 0; }
+.timeline__item { border-left: 3px dashed var(--state-restated); padding: .35rem 0 .35rem .6rem;
+                  margin-bottom: .5rem; }
+.timeline__head { font-size: .85rem; }
+.timeline__delta { font-size: .9rem; font-variant-numeric: tabular-nums; }
+.timeline__meta { font-size: .72rem; color: var(--ink-muted); }
+.timeline__event { margin-left: .3rem; }
+.timeline__empty { font-size: .85rem; color: var(--ink-muted); }

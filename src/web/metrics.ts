@@ -14,6 +14,7 @@
 // answered and at which log position rather than implying it is current.
 
 import type { MetricTotals, TotalsResponse } from '../server/snapshot.ts';
+import type { RestatementEntry } from '../server/restatements.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
 export const METRIC_LABELS: Record<MetricKey, string> = {
@@ -159,4 +160,23 @@ export function ewma(
     out[i] = level;
   }
   return out;
+}
+
+/**
+ * **B43 — the restatement timeline for a window** (`GET /api/restatements`).
+ *
+ * Same `?from&to&ads` as the snapshot, so the timeline and the chart cannot end up describing
+ * different portfolios. Read-only, and every figure in the response was derived on the server.
+ */
+export async function fetchRestatements(
+  window: { from: string; to: string },
+  ads: ReadonlySet<string> | null,
+  signal: AbortSignal,
+): Promise<{ entries: RestatementEntry[] }> {
+  const url =
+    `/api/restatements?from=${encodeURIComponent(window.from)}&to=${encodeURIComponent(window.to)}` +
+    (ads === null ? '' : `&ads=${encodeURIComponent([...ads].join(','))}`);
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`restatements: ${res.status} ${res.statusText}`);
+  return (await res.json()) as { entries: RestatementEntry[] };
 }

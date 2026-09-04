@@ -22,7 +22,19 @@ export type Columns = { x: number[]; series: (number | null)[][]; labels: string
  * divides after the counts are summed). `null` keeps D64's meaning exactly: not "zero", but "the
  * ad did not exist yet".
  */
-export type CountPoints = { x: number[]; series: (MetricCounts | null)[][]; labels: string[] };
+export type CountPoints = {
+  x: number[];
+  series: (MetricCounts | null)[][];
+  labels: string[];
+  /**
+   * **B42** — per point, per ad: did any bucket folded into this point carry `restated_at`?
+   *
+   * A flag, not a number, so it is outside D46's concern; it rides on the SAME index arithmetic as
+   * the counts because a marker drawn one point left of the bucket it describes is the invisible
+   * failure this file exists to have one implementation of.
+   */
+  restated: boolean[][];
+};
 
 /**
  * Bucket rows to aligned points: one x array, and one array of COUNT SETS per ad.
@@ -69,6 +81,7 @@ export function pointCounts(
     for (let i = Math.max(0, launchIndex[s] ?? points); i < points; i++) column[i] = ZERO_COUNTS;
     return column;
   });
+  const restated = ads.map(() => new Array<boolean>(points).fill(false));
 
   for (const row of rows) {
     const s = index.get(row.ad_id);
@@ -81,9 +94,15 @@ export function pointCounts(
     // `launched_at` is a real event on an ad the fold says had not launched, and it is counted
     // rather than dropped. `addCounts` is integer addition — the division never happens here.
     column[i] = addCounts(column[i] ?? ZERO_COUNTS, row);
+    // Sticky per point: an hour containing one restated minute IS a restated hour, because the
+    // number drawn for that hour moved after it had settled.
+    if (row.restated_at !== null) {
+      const flags = restated[s];
+      if (flags !== undefined) flags[i] = true;
+    }
   }
 
-  return { x, series, labels: ads.map((ad) => ad.name) };
+  return { x, series, labels: ads.map((ad) => ad.name), restated };
 }
 
 /**

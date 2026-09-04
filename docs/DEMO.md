@@ -46,7 +46,7 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | 2 | Read a signal off the chart | B37, **B38** | ✅ below — ratios landed at B38 |
 | 3 | The gate refuses to draw a ratio it cannot support | **B39**, B40 | ✅ below |
 | 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | B46, B47 | — |
-| 5 | **A late conversion restates a settled bucket** | B42, B43, B49 | — |
+| 5 | **A late conversion restates a settled bucket** | **B41, B42, B43**, B49 | ✅ below |
 | 6 | **Walk a number back to its events** | B52, B53 | — |
 | 7 | Configs are versioned; the swap is visible | B48, B56 | — |
 | 8 | Kill everything and restart — the world is still there | B60 | — |
@@ -206,6 +206,83 @@ and the gated count is always on screen.
 **The distinction to keep saying:** the gate says *too little data to be a ratio*; the maturity
 indicator (B41) says *the data is still arriving*. A young cohort trips both, for different reasons,
 and the surface has to say which.
+
+---
+
+## Beat 5 — a late conversion restates a settled bucket (B41, B42, B43)
+
+**Say:** *"This is the one the brief singles out. A conversion for last Saturday arrived on
+Wednesday, after we had closed the books on that minute — and the app says so, at Saturday, not at
+now."*
+
+**It is true on frame one.** No waiting, no scenario trigger: under the seeded arrival model 2–5% of
+conversions arrive past the 72 h horizon, so the store carries **ten** restated buckets from the
+moment it is seeded — eight of them inside a rolling seven-day window.
+
+1. **Window `7d`, select `a_01` and `a_03`, metric `Impressions`.** Look at the chart: a **dashed
+   vertical rule** labelled `settled ◂ ▸ live` sits 72 hours back — everything left of it has passed
+   the settlement horizon. Then the **hollow squares with hairlines**: eight of them, days back.
+   Those are buckets whose numbers moved *after* they had settled.
+2. **Read the caption.** *"settlement: 8 restated buckets in view, marked with a square and a
+   hairline · N settled · N live · the dashed vertical rule is the 72 h horizon."* Say it out loud:
+   *"persistent, not a flash — the reviewer is allowed to be looking somewhere else."*
+3. **Scroll to the timeline.** Eight entries, **ordered by the bucket's own time**, newest period
+   first. The one to point at is `a_01` at **18:33 Sat 29 Aug**:
+
+   > ROAS **11.89× → 56.87×** · +1 conversion · **$191.17** · arrived **5 d 12 h late**
+   > spend $3.36 in this minute · CPA $3.36 → $1.68 · learned at `2026-09-04T07:14:01.180Z`
+
+   **That is the only one of the eight with a real before-and-after** — it already had one
+   conversion, and the late arrival made it two. The other seven went from zero, which is why this
+   is the entry to demo.
+4. **Two clocks, and the entry shows both.** The bucket's minute (`18:33 Sat`) is *what moved*;
+   `learned at` is *when we found out*. Sorted by the second, every entry would read "recently" and
+   the timeline would say nothing about which period changed. §5.6 clause 2 is that sentence.
+5. **Prove it from the store.** The entry names its own `event_id`s:
+
+```
+sqlite3 -header -column data/loop.sqlite "
+  SELECT a.credited_minute, a.credited_ad_id, s.event_id, s.received_at, s.value_cents, s.source
+    FROM conversion_attribution a JOIN signals s ON s.event_id = a.event_id
+   WHERE a.state='resolved' AND a.credited_ad_id='a_01'
+     AND a.credited_minute='2026-08-29T18:33:00.000Z';"
+sqlite3 -header -column data/loop.sqlite "
+  SELECT conversions, value_cents, restated_at, restatement_count FROM rollup_minute
+   WHERE ad_id='a_01' AND minute_start='2026-08-29T18:33:00.000Z';"
+```
+
+   Two conversions credited to that minute, one of them received **five days later**; the bucket
+   carries `restated_at` and `restatement_count 1`. Subtract the late one and you have the `before`
+   figures on screen — **nothing stores them**, which is D10 and D7 in the same breath.
+6. **Say what is NOT covered, before anyone asks.** A late *click* promoting an orphan decrements
+   the provisional bucket the conversion was parked in; if that bucket had already settled it is
+   restated by a subtraction. This store contains none, and rather than ship a derivation no data
+   exercises, an entry whose arrivals do not account for its `restatement_count` renders as
+   **UNEXPLAINED**. That is the honest shape of partial coverage.
+
+### The maturity indicator, which is the other half of the same story (B41)
+
+**Say:** *"Restatement is the surprise. Maturity is the part we can see coming — and they are
+different messages, so they are different sentences."*
+
+7. **Read the maturity line** under the headline: *"newest minute in view 0% mature · oldest 100% ·
+   measured over 805 settled conversions (805 seeded, 0 live) · half arrive within 21 min, 95%
+   within 42 h."* On a 7-day window the newest minute genuinely is 0% — its conversions have not
+   arrived yet — and that is the number a strategist needs before acting on a fresh CPA.
+8. **Point at the sample size and the seeded share.** §15.4's disclosure, and it is a real limit:
+   inside the seeded window `received_at` is *designed*, not observed, so a figure resting on 805
+   seeded arrivals rests on our own arrival model. `0 live` will grow as the emitter runs.
+9. **Point at the exclusion note.** Cohorts credited after `now − 72 h` are excluded as incomplete.
+   *"Measured over all of them, the curve would read earlier at every quantile and the screen would
+   claim more maturity than it has — flatteringly, and with nothing to catch it."*
+10. **Keep the two apart.** The gate says *too little data to be a ratio*. Maturity says *the data
+    is still arriving*. `a_08` overnight trips both, for different reasons, and each has its own
+    sentence on the screen.
+
+```
+curl -s "localhost:8787/api/restatements?from=$(node -e "console.log(new Date(Date.now()-7*86400e3).toISOString())")&to=$(node -e "console.log(new Date().toISOString())")" | python3 -m json.tool | head -40
+sqlite3 data/loop.sqlite "SELECT COUNT(*) FROM rollup_minute WHERE restated_at IS NOT NULL;"   # 10
+```
 
 ---
 

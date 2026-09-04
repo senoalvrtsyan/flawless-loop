@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // bundle. The wire types' permanent home is `src/shared/wire.ts`, which B44/B51 create; importing
 // them across the boundary until then beats moving an approved file in a chunk about the client.
 import type { AdRow, Snapshot, TotalsResponse } from '../server/snapshot.ts';
+import type { RestatementEntry } from '../server/restatements.ts';
 import {
   applyRows,
   createStore,
@@ -39,6 +40,7 @@ import { isRatio, type MetricKey } from '../shared/metrics.ts';
 import {
   METRIC_NOTES,
   combined,
+  fetchRestatements,
   fetchTotals,
   formatCents,
   formatCount,
@@ -48,6 +50,8 @@ import {
 } from './metrics.ts';
 import { Portfolio } from './Portfolio.tsx';
 import { Chart } from './Chart.tsx';
+import { Maturity } from './Maturity.tsx';
+import { Timeline } from './Timeline.tsx';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
@@ -127,6 +131,15 @@ export function App() {
   const [totals, setTotals] = useState<TotalsResponse | null>(null);
   /** Whether the last totals refresh landed. A silently stale headline is the failure to avoid. */
   const [totalsFresh, setTotalsFresh] = useState(true);
+  /**
+   * **B43** — the restatement timeline for the window on screen.
+   *
+   * Fetched alongside the snapshot rather than streamed: a restatement is a rare, historical event
+   * (ten in the seeded week), and the live path already tells the chart that a bucket moved. It is
+   * re-read on the same 5-second tick as the totals, so a restatement arriving live appears without
+   * a refresh, one tick late.
+   */
+  const [entries, setEntries] = useState<readonly RestatementEntry[]>([]);
 
   /**
    * Toggling from "all" selects that ad ALONE rather than deselecting it out of twelve.
@@ -194,9 +207,15 @@ export function App() {
         setTotals({
           query: snapshot.query,
           totals: snapshot.totals,
+          maturity: snapshot.maturity,
           as_of_ingest_seq: snapshot.as_of_ingest_seq,
         });
         setTotalsFresh(true);
+        // The timeline for the same window, in the same pass as step 1 — so a refresh shows the
+        // restatements of the window it just read, not of the one before it.
+        void fetchRestatements(snapshot.query, selected, controller.signal)
+          .then((response) => setEntries(response.entries))
+          .catch(() => setEntries([]));
 
         // Steps 2-4. The cursor closes the snapshot-to-subscribe gap: anything ingested between
         // the read transaction above and this line is replayed by B10a.
@@ -283,6 +302,8 @@ export function App() {
           setTotals(response);
           setTotalsFresh(true);
         })
+        .then(() => fetchRestatements(view, selected, controller.signal))
+        .then((response) => setEntries(response.entries))
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           console.warn('[totals] refresh failed', err);
@@ -320,6 +341,15 @@ export function App() {
    * to say what it decided, and the sentence belongs next to the chart, not inside the canvas.
    */
   const plan = planChart([...store.rows.values()], store.window, charted, metric, granularity);
+  // B42's counts, over the rows that are actually charted. Selection, not arithmetic: `state` and
+  // `restated_at` were both derived by the server (B21), and this only tallies them.
+  const chartedIds = new Set(charted.map((ad) => ad.ad_id));
+  const inView = [...store.rows.values()].filter((row) => chartedIds.has(row.ad_id));
+  const restatedInView = inView
+    .filter((row) => row.restated_at !== null)
+    .sort((a, b) => (a.minute_start < b.minute_start ? -1 : 1));
+  const settledInView = inView.filter((row) => row.state === 'settled').length;
+  const liveInView = inView.filter((row) => row.state === 'live').length;
 
   return (
     <div className="shell">
@@ -423,6 +453,21 @@ export function App() {
             </>
           )}
         </p>
+        {/* B42 — the marks are only self-explanatory if the surface names them, and this line is
+            what makes the treatment persistent in the second sense: it is still true after a
+            repaint, a refresh, or a week. `state` and `restated_at` are server-derived (B21). */}
+        <p className="gate">
+          settlement: <strong>{restatedInView.length}</strong> restated bucket
+          {restatedInView.length === 1 ? '' : 's'} in view, marked with a square and a hairline ·{' '}
+          {settledInView} settled · {liveInView} live · the dashed vertical rule is the 72 h horizon
+          {restatedInView.length > 0 ? (
+            <>
+              {' '}· oldest restated: <code>{restatedInView[0]?.minute_start}</code> (ad{' '}
+              <code>{restatedInView[0]?.ad_id}</code>)
+            </>
+          ) : null}
+        </p>
+
         {plan.dropped.length > 0 ? (
           <p className="gate gate--dropped">
             shown as counts, not as {METRIC_LABELS[metric]} — no rung up to the hour clears the bar:{' '}
@@ -495,6 +540,10 @@ export function App() {
               ) : null}
             </p>
 
+            {/* B41 — D33's maturity indicator. It sits BETWEEN the numbers and the chart, because
+                it qualifies both, and it is worded so it cannot be read as the gate's message. */}
+            <Maturity data={totals.maturity} />
+
             {/* Per ad, so the portfolio is comparable rather than only aggregated. Same envelope,
                 same read transaction — these rows sum to the headline above by construction. */}
             <table className="totals">
@@ -541,6 +590,10 @@ export function App() {
             {latest.restated_at !== null ? <> · <strong>restated</strong></> : null}
           </p>
         )}
+
+        {/* B43 — §5.6's timeline. Below the chart, because an entry explains a mark on it. */}
+        <h2 className="section">Restatements — settled buckets that moved</h2>
+        <Timeline entries={entries} />
 
         {/* §11's stream telemetry, quarantined by treatment (D45) so it can never be misread as a
             performance metric. B44 gives it its three counters; this is the same treatment. */}

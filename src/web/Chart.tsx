@@ -25,6 +25,7 @@ import 'uplot/dist/uPlot.min.css';
 import type { BucketRow } from '../server/snapshot.ts';
 import { metricColumn, pointCounts } from './series.ts';
 import { clears, type ChartPlan } from './gate.ts';
+import { HORIZON_MS } from '../shared/config.ts';
 import { HALF_LIFE_MS, ewma, formatCents, formatCtr, formatRoas } from './metrics.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
@@ -35,6 +36,27 @@ const SERIES_COLOURS = [
 ];
 
 const HEIGHT = 320;
+
+/**
+ * **B42 — settlement, drawn so it survives a greyscale screenshot** (D45's requirement, which B42
+ * is the chunk that gets checked on).
+ *
+ * Colour is the second channel here, never the only one:
+ *
+ *   - the **settlement horizon** (`now − 72 h`, D13) is a DASHED vertical rule with a text label,
+ *     so "left of this line is settled, right of it is still live" is readable with no colour at
+ *     all. It is one rule rather than per-point shading because settlement is a property of age,
+ *     and a contiguous band drawn per point would say the same thing twelve times;
+ *   - a **restated** point gets a hollow SQUARE marker plus a full-height hairline at its x — a
+ *     shape and a position, not a hue.
+ *
+ * **Persistent, not transient** (`DESIGN.md` §5.6's first clause): the marks are drawn from
+ * `restated_at` on the row, so they are still there on the next repaint, after a refresh, and days
+ * later. A flash would be worse than nothing — the reviewer is looking somewhere else.
+ */
+const HORIZON_STROKE = '#5b6470';
+const RESTATED_STROKE = '#c2410c';
+const MARKER = 9;
 
 export type ChartProps = {
   rows: readonly BucketRow[];
@@ -69,8 +91,19 @@ function formatValue(metric: MetricKey, value: number | null): string {
   }
 }
 
+/**
+ * Where the restated marks go: `[seriesIndex, pointIndex]` pairs, read through a ref so the draw
+ * hook always sees the current set without the plot being rebuilt when it changes.
+ */
+type Marks = { restated: readonly (readonly boolean[])[] };
+
 /** uPlot options. Rebuilt whenever the SERIES SET changes — uPlot cannot add a series in place. */
-function options(labels: readonly string[], width: number, metric: MetricKey): uPlot.Options {
+function options(
+  labels: readonly string[],
+  width: number,
+  metric: MetricKey,
+  marks: { current: Marks },
+): uPlot.Options {
   return {
     width,
     height: HEIGHT,
@@ -85,6 +118,75 @@ function options(labels: readonly string[], width: number, metric: MetricKey): u
       { stroke: '#5b6470', values: (_u, ticks) => ticks.map((t) => formatValue(metric, t)) },
     ],
     legend: { show: true, live: true },
+    hooks: {
+      // AFTER the series are drawn, so the marks sit on top of the lines rather than under them.
+      draw: [
+        (u) => {
+          const ctx = u.ctx;
+          const left = u.bbox.left;
+          const top = u.bbox.top;
+          const height = u.bbox.height;
+          ctx.save();
+
+          // 1. The settlement horizon. Drawn only when it falls inside the window — outside it the
+          //    label would point off-canvas and say nothing true about what is on screen.
+          const horizonSeconds = (Date.now() - HORIZON_MS) / 1_000;
+          const [min, max] = u.scales.x?.min !== undefined && u.scales.x?.max !== undefined
+            ? [u.scales.x.min, u.scales.x.max]
+            : [0, 0];
+          if (horizonSeconds > min && horizonSeconds < max) {
+            const x = left + u.valToPos(horizonSeconds, 'x');
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = HORIZON_STROKE;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, top);
+            ctx.lineTo(x, top + height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = HORIZON_STROKE;
+            ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText('settled ◂', x - 4, top + 11);
+            ctx.textAlign = 'left';
+            ctx.fillText('▸ live', x + 4, top + 11);
+          }
+
+          // 2. The restated points. Shape and position carry the meaning; the colour is a third
+          //    channel on top of both, which is what makes the greyscale check pass.
+          ctx.strokeStyle = RESTATED_STROKE;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 2]);
+          const drawn = new Set<number>();
+          marks.current.restated.forEach((column, s) => {
+            const values = u.data[s + 1];
+            column.forEach((isRestated, i) => {
+              if (!isRestated) return;
+              const xValue = u.data[0]?.[i];
+              if (xValue === undefined) return;
+              const x = left + u.valToPos(xValue, 'x');
+              // The hairline, once per x even if three ads restated the same minute.
+              if (!drawn.has(i)) {
+                drawn.add(i);
+                ctx.beginPath();
+                ctx.moveTo(x, top);
+                ctx.lineTo(x, top + height);
+                ctx.stroke();
+              }
+              // The marker, only where that ad actually has a value at that point — a square
+              // floating in space would claim a restatement of a number that is not drawn.
+              const yValue = values?.[i];
+              if (yValue === null || yValue === undefined) return;
+              const y = top + u.valToPos(yValue as number, 'y');
+              ctx.setLineDash([]);
+              ctx.strokeRect(x - MARKER / 2, y - MARKER / 2, MARKER, MARKER);
+              ctx.setLineDash([2, 2]);
+            });
+          });
+          ctx.restore();
+        },
+      ],
+    },
     series: [
       { label: 'time' },
       ...labels.map((label, i) => ({
@@ -103,7 +205,7 @@ function options(labels: readonly string[], width: number, metric: MetricKey): u
 export function Chart({ rows, window, plan, smooth }: ChartProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const plot = useRef<uPlot | null>(null);
-  const { data, labels } = useMemo(() => {
+  const { data, labels, restated } = useMemo(() => {
     // Re-bucketed at the PLAN's granularity, never the viewport's — that is the whole of the D46
     // trap in `BUILD_PLAN.md` §14, and at B51 the plan's granularity becomes the descriptor's.
     const points = pointCounts(rows, window, plan.drawn, plan.granularity_s);
@@ -120,6 +222,7 @@ export function Chart({ rows, window, plan, smooth }: ChartProps) {
     return {
       data: [points.x, ...columns] as unknown as uPlot.AlignedData,
       labels: points.labels,
+      restated: points.restated,
     };
   }, [rows, window, plan, smooth]);
 
@@ -128,6 +231,8 @@ export function Chart({ rows, window, plan, smooth }: ChartProps) {
   // a dependency on it.
   const labelsRef = useRef<string[]>(labels);
   labelsRef.current = labels;
+  const marksRef = useRef<Marks>({ restated: [] });
+  marksRef.current = { restated };
   const metricRef = useRef<MetricKey>(plan.metric);
   metricRef.current = plan.metric;
 
@@ -141,7 +246,11 @@ export function Chart({ rows, window, plan, smooth }: ChartProps) {
     const element = host.current;
     if (element === null || shape === '') return;
     const width = element.clientWidth || 800;
-    const instance = new uPlot(options(labelsRef.current, width, metricRef.current), data, element);
+    const instance = new uPlot(
+      options(labelsRef.current, width, metricRef.current, marksRef),
+      data,
+      element,
+    );
     plot.current = instance;
 
     const onResize = () => instance.setSize({ width: element.clientWidth || 800, height: HEIGHT });
@@ -159,6 +268,8 @@ export function Chart({ rows, window, plan, smooth }: ChartProps) {
   // The steady-state path, and the one D44 was chosen for: at a 250 ms flush tick this runs up to
   // four times a second for as long as the demo is open. An array swap, not a reconciliation.
   useEffect(() => {
+    // `setData` triggers a redraw, which re-runs the draw hook above, which reads `marksRef` — so
+    // the marks follow the data without the plot being rebuilt.
     plot.current?.setData(data);
   }, [data]);
 

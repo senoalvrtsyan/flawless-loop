@@ -13,6 +13,7 @@ import { verify, type VerifyResult } from './verify.ts';
 import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
 import { parseSnapshotQuery, snapshot, totalsOnly, type Snapshot, type TotalsResponse } from './snapshot.ts';
+import { restatements, type RestatementEntry } from './restatements.ts';
 import { createStream } from './stream.ts';
 import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 
@@ -132,6 +133,29 @@ const routes: readonly Route[] = [
         return;
       }
       const body: Snapshot = snapshot(db, parsed.query);
+      sendJson(res, 200, body);
+    },
+  },
+  {
+    method: 'GET',
+    /**
+     * **B43 — the restatement timeline** (`DESIGN.md` §5.6). Its own endpoint rather than a member
+     * of the snapshot, because it answers a different question over the same window: the snapshot
+     * says what the numbers ARE, this says which of them moved after they had settled and by how
+     * much. It takes the same `?from&to&ads`, so the two cannot describe different portfolios.
+     */
+    path: '/api/restatements',
+    handler: (_req, res, url) => {
+      const parsed = parseSnapshotQuery(url.searchParams);
+      if (!parsed.ok) {
+        sendJson(res, 400, { error: 'bad_request', message: parsed.error });
+        return;
+      }
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const body: { query: typeof parsed.query; entries: RestatementEntry[] } = {
+        query: parsed.query,
+        entries: restatements(db, parsed.query),
+      };
       sendJson(res, 200, body);
     },
   },
