@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1, G2 closed) · 18 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 2 in progress (G1, G2, G3 closed) · 20 / 64 chunks**
 
 ---
 
@@ -43,9 +43,19 @@ and spend, each landing additively in its own `rollup_minute` column. Attributio
 conversion to its click, its click's minute (D27-B) and the generation live at that click (D14),
 though nothing calls it yet.
 
-**The rest of stage 2 (B18–B24)** is conversions and cohort placement, orphans, restatement, the
-timestamp module, settlement on the read side, `/api/verify` and replay — verified by `curl` and
-`sqlite3` only — ending with the P14 agreement sweep.
+**G3 = B18 + B19 is closed.** **The fourth signal kind is real, and the late conversion lands where
+the design says it lands.** `ingest()` now accepts all four of the brief's kinds. A conversion is
+credited at **its click's minute, on its click's ad** (D27-B, I8/G30) — verified end to end against
+a seeded store: a click at 07:18 and a conversion at 09:47 produce **one** rollup row, at 07:18,
+with `max_ingest_seq` raised to the conversion's seq. An unattributable conversion is credited
+**provisionally at its own minute**, in the `provisional_*` columns, never in the settled ones
+(D16). **D54:** `orphan_expired` is derived at read by `attributionStateAt()` and never stored —
+`orphanTally()` gives the same store two different answers three days apart with no write between
+them. `npm test` runs **50 tests**.
+
+**The rest of stage 2 (B20–B24)** is restatement, the timestamp module, settlement on the read side,
+`/api/verify` and replay — verified by `curl` and `sqlite3` only — ending with the P14 agreement
+sweep.
 
 **No decision blocks anything from B18 to B35.** D44/D45 are *deferred* (**F4**) and come back at
 the stage 3 → 4 seam; see "What is open", which also carries the two unratified B11 assumptions.
@@ -59,14 +69,14 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | File | What it is |
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
-| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I19**) — the assembly source for the README's extensions section. |
+| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
-| `docs/DECISIONS.md` | Ratified only — **D1–D53, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
-| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale as of D41–D43/F4/U8–U9**, see "What is owed". |
+| `docs/DECISIONS.md` | Ratified only — **D1–D54, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
+| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale as of D41–D43/F4/U8–U9/D54**, see "What is owed". |
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps**. |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (16). |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
 | **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
@@ -77,21 +87,21 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/server/index.ts`** | B04/B05/B14. One `DatabaseSync` for the process; refuses to boot on an unmigrated store; `GET /api/health` (log position), `POST /api/ingest`, **`POST` and `GET /api/decisions`**; clean close on SIGINT/SIGTERM. Port **8787**, `PORT` overrides. |
 | **`scripts/dev.mjs`** | B04/B08. **Three** OS processes: server, simulator (D32), and Vite on :5173. A crash in any tears the rest down; a **clean** exit does not. **Unchanged by B11** — the simulator now runs forever instead of returning immediately, so that tolerance is no longer exercised, but it is what keeps `npm run dev` alive if the emitter is ever stopped alone. |
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
-| **`src/server/ingest.ts`** | B05/B09/B16. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. **`isCanonicalIso` is exported** for its D43 test (B12) and for no other caller. **B16 widened `SUPPORTED` to impression + click + spend**, added the `OWN_FIELDS` ownership table and the `click_id` collision test — whose position in the ladder is a §14 trap. |
+| **`src/server/ingest.ts`** | B05/B09/B16. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. Returns **`IngestOutcome`** = `{ result, dirty }` (B09: the buckets it moved, for the SSE flush; the caller publishes *after* commit). **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. **`isCanonicalIso` is exported** for its D43 test (B12) and for no other caller. **B16 widened `SUPPORTED` to impression + click + spend**, added the `OWN_FIELDS` ownership table and the `click_id` collision test — whose position in the ladder is a §14 trap. **B18 completed `SUPPORTED` with `conversion`** and validates its two fields. |
 | **`src/server/stream.ts`** | B09/B10a. **273 lines — B44 splits it** (§14/B44 row). `createStream(db)` — the process-wide dirty set (coalesced by `Map`), the **250 ms** flush tick, `subscribe`/`markDirty`/`shutdown`/`size`. **One frame per tick** carrying every touched bucket as an absolute row; `id:` = high-water `ingest_seq`. Plus B10a: `readCursor()` = `max(?cursor, Last-Event-ID)` validated as `/^\d+$/` on the RAW string, the store replay (`bucketsSinceReader`, `LIMIT 2001`), and the three `resnapshot` conditions. **Subscribes before replaying** — duplicates are free, gaps are not. |
 | **`src/server/snapshot.ts`** | B07/B09/B10a. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Also **`bucketReader()`** (the flush's single-bucket read) and **`bucketsSinceReader()`** (the resume read) — both here so the snapshot, the flush and the resume cannot drift into three row shapes. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
 | **`index.html`, `vite.config.ts`** | B08. Vite dev-serves `src/web` alone on **:5173** and proxies `/api` to :8787 (D41-A). Client fetches relative paths, so no CORS and one configuration. Unstyled: D45 deferred. |
 | **`src/web/main.tsx`, `src/web/App.tsx`** | B08/B10b. Snapshot for the last hour, then subscribe from its cursor; renders **one bucket's `impressions` verbatim** plus the server's window, the cursor and a link state. No sum — see **D46**. Nothing durable client-side (§3). A `resnapshot` bumps a generation counter that re-runs the whole effect, so §3.1's "return to step 1" is literally a re-mount. |
 | **`src/web/store.ts`** | B10b. The render cache. `createStore` / `applyRows` / `inWindow` / `latestBucket` / `bucketKey`. **The merge is an ASSIGNMENT keyed by `(ad_id, minute_start)`, never an addition** — absolute rows (D30) — and **out-of-window rows are dropped**, because the replay is unwindowed while the snapshot is windowed. |
 | **`src/web/stream.ts`** | B10b. `subscribe(cursor, handlers)` → `EventSource('/api/stream?cursor=N')`. **`?cursor=` is mandatory (D47)**: `EventSource` cannot set a header, so without it every refresh drops the snapshot-to-subscribe gap. |
-| **`src/server/apply.ts`** | B06/B13/B16. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert — **one generalised statement binding four deltas**, covering impression, click and spend; `AppliedSignal` is a **discriminated union** on `kind`, so a caller that forgets the money is a compile error. B18 adds the conversion, which is the one kind that does not land at its own minute. Plus **`applyDecision()`** (B13): §7's four steps in one transaction — precondition, fold, close generation *n* / open *n+1*, write `ads`. It also inserts the `decisions` **log** row, deliberately, so the log and the projections it produces commit together. |
+| **`src/server/apply.ts`** | B06/B13/B16. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert — **one generalised statement binding four deltas**, covering impression, click and spend; `AppliedSignal` is a **discriminated union** on `kind`, so a caller that forgets the money is a compile error. **B18/B19 added the conversion** — the one kind that does not land at its own minute: `apply()` resolves attribution (so a rebuild re-derives placement through this same function), writes the `conversion_attribution` row, and credits either `conversions`/`value_cents` at the CLICK's minute or `provisional_*` at the orphan's own. It **returns `BucketKey[]`** — B20's promotion moves two buckets, and `stream.ts` treats every key as a row that certainly exists. Plus **`applyDecision()`** (B13): §7's four steps in one transaction — precondition, fold, close generation *n* / open *n+1*, write `ads`. It also inserts the `decisions` **log** row, deliberately, so the log and the projections it produces commit together. |
 | **`src/shared/decisions.ts`** | B12. `AdConfig`, `AdInitial`, `DecisionBody` (§2.3's six actions), `Decision`, `ACTOR`. The lever half of "configs, signals and levers stay distinct" — no signal type appears here. `AdInitial` omits `created_at` per **D51**. |
 | **`src/server/fold.ts`** | B12. **Two pure functions, no store, no clock.** `precondition()` = §7's compare-and-swap + the existence rules + the transition table (F1's unreachable `archived` branch lives in it, explaining itself). `fold()` = the six actions, returning a new object every time. |
 | **`src/server/decisions.ts`** | B14. `postDecision()` and `listDecisions()` — parse and shape only; **writes nothing**. `ts` and `actor` are server-assigned, so U7's backdating and U2's actor are unrepresentable on the wire rather than validated. |
-| **`src/server/attribute.ts`** | B17. `resolveAttribution()` and `generationAt()`. **Reads and computes only** — `conversion_attribution` is a projection and B18 persists the row this returns. Covers D14, D16, D27-B and I8/G30. **No caller yet.** |
+| **`src/server/attribute.ts`** | B17. `resolveAttribution()` and `generationAt()`. **Reads and computes only** — `conversion_attribution` is a projection and B18 persists the row this returns. Covers D14, D16, D27-B and I8/G30. Called by `apply()` from B18 on. **B19 added the derived half:** `HORIZON_MS` (72 h, D13 — **B21 moves it to `shared/config.ts`**), `attributionStateAt()` and `orphanTally()`. **D54: `orphan_expired` is computed at read, never stored** — the column holds two states. |
 | **`src/sim/fixtures.ts`** | B15. SIMULATOR §2 transcribed: `COMPONENTS` (16, `vl_04` at two versions), `AUDIENCES` (4, all US), `ADS` (12, with `live_days` and D52's budgets — the expected-spend derivation is written above the table). `served_fraction` is deliberately **not** here: it is an emitter parameter, not an `audiences` column. |
 | **`src/sim/seed-world.ts`** | B15. `seedWorld(db, t0)` + `npm run seed`. Writes `components` and `audiences` directly (static reference data, not projections) and creates every ad **only** through `applyDecision()`. **D53:** decisions backdated to `T0 − live_days`. Refuses a non-empty world. |
-| **`src/server/*.test.ts`** | B12/B13/B17. `npm test` = `node --test`, **39 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8). D43's criterion governs what goes here, not a list — attribution is one of its four named functions. |
+| **`src/server/*.test.ts`** | B12/B13/B17. `npm test` = `node --test`, **50 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), **`conversion.test.ts` (11 — B18/B19, ingest→apply end to end)**. D43's criterion governs what goes here, not a list — attribution is one of its four named functions. |
 | **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
 | **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. |
 
@@ -104,7 +114,7 @@ npm run seed          # B15: the 12-ad world, as 24 backdated decisions. ONCE, o
 npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
 npm run sim           # the simulator alone, against an already-running server
 npm run typecheck     # tsc --noEmit, must be clean
-npm test              # node --test — no test files yet (D43), exits 0
+npm test              # node --test — 50 tests (D43's targets plus the write path)
 
 open http://localhost:5173        # the number, live. Ctrl-C the runner and it comes back.
 
@@ -118,6 +128,16 @@ F=$(node -e "console.log(new Date(Date.now()-3600e3).toISOString())"); TO=$(node
 curl -s "localhost:8787/api/snapshot?from=$F&to=$TO"    # buckets + as_of_ingest_seq
 curl -sN "localhost:8787/api/stream?cursor=0"           # ready frame, then absolute rows per tick
 curl -sN -H 'Last-Event-ID: 999999' localhost:8787/api/stream    # resnapshot cursor_ahead_of_log
+# B18/B19 — a click, then its late conversion. The conversion lands in the CLICK's minute.
+CK=$(node -e "console.log(new Date(Date.now()-9000e3).toISOString())")   # 2.5 h ago
+CV=$(node -e "console.log(new Date(Date.now()-60e3).toISOString())")
+curl -s -X POST -H 'content-type: application/json' localhost:8787/api/ingest \
+  -d '[{"event_id":"k1","ts":"'$CK'","ad_id":"a_12","event":"click","click_id":"ck1","cost_cents":62}]'
+curl -s -X POST -H 'content-type: application/json' localhost:8787/api/ingest \
+  -d '[{"event_id":"v1","ts":"'$CV'","ad_id":"a_12","event":"conversion","attributed_click_id":"ck1","value_cents":4500}]'
+#   -> one rollup row moves, at the CLICK's minute; none is created at the conversion's
+#   -> attributed_click_id that matches nothing => provisional_conversions at its OWN minute
+
 sqlite3 data/loop.sqlite "SELECT ad_id,minute_start,impressions,max_ingest_seq FROM rollup_minute ORDER BY max_ingest_seq;"
 sqlite3 data/loop.sqlite "SELECT disposition, COUNT(*) FROM signal_deliveries GROUP BY 1;"
 #   -> restart the sim within 60s: duplicate_identical rises, impressions do NOT
@@ -333,12 +353,12 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 
 | | |
 |---|---|
-| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1 (B12–B14) and G2 (B15–B17) closed**; B18 is next. |
-| **Last completed chunk** | **B17** — attribution. G2's commits: `dfca97a` (D52/D53), `955a74a` (B15), `271496b` (B16), `58d863b` (B17). G1's were `66afb5b`/`515a8cf`/`822cdaa`. |
-| **Next gate** | **G3 = B18 + B19** — conversions: cohort placement and orphans. Nothing blocks it. Only two chunks, which is within D48's 3–5 because `BUILD_PLAN.md` §5 defines the gate that way. |
-| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ **both done** · **G3** B18+B19 · **G4** **B20 alone** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
+| **Current stage** | **Stage 2 — the full write path (B12–B24)**, in progress. **G1 (B12–B14), G2 (B15–B17) and G3 (B18–B19) closed**; B20 is next. |
+| **Last completed chunk** | **B19** — the orphan. G3's commits: `beff2dc` (D54), `061bb00` (B18), `7a8d956` (B19). G2's were `dfca97a`/`955a74a`/`271496b`/`58d863b`; G1's `66afb5b`/`515a8cf`/`822cdaa`. |
+| **Next gate** | **G4 = B20 ALONE — restatement.** §13's hardest chunk and **single-gated**: do not group it. Nothing blocks it. |
+| **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ **three done** · **G4** **B20 alone** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
 | **In flight** | nothing |
-| **Chunks ticked** | **18 / 64** (B01–B09, B10a, B10b, B11–B17) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **20 / 64** (B01–B09, B10a, B10b, B11–B19) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -360,7 +380,7 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Fourteen now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Sixteen now — the Phase 5 ones were
 found against the real store and are in no design document.
 
 - **Nothing writes a projection except `apply()`** (D7). `ads`, `config_generations`,
@@ -449,6 +469,15 @@ found against the real store and are in no design document.
   down and `to` up and echoes the resolved window. **B53's drill-down asserts raw == buckets over
   `[from, to)`**, so unaligned it reports FAIL for a reason that is not corruption. The read side
   canonicalises where the write side rejects — a bound is a query, `signals.ts` is a fact.
+- **`conversions` and `provisional_conversions` must never be summed** (found at B19; bites at
+  **B38**). Side by side in the same row, both counting conversions — so adding them is the natural
+  thing to write, and it puts unattributed revenue into ROAS and CPA. They are disjoint by
+  construction so the settled and provisional figures can be shown apart. Every number stays
+  plausible and B24's sweep agrees with itself.
+- **There is no stored `orphan_expired` to filter on** (D54, B19). Expiry is derived at read, so
+  `WHERE state = 'orphan_provisional'` means *"unresolved, including the ones we gave up on"* — a
+  health count written that way reports zero expired orphans forever, and it also full-scans (the
+  row below). `state <> 'resolved'` in SQL, then `attributionStateAt(row, at)` in JS.
 - **A partial index is only used if the query spells its predicate literally** (found at B03).
   `WHERE state = 'orphan_provisional'` and `WHERE state IN (...)` both **full-scan**
   `conversion_attribution`; only `WHERE state <> 'resolved'` reaches `ix_attr_unresolved`. **Every
@@ -494,12 +523,12 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   §18.4 carries a pointer to it.
 - **B33 owes a fault split.** Malformed (0.1%) and dual click-id (0.05%) both read `rejected_invalid`
   and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
-  bodies, which is only correct once `SUPPORTED` covers all four kinds.
-- **B18 owes the WRITE that B17 does not do.** `resolveAttribution()` returns a
-  `conversion_attribution` row and persists nothing, because that table is a projection and
-  `apply()` is its only writer (D7). `BUILD_PLAN.md`'s B17 row says the table "is `resolved` with
-  the generation covering T" — it is empty until B18 wires the write in. B17's test asserts the
-  emptiness deliberately.
+  bodies. Its precondition is now met: **B18 completed `SUPPORTED`**, so a click no longer reads as
+  a fault.
+- **B21 owes the move of `HORIZON_MS`.** B19 needed the 72 h horizon two chunks before B21 creates
+  `src/shared/config.ts`, so it is exported from `src/server/attribute.ts` for now. B21's row
+  already says the horizon and the `America/New_York` constant land in one module — that is the
+  move, not a refactor to propose.
 - **`ad_id` known (§5.1 step 2) is still NOT validated at ingest.** `ingest.ts` says so in a
   comment — "the check lands with the ad, not before it" — and B15 has now landed the ads, but **no
   `BUILD_PLAN` row asks for the check** and adding it would make an unseeded store reject every
@@ -612,52 +641,51 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce G3, build it, report once, wait.** Nothing needs deciding first. **The gate is the
-group** (D48) — read `CLAUDE.md` §5 as it stands, not as remembered.
+**Announce B20, build it, report, wait.** Nothing needs deciding first.
 
-**G3 = B18 + B19**, and the one concern is *conversions: cohort placement and orphans*. Two chunks,
-not three — `BUILD_PLAN.md` §5 defines the gate that way, and D48's 3–5 is a ceiling on grouping,
-not a quota. Read **`DESIGN.md` §5.2, §5.3, §5.4** and **`SIMULATOR.md` §11** before writing it.
+**G4 = B20 ALONE. It is single-gated** (`CLAUDE.md` §5, `BUILD_PLAN.md` §13) — do not group it with
+B20a or anything else. It is §13's hardest chunk, and everything it gets wrong is invisible.
 
 | Chunk | Scope, from the plan row and no wider | Files |
 |---|---|---|
-| **B18** | `conversion` through ingest **and** cohort placement (D27-B) together — a conversion counts in **its click's minute**. Persists the `conversion_attribution` row B17 computes | `src/server/ingest.ts`, `src/server/apply.ts` |
-| **B19** | Orphans: `orphan_provisional` at its own minute into the **`provisional_*`** columns; `orphan_expired` past the horizon | `src/server/attribute.ts`, `src/server/apply.ts` |
+| **B20** | **Restatement.** `applyConversion(ev, prev)`: decrement the old bucket, credit the new; `settled_at(B, ev.received_at)` — *never* wall-clock `now`; `restated_at` + `restatement_count`; orphan promotion via `ix_signals_attr` | `src/server/apply.ts` |
 
-Five things that are already true and constrain the group:
+Read **`DESIGN.md` §5.4** and **`SIMULATOR.md` §15.3(c)** before writing it. What is already true
+and constrains it:
 
-- **B18 is the chunk that makes B17 real.** `resolveAttribution()` returns a row and writes
-  nothing; `apply()` is the only writer of `conversion_attribution` (D7), so B18 owns the INSERT.
-- **B18 cannot be split.** `ingest()` calls `apply()` for every accepted signal, so a conversion
-  that ingests before `apply()` can place it would need a silent no-op branch — the exact
-  divergence `default: throw` prevents. This is the split Seno already made at B11 for click/spend.
-- **The conversion is the ONE kind that does not land at its own minute.** `apply()` currently
-  computes `minute_start = floorMinute(signal.ts_effective)` once, before the switch, precisely
-  because impression/click/spend all agree. D27-B breaks that for conversions, so B18 changes that
-  line — deliberately, not incidentally.
-- **`max_ingest_seq` is the resume contract.** Every path B18 and B19 add must raise it, or a
-  resuming client never learns the bucket moved and **B24's sweep will not catch it** because the
-  counts are right. B20's restatement touching only `restated_at` is the named case.
-- **Every orphan query must carry `state <> 'resolved'` as a literal term** (the B03 finding).
-  `ix_attr_unresolved` is a partial index with exactly that predicate; `state = 'orphan_provisional'`
-  and `state IN (...)` both full-scan, correctly and slowly.
+- **Restatement is GENERIC** (§5.4): *a fact changed, recompute the affected buckets.* Not
+  lateness-specific — D27-B forced that, because an orphan promotion moves a conversion between two
+  buckets and a lateness-only mechanism would be wrong on the very first orphan.
+- **The two buckets are already findable.** `conversion_attribution.credited_minute` stores the
+  placement precisely so the OLD bucket can be located to decrement; B19 writes it for orphans too.
+  `apply()` already returns `BucketKey[]`, so a two-bucket move needs no signature change.
+- **Settlement is evaluated at `ev.received_at`, never at wall-clock `now`** (D38, correcting §5.4's
+  own pseudocode). The wall-clock form stamps `restated_at` on every backfilled event landing in a
+  bucket older than 72 h — tens of thousands of spurious restatements, and P7 looking broken on
+  frame one.
+- **Every touched bucket must raise `max_ingest_seq`** — including a bucket whose counts do not
+  change and only `restated_at` moves. That is the named case in the §14 resume-contract trap: the
+  counts are right, so B24's sweep will not catch it, and every resuming client is told nothing.
+- **Promotion queries carry `state <> 'resolved'` as a literal term** (the B03 finding), and under
+  **D54** there is no expired state to exclude — an orphan whose click arrives on day eight still
+  promotes, because age is a reading, not a stored state.
+- **Orphan promotion also rewrites `credited_ad_id`** to the click's (I8/G30) and
+  `credited_generation_id` to the generation live at the click (D14). The provisional credit comes
+  out of `provisional_*` at the old minute; the settled credit goes into `conversions`/`value_cents`
+  at the new one. They are never summed (§14).
 
-**Restatement is B20 and is SINGLE-GATED** — do not pull the decrement/credit forward into B19.
-B19 places an orphan and expires it; moving one between buckets is B20's whole concern.
+**After B20**: **G5 = B20a + B21 + B22 + B23** — the timestamp module, settlement on the read side,
+`/api/verify`, replay. Then **G6 = B24 alone**.
 
-**Stop mid-group** if a chunk needs a decision, reveals the design is wrong, or wants a dependency.
-
-**After G3**: **G4 = B20 alone**. Stage 2's remaining gates are in the "Build progress" table.
-
-**One thing to know about the ground G3 stands on.** The simulator still emits impressions only,
-for `a_12`, and **still emits regardless of status** — `GET /api/sim/world` is B29, so HR3's
-*"pausing `a_12` stops its events"* is real in the store from B14 but not yet in the world. B18's
-conversions therefore have to be posted by hand (`curl`) until the emitter learns to make them.
+**One thing to know about the ground B20 stands on.** The simulator still emits impressions only,
+for `a_12`, and still emits regardless of status — `GET /api/sim/world` is B29. Conversions and
+withheld clicks are posted by hand (`curl`) until the emitter learns to make them, so B20's
+promotion is demonstrated by ingesting a conversion first and its click second.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
 1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5 as amended by D48.
-   **In progress, 12/64** — stages 0 and 1 closed.
+   **In progress, 20/64** — stages 0 and 1 closed, stage 2 half done.
 2. **Phase 6 — packaging:** README, demo script, the "life of one event" trace, the AI artifact.
    These are `BUILD_PLAN.md` stage 7 (B57–B62) rather than a separate effort.
 
