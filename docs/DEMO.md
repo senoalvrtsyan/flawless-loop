@@ -43,8 +43,8 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | # | Beat | Chunk | Written? |
 |---|---|---|---|
 | 1 | **The world has a past** — the app opens onto seven days, not an empty chart | B36 | ✅ below |
-| 2 | Read a signal off the chart | B37, B38 | ◐ chart written below; ratios owed by B38 |
-| 3 | The gate refuses to draw a ratio it cannot support | B40 | — |
+| 2 | Read a signal off the chart | B37, **B38** | ✅ below — ratios landed at B38 |
+| 3 | The gate refuses to draw a ratio it cannot support | **B39**, B40 | ✅ below |
 | 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | B46, B47 | — |
 | 5 | **A late conversion restates a settled bucket** | B42, B43, B49 | — |
 | 6 | **Walk a number back to its events** | B52, B53 | — |
@@ -84,7 +84,7 @@ only thing that changed on disk is one row in `decisions`.
 
 ---
 
-## Beat 2 — read a signal off the chart (B37; ratios owed by B38)
+## Beat 2 — read a signal off the chart (B37, B38)
 
 **Say:** *"Every point on this chart is a sum of events that are still in the store. Pick one and I
 will show you the events under it."*
@@ -118,6 +118,94 @@ sqlite3 data/loop.sqlite "
 4. **A line that falls to zero is an ad delivering nothing; a line that has not started is an ad
    that did not exist yet.** The chart distinguishes them: zero inside the ad's life, nothing at
    all before `launched_at`.
+
+### The headline, and where its numbers come from (B38)
+
+**Say:** *"Six numbers, and the server computed all six. The client formats them and is structurally
+incapable of inventing one."*
+
+5. **Read the headline row** — impressions, clicks, spend, CTR, CPA, ROAS, with the per-ad table
+   under it. **Spend says its own two parts** (`$X clicks + $Y CPM/fees`): the brief keeps click
+   costs and non-click charges disjoint and says total spend is their sum (L79-80), so it is a
+   read-time sum and never a stored third column.
+6. **Point at the note under CPA and ROAS**: *"lags by cohort"*. CTR's two terms both land at their
+   own time; a conversion is backdated to its click's minute (D27-B), so CPA and ROAS are only
+   readable once a cohort matures. That sentence is on the screen because a cockpit that does not
+   say it invites exactly the wrong decision.
+7. **Point at the provisional line.** Orphan conversions — a conversion whose click has not arrived
+   — are counted **apart** and excluded from CPA and ROAS. Both columns are called conversions and
+   sit side by side in the same row, so adding them is the natural mistake; it would put
+   unattributed revenue into ROAS and every number would still look plausible.
+8. **Prove the totals rather than trusting them.** Sum the buckets the same screen is drawn from,
+   then check the same window against **raw events**:
+
+```
+F=2026-09-03T17:00:00.000Z; T=2026-09-03T23:00:00.000Z
+curl -s "localhost:8787/api/snapshot?include=totals&from=$F&to=$T&ads=a_08" | python3 -m json.tool
+sqlite3 data/loop.sqlite "
+  SELECT COUNT(*) buckets, SUM(impressions), SUM(clicks), SUM(click_cost_cents)+SUM(spend_cents),
+         SUM(conversions), SUM(value_cents)
+    FROM rollup_minute WHERE ad_id='a_08' AND minute_start >= '$F' AND minute_start < '$T';"
+sqlite3 data/loop.sqlite "
+  SELECT SUM(kind='impression'), SUM(kind='click'),
+         COALESCE(SUM(cost_cents),0)+COALESCE(SUM(amount_cents),0)
+    FROM signals WHERE ad_id='a_08' AND ts_effective >= '$F' AND ts_effective < '$T';"
+```
+
+   Measured at B38, all three agree exactly: **360 buckets · 18,056 impressions · 680 clicks ·
+   $285.30 spend · 77 conversions · $6,341.12 value**, and CTR hand-computed as 680 / 18,056 =
+   3.7661% is what the server sent to fifteen decimal places. **The conversions agree through the
+   attribution join** — 77 either way — which is D27-B: a conversion counts in its *click's* minute,
+   so the raw route has to join back through `attributed_click_id` to ask the same question.
+9. **`?include=totals` is the cheap read** the screen uses every five seconds: **752 bytes in
+   2.2 ms**, against 24 MB and 449 ms for the whole 7-day snapshot. It carries the resolved window
+   and `as_of_ingest_seq`, so the headline says which question it answered and at which log
+   position — never just a number.
+10. **The window walks forward** (D65). Watch the telemetry line: `window … → …` advances a minute at
+    a time while `anchored at …` stays where the snapshot put it, and `(+Nm)` counts the distance.
+    Before B38a the frame was frozen at fetch time and the surface was live for at most the tail of
+    one minute — measured, and it is the reason the roll exists. **Refresh and the anchor resets.**
+
+---
+
+## Beat 3 — the gate refuses to draw a ratio it cannot support (B39, B40)
+
+**Say:** *"This is the honest part. The chart will not draw a ratio it does not have the evidence
+for, it tells you which resolution it chose, and it names the ads it gave up on."*
+
+The bars are **D20**'s: ≥ 500 impressions per point for CTR, ≥ **10 conversions** per point for CPA
+and ROAS. The ladder is minute → 5 min → 15 min → hour and then it **stops** — past the hour the
+counts are shown instead of an ever-wider bucket. **D67** fixes what "its points clear" means: the
+bar is tested per point, a rung is admissible at **more than 50% of the window's non-empty points**,
+and the gated count is always on screen.
+
+1. **Select `a_08` alone, window `6h`, metric `CTR`, granularity `minute`.** The caption reads
+   **drawn at 15 min — the gate coarsened from minute to clear its bar**. Nobody chose 15 minutes;
+   the data did.
+2. **Switch metric to `CPA`.** On an evening window it reads **drawn at hour** with a gated count.
+   Measured on the seeded week, `a_08` over `2026-09-04 00:00–04:00Z` (20:00–00:00 local): **CPA
+   drawn at the hour, 3 points plotted, 1 gated**.
+3. **Now the same ad over `2026-09-04 05:00–11:00Z`** (01:00–07:00 local, the overnight trough).
+   **CPA falls to counts** — *"0 of 6 points clear at best — under 10 conversions"* — and CTR
+   coarsens from 15 min to the hour. **Both branches of D20 fire on the same ad, four hours apart.**
+   That is the demo moment `SIMULATOR.md` §18.3 was parameterised to produce, and it is reproduced
+   from **realised** counts, not from the expectations that table was computed with.
+4. **Select the whole portfolio, metric `CPA`.** One ad is drawn (`a_08`) and **eleven are named**
+   with their reason. Say it out loud: *"a portfolio where every chart drew every ratio would make
+   this mechanism invisible."*
+5. **Metric `CTR`, whole portfolio, 24h.** Nine ads drawn at the hour, **43 of 216 points gated**,
+   and `a_07` / `a_09` named as counts-only. `a_09` clears nothing at any rung — 214 impressions an
+   hour against a bar of 500 — and the surface says why rather than drawing a line through noise.
+6. **Toggle `raw` → `EWMA 15m`** (B40). The series smooths and the caption warns that smoothed
+   points **will not reconcile against raw events** — switch back to raw before walking one back,
+   which is what B53's drill-down asserts against. Note the honest limitation while it is on screen:
+   at D20's ratified 15-minute half-life the carried weight is 0.5 at the 15-min rung and **0.0625
+   at the hour**, so smoothing visibly acts on CTR and barely acts on CPA. That is the constant
+   behaving correctly, not a broken control.
+
+**The distinction to keep saying:** the gate says *too little data to be a ratio*; the maturity
+indicator (B41) says *the data is still arriving*. A young cohort trips both, for different reasons,
+and the surface has to say which.
 
 ---
 

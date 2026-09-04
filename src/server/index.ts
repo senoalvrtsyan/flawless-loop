@@ -12,7 +12,7 @@ import { simWorld } from './sim-world.ts';
 import { verify, type VerifyResult } from './verify.ts';
 import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
-import { parseSnapshotQuery, snapshot } from './snapshot.ts';
+import { parseSnapshotQuery, snapshot, totalsOnly, type Snapshot, type TotalsResponse } from './snapshot.ts';
 import { createStream } from './stream.ts';
 import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 
@@ -118,7 +118,21 @@ const routes: readonly Route[] = [
         sendJson(res, 400, { error: 'bad_request', message: parsed.error });
         return;
       }
-      sendJson(res, 200, snapshot(db, parsed.query));
+      // **B38 / D66: `?include=totals` serves the totals alone** — the same window, the same read
+      // transaction, no buckets and no portfolio. Measured on the seeded week: 20 ms and ~2 KB
+      // against 449 ms and 24 MB for the full snapshot, which is what makes a rolling window (D65)
+      // able to keep its headline current without re-fetching what it already holds.
+      //
+      // Both bodies are annotated at the CALL SITE on purpose (§14, found at B09): `sendJson` takes
+      // `unknown`, so without these two declarations a change to either return shape typechecks
+      // clean and silently changes what the client receives.
+      if (parsed.totalsOnly) {
+        const body: TotalsResponse = totalsOnly(db, parsed.query);
+        sendJson(res, 200, body);
+        return;
+      }
+      const body: Snapshot = snapshot(db, parsed.query);
+      sendJson(res, 200, body);
     },
   },
   {

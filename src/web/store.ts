@@ -6,7 +6,16 @@
 // applying one is an assignment, never an addition. That is what makes a redelivery after a
 // reconnect free — and B10a subscribes before replaying precisely because duplicates cost nothing
 // here while gaps would.
+//
+// **B38a adds the roll (D65).** The window used to be fixed at fetch time, and measured, that made
+// the surface live for at most the tail of one minute: `to = ceilToMinute(now)`, so once that minute
+// closed every arriving bucket was outside the window and `applyRows` dropped it — correctly, by
+// the rule below, which is what made the question a design question rather than a bug. The frame
+// now walks forward and the stream fills it. Snapping is `shared/time.ts`'s, not this file's
+// (D65's amendment): a fifth copy of `floorMinute` is exactly what B20a collapsed four copies to
+// prevent.
 
+import { MINUTE_MS, ceilToMinute } from '../shared/time.ts';
 import type { BucketRow } from '../server/snapshot.ts';
 
 /** `(ad_id, minute_start)` — D28's rollup key, and the merge key on this side too. */
@@ -17,13 +26,56 @@ export function bucketKey(row: { ad_id: string; minute_start: string }): string 
 export type Window = { from: string; to: string };
 
 export type BucketStore = {
-  /** The window these rows belong to, as the SERVER resolved it (snapped, echoed by B07). */
+  /** The window in view NOW — the anchor, walked forward by `rollWindow` (D65). */
   window: Window;
+  /**
+   * The window the SERVER resolved and echoed at step 1 (snapped by B07), kept verbatim.
+   *
+   * On screen as "anchored at" — **D65's amendment**, and the reason is that B10b's original
+   * property was that the client displayed the server's window byte for byte. A rolling frame
+   * cannot keep that property, so it keeps the anchor visible instead of implicit: a reviewer can
+   * see how far the frame has walked, and a refresh visibly re-anchors.
+   */
+  anchor: Window;
   rows: ReadonlyMap<string, BucketRow>;
 };
 
 export function createStore(window: Window, rows: readonly BucketRow[]): BucketStore {
-  return { window, rows: new Map(rows.map((r) => [bucketKey(r), r])) };
+  return { window, anchor: window, rows: new Map(rows.map((r) => [bucketKey(r), r])) };
+}
+
+/**
+ * Walk the frame forward to `now`, keeping the anchor's WIDTH, and evict what fell off the back.
+ *
+ * Returns the same store when nothing moved, so a 5-second tick costs one comparison for 55 of
+ * every 60 seconds and React re-renders only on the minute.
+ *
+ * **Why this is correct rather than lossy, and it is the whole argument for D65-C:** the frame only
+ * ever moves forward, so a minute that ENTERS the window was in the future when the snapshot was
+ * taken — every event in it therefore arrives on the stream as an absolute row (B10a replays
+ * unwindowed), and there is no set of events the client can have missed. Minutes only LEAVE.
+ *
+ * The width comes from the anchor, not from the viewport control, because the server snapped the
+ * anchor and the client must not re-derive a bound the server already resolved.
+ */
+export function rollWindow(store: BucketStore, nowMs: number): BucketStore {
+  const to = ceilToMinute(nowMs);
+  if (to <= store.window.to) return store;
+
+  const widthMs = Date.parse(store.anchor.to) - Date.parse(store.anchor.from);
+  // Whole minutes by construction: `to` is minute-aligned and the width is a whole number of
+  // minutes, because both anchor bounds were snapped by B07.
+  const from = new Date(Date.parse(to) - widthMs).toISOString();
+  const window = { from, to };
+
+  const rows = new Map<string, BucketRow>();
+  for (const [key, row] of store.rows) if (inWindow(window, row)) rows.set(key, row);
+  return { window, anchor: store.anchor, rows };
+}
+
+/** How far the frame has walked from its anchor, in whole minutes. Zero at step 1. */
+export function minutesRolled(store: BucketStore): number {
+  return Math.round((Date.parse(store.window.to) - Date.parse(store.anchor.to)) / MINUTE_MS);
 }
 
 /**
@@ -57,7 +109,7 @@ export function applyRows(store: BucketStore, incoming: readonly BucketRow[]): B
 
   const rows = new Map(store.rows);
   for (const row of relevant) rows.set(bucketKey(row), row);
-  return { window: store.window, rows };
+  return { window: store.window, anchor: store.anchor, rows };
 }
 
 /**

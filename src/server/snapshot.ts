@@ -4,9 +4,17 @@
 // This file is READ-ONLY by construction: it holds SELECTs and nothing else. Projections have
 // exactly one writer (D7, apply.ts), and the read side never repairs what it finds.
 //
-// D10 is visible here as an absence: the rows carry additive counts and no ratios. CTR/CPA/ROAS
-// are derived from these counts at B38, in this file, from the numbers below — never stored, and
-// never recomputed on the client from raw events (D30/D34).
+// D10 is visible here as an absence: the ROWS carry additive counts and no ratios. **B38 adds the
+// window totals and their ratios** — counts summed in SQL, the division taken after, in
+// `shared/metrics.ts`, and stored nowhere. There is no ratio column in any migration and there must
+// never be one (`DESIGN.md` §4.3).
+//
+// **D46 is why the totals are computed here rather than on the client**: §10.1's `TraceDescriptor`
+// rides on values the SERVER sends, so a total invented in the browser has no descriptor and B52's
+// `<Metric>` is structurally unable to render it. **D66** adds how they stay current — the client
+// re-asks over `?include=totals`, which serves the totals WITHOUT the buckets, carrying
+// `as_of_ingest_seq` and the resolved window so a reader can see which question was answered and at
+// which log position.
 
 import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
@@ -15,6 +23,7 @@ import { readTx } from './db.ts';
 // looking like two modules disagreeing.
 import { HAS_EXPLICIT_OFFSET, ceilToMinute, floorToMinute } from '../shared/time.ts';
 import { bucketState, type SettlementState } from './settlement.ts';
+import { ZERO_COUNTS, addCounts, derive, type MetricCounts, type MetricSet } from '../shared/metrics.ts';
 import type { BucketKey } from './apply.ts';
 
 /**
@@ -93,6 +102,17 @@ export type Snapshot = {
   /** Ordered by `(ad_id, minute_start)`, both request paths, so hand-diffs are reproducible. */
   buckets: BucketRow[];
   /**
+   * **B38 / D46 / D66** — the window's totals and the ratios derived from them, per ad, plus one
+   * combined row (`ad_id: null`) for the whole selection.
+   *
+   * Summed in SQL over the same predicate the buckets were read with, in the same read transaction,
+   * so `SUM` over `buckets` and this array cannot disagree — which is also the hand-verification
+   * for this chunk. Scoped to `query.ads` (unlike `ads[]`, which is always the whole portfolio):
+   * these are the numbers for what was ASKED FOR, and a total that silently included the eleven ads
+   * you are not charting would be a different question wearing the same label.
+   */
+  totals: MetricTotals[];
+  /**
    * The log position these buckets reflect — `MAX(signals.ingest_seq)`, read INSIDE the same read
    * transaction. The client hands it back as `Last-Event-ID` (§3.1 step 2, D18), so it is the one
    * number here that must not be off by one in either direction: read it before the buckets and
@@ -103,7 +123,34 @@ export type Snapshot = {
   as_of_ingest_seq: number;
 };
 
-export type ParsedQuery = { ok: true; query: SnapshotQuery } | { ok: false; error: string };
+/**
+ * One row of the totals: a `MetricSet` (counts + `spend_total_cents` + the three ratios) tagged
+ * with whose it is. **`ad_id: null` is the combined row** for the whole selection — a portfolio CTR
+ * is `SUM(clicks) / SUM(impressions)`, which is correct because the terms aggregate even though the
+ * ratio does not (D10). It is not a mean of per-ad CTRs, and it must never be built as one.
+ */
+export type MetricTotals = MetricSet & { ad_id: string | null };
+
+/**
+ * The response to `?include=totals` — **D66's cheap read**, and the reason it exists is measured:
+ * the `SUM` over all 70,980 buckets of the seeded week is 20 ms, while re-sending the buckets is
+ * 24 MB. So a client whose window is rolling (D65) re-asks for THIS, not for a snapshot.
+ *
+ * It carries `as_of_ingest_seq` and the resolved `query` per D66's amendment. A total with neither
+ * is exactly the undescribed number D34's quarantine exists to refuse, and B51 has only to sign an
+ * envelope that already says what it answered and when.
+ */
+export type TotalsResponse = { query: SnapshotQuery; totals: MetricTotals[]; as_of_ingest_seq: number };
+
+/**
+ * `totalsOnly` is `?include=totals` — the totals without the buckets or the portfolio.
+ *
+ * A separate field rather than a member of `SnapshotQuery`, because `SnapshotQuery` is echoed back
+ * as *the window that was resolved*, and what the caller wanted included is not part of that.
+ */
+export type ParsedQuery =
+  | { ok: true; query: SnapshotQuery; totalsOnly: boolean }
+  | { ok: false; error: string };
 
 /**
  * Resolve `?from&to&ads`. Two rules, both there because the alternative is a wrong answer that
@@ -177,7 +224,19 @@ export function parseSnapshotQuery(params: URLSearchParams): ParsedQuery {
     if (ads.length === 0) return { ok: false, error: 'ads was given but empty' };
   }
 
-  return { ok: true, query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads } };
+  // `?include=totals` is the only accepted value; anything else is a caller bug and is refused
+  // rather than silently serving the full payload — B35a's `?include=pending` set the precedent
+  // that an `include` we do not understand is an error, not a default.
+  const rawInclude = params.get('include');
+  if (rawInclude !== null && rawInclude !== 'totals') {
+    return { ok: false, error: `include: '${rawInclude}' is not understood (the only value is 'totals')` };
+  }
+
+  return {
+    ok: true,
+    query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads },
+    totalsOnly: rawInclude === 'totals',
+  };
 }
 
 /**
@@ -213,6 +272,31 @@ const SELECT_ONE_AD = `SELECT ${BUCKET_COLUMNS} FROM rollup_minute
 /** The portfolio window (DESIGN §2.4's second access path): `ix_rollup_time` over all ads. */
 const SELECT_ALL_ADS = `SELECT ${BUCKET_COLUMNS} FROM rollup_minute
   WHERE minute_start >= ? AND minute_start < ? ORDER BY ad_id, minute_start`;
+
+/**
+ * **B38's totals — the counts summed in SQL, per ad.** The division happens afterwards, in
+ * `shared/metrics.ts`, which is D10's rule as a code path rather than as a comment.
+ *
+ * `COUNT(*)` rides along because "how many buckets is this total over" is the denominator every
+ * honest surface needs and it is free here. `COALESCE` is not needed on the sums — the `GROUP BY`
+ * only produces a row where at least one bucket exists — but it IS needed on the whole-window
+ * aggregate when the window is empty, which is why the JS side folds from `ZERO_COUNTS`.
+ */
+const TOTALS_COLUMNS = `
+  COUNT(*) AS buckets,
+  SUM(impressions) AS impressions, SUM(clicks) AS clicks,
+  SUM(click_cost_cents) AS click_cost_cents, SUM(spend_cents) AS spend_cents,
+  SUM(conversions) AS conversions, SUM(value_cents) AS value_cents,
+  SUM(provisional_conversions) AS provisional_conversions,
+  SUM(provisional_value_cents) AS provisional_value_cents`;
+
+/** One selected ad: the same contiguous PK range scan the bucket read uses (DESIGN §2.4). */
+const TOTALS_ONE_AD = `SELECT ${TOTALS_COLUMNS} FROM rollup_minute
+  WHERE ad_id = ? AND minute_start >= ? AND minute_start < ?`;
+
+/** The whole portfolio, grouped: `ix_rollup_time` over the window. Measured at 20 ms over 7 days. */
+const TOTALS_ALL_ADS = `SELECT ad_id, ${TOTALS_COLUMNS} FROM rollup_minute
+  WHERE minute_start >= ? AND minute_start < ? GROUP BY ad_id ORDER BY ad_id`;
 
 /** `MAX(signals.ingest_seq)`, the same high-water mark `/api/health` reports (D12/E2). */
 /**
@@ -275,6 +359,75 @@ export function bucketsSinceReader(db: DatabaseSync): (cursor: number, limit: nu
     withState(stmt.all(cursor, limit) as unknown as StoredBucket[], new Date().toISOString());
 }
 
+/** A summed row as SQLite returns it: the counts, plus `buckets`, plus `ad_id` on the grouped form. */
+type SummedRow = MetricCounts & { buckets: number; ad_id?: string };
+
+/**
+ * The window's totals, per ad, plus the combined row.
+ *
+ * **Called inside an existing read transaction** — never on its own. That is what makes
+ * `SUM(buckets)` and the returned bucket rows two views of one instant rather than two reads that
+ * happen to agree most of the time.
+ *
+ * The combined row is folded in JS from the per-ad sums rather than re-queried with a second
+ * `SUM`: they are integers and adding them is exact, so a second pass over the same index would
+ * only create a way for the two to disagree. **The fold is `addCounts` and then one `derive`** —
+ * counts first, division last, which is the only order that is correct at more than one
+ * granularity (D10).
+ */
+function readTotals(db: DatabaseSync, query: SnapshotQuery): MetricTotals[] {
+  const rows: SummedRow[] =
+    query.ads === null
+      ? (db.prepare(TOTALS_ALL_ADS).all(query.from, query.to) as unknown as SummedRow[])
+      : query.ads.map((ad) => ({
+          ad_id: ad,
+          ...(db.prepare(TOTALS_ONE_AD).get(ad, query.from, query.to) as unknown as SummedRow),
+        }));
+
+  const perAd: MetricTotals[] = [];
+  let combined = ZERO_COUNTS;
+  let buckets = 0;
+
+  for (const row of rows) {
+    // An explicitly selected ad with no buckets in the window comes back from `get()` as a row of
+    // NULL sums (SQLite's aggregate over zero rows), so every field is normalised here rather than
+    // trusted. Dropping such an ad instead would make "you selected it and it has nothing" and "you
+    // did not select it" the same shape on the wire.
+    const counts: MetricCounts = {
+      impressions: row.impressions ?? 0,
+      clicks: row.clicks ?? 0,
+      click_cost_cents: row.click_cost_cents ?? 0,
+      spend_cents: row.spend_cents ?? 0,
+      conversions: row.conversions ?? 0,
+      value_cents: row.value_cents ?? 0,
+      provisional_conversions: row.provisional_conversions ?? 0,
+      provisional_value_cents: row.provisional_value_cents ?? 0,
+    };
+    perAd.push({ ad_id: row.ad_id ?? null, ...derive(counts, row.buckets ?? 0) });
+    combined = addCounts(combined, counts);
+    buckets += row.buckets ?? 0;
+  }
+
+  // The combined row last, so `totals[totals.length - 1]` is never the answer a caller wants by
+  // accident — it is found by `ad_id === null`, which cannot be confused with an ad.
+  return [...perAd, { ad_id: null, ...derive(combined, buckets) }];
+}
+
+/**
+ * **D66's cheap read** — the totals for a window, without the buckets or the portfolio.
+ *
+ * Its own read transaction, and it takes the log position inside it for the same reason
+ * `snapshot()` does: a totals figure whose `as_of` is ahead of its own numbers is worse than a
+ * stale one, because it claims to include events it does not.
+ */
+export function totalsOnly(db: DatabaseSync, query: SnapshotQuery): TotalsResponse {
+  const logPosition = db.prepare(SELECT_LOG_POSITION);
+  return readTx(db, () => {
+    const seq = logPosition.get() as { seq: number };
+    return { query, totals: readTotals(db, query), as_of_ingest_seq: seq.seq };
+  });
+}
+
 export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
   const portfolio = db.prepare(SELECT_PORTFOLIO);
   const perAd = db.prepare(SELECT_ONE_AD);
@@ -307,6 +460,9 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
       query,
       ads,
       buckets: withState(buckets, new Date().toISOString()),
+      // Same transaction, same predicate, same instant as the buckets above — so "sum the rows
+      // yourself and compare" is a check on the arithmetic and never a race.
+      totals: readTotals(db, query),
       as_of_ingest_seq: seq.seq,
     };
   });
