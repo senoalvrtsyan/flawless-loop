@@ -68,6 +68,22 @@ export const AUDIENCES: readonly AudienceFixture[] = [
   { audience_id: 'rt_us', geo: 'US', temperature: 'retargeting', est_size: 46_000 },
 ];
 
+/**
+ * §6's temperature for an audience — what §11.1's `p_fast` is keyed by and what §10's order value
+ * is drawn from.
+ *
+ * Read from AUDIENCES rather than from the `ads` projection, because temperature is a property of
+ * the AUDIENCE and audiences are static reference data (U3), not something a lever can move. Lives
+ * here, next to the table it reads, because **B35** needs the same answer in two processes: the
+ * backfill generator and the live emitter must agree about a handed-over click's temperature or
+ * its conversion lands at a different moment on either side of `T0`.
+ */
+export function temperatureOf(audienceId: string): string {
+  const audience = AUDIENCES.find((a) => a.audience_id === audienceId);
+  if (audience === undefined) throw new Error(`no audience ${audienceId} — SIMULATOR §2.2`);
+  return audience.temperature;
+}
+
 export type AdFixture = {
   ad_id: string;
   name: string;

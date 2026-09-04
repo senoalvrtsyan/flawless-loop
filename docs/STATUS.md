@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · stage 3 · B34a CLOSED — VERIFY IS TRUSTWORTHY AGAIN · 38 / 66 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · STAGE 3 CLOSED — THE SIMULATOR IS DONE · 39 / 66 chunks**
 
 ---
 
@@ -64,7 +64,20 @@ the live check now, and it holds**. D16's orphan path is real for the first time
 the CLICK's). Measured on a 1-day scratch seed of 360,740 signals with 49 promoted orphans:
 **409 → 200**, `npm run agree` still OK, **78 tests**. `verify.ts` itself was not touched.
 
-**What stage 3 has left: B35 (the `T0` seam)**, single-gated.
+**B35 closed stage 3, and it found that the live emitter emitted NO conversions at all.** B29 built
+the lag and emits nothing by design; B31a built `pending_backfill_clicks` and nothing consumed it;
+B34 dropped every conversion arriving after `T0` on the promise the emitter would re-derive it. One
+`conversionFor()` now serves both populations — the live clicks this process emitted and the
+backfilled clicks `T0` handed over — because §15.3(b)'s promise is that a click's whole future is
+re-derivable from its `click_id`, and two implementations of that promise is how the two sides of
+the seam come to disagree with every number still plausible. Measured on a 1-day scratch seed with
+7,166 handed-over clicks: **five conversions arrived live, every one on a `source='backfill'` click
+and every one crediting a minute before `T0`**, the oldest **19.5 hours late**. A restart's catch-up
+re-emitted 412 events as **400 `duplicate_identical` / 0 `duplicate_conflicting`**. It landed
+**D63** — a paused ad's already-earned conversion still arrives.
+
+**STAGE 3 IS CLOSED. `SIMULATOR.md` is fully implemented.** Nothing in that document is
+unbuilt.
 
 **How stage 3 is verified, and it has not changed:** `SIMULATOR.md` is the spec and is complete to
 the parameter, so each chunk is a comparison against a table already in that document rather than a
@@ -469,6 +482,18 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 plan. **Each produces wrong or slow output with no error.** Twenty-eight now — the Phase 5 ones were
 found against the real store and are in no design document.
 
+**The newest (B35), all three about the `T0` seam:**
+
+- **The conversion draw must be taken at the TICK's instant (`tick * 1000`), not the click's `ts`.**
+  The backfill generator passes `atMs`; the live emitter must pass the same. Otherwise a different
+  set of clicks converts on either side of `T0` — every number plausible, nothing errors.
+- **The seam decodes the tick and click index out of the click's `ts`**, which is only correct while
+  `spreadMs` stays `tick * 1000 + min(i, 999)`. Move the sub-second placement (D58 moved it once)
+  and every handed-over conversion silently mints a DIFFERENT `event_id`.
+- **§1's "a paused ad's arrival count reads zero" self-check is PER KIND, not per ad** (D63) — a
+  paused ad still receives conversions from clicks it earned while live, and a per-ad check reports
+  a false failure on exactly the pause demo.
+
 **The newest (B34), and the first was a live defect — FIXED at B34a, kept here as the hazard:**
 
 - **Attribution must read a log PREFIX, not the whole table.** `verify.ts` replays
@@ -787,6 +812,18 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   received bytes — `JSON.parse` has already collapsed duplicate keys and rewritten `1e2` and `\u0041`.
   The DDL comment and `DESIGN.md` §2.2 both promised "exactly as received" and were corrected at B05.
 
+**Owed by B35 (stage 3's close), neither blocking:**
+
+- **A live click loses its in-flight conversion across an emitter restart.** `PENDING_CLICKS_SQL` is
+  restricted to `source = 'backfill'` (B31a, deliberately — "a live click's schedule is known to the
+  process that emitted it"), so only the backfilled half is re-derivable from the store. Bounded,
+  and the backfilled population — which is most of what a demo sees convert — is unaffected. **A
+  stated limit, owed to the README.**
+- **A handed-over conversion landing in a SETTLED bucket has not been shown.** The 1-day scratch
+  store that verified B35 holds nothing older than D13's 72 h, so no live arrival could restate.
+  Seven days is where that appears, which is a fact about which store the demo runs on rather than
+  about the code.
+
 ## What was verified, not assumed
 
 Phase 0–4 rows ran in the scratchpad. **Phase 5 rows ran against the committed repo** and are
@@ -845,7 +882,14 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Next is B35, the `T0` handover seam — the last chunk of stage 3, single-gated.**
+**Next is stage 4 and its first chunk is B36 — the app shell. SINGLE-GATED**, and it owes the two
+DEFERRED decisions: **D44** and **D45** (`BUILD_PLAN.md` §7's B36 gate, now four items). Nothing may
+be built on either until they are ratified. **`docs/DEMO.md` is owed from the B36 group onward
+(D50)** — every stage-4/5 group appends its steps as it lands, rather than B61 writing the whole
+thing cold.
+
+**Stage 3 is closed and `SIMULATOR.md` is fully implemented.** What that leaves owed is written
+under "What is owed" — none of it blocks B36.
 
 **B34a is closed and verify is trustworthy again**, which is what B35's seam check leans on.
 `resolveAttribution()` now takes a **required** `as_of_ingest_seq`; `apply()` passes
@@ -983,12 +1027,14 @@ identically either way — noted rather than fixed.
   one ad and still regardless of status until B31. `PHI_AD` is frozen at the nominal `T0` accrual —
   an `ASSUMPTION (unratified)` in `index.ts`, replaced by B31's polled `F`.
 
-**Stage 3's remaining chunk is B35.**
+**Stage 3 is CLOSED — B25 through B35 are all in.** The rest of this section is the stage's
+standing record; the bullets marked with a chunk that has since landed are history, and the rules
+(the keyed RNG, the draw budget, "do not invent a constant") still bind.
 
-**B34 and B35 are single-gated and must not be grouped.** `BUILD_PLAN.md` §5's gate table covered
-stage 2 only, so stage 3's remaining two are governed by D48's exception list directly.
+**B36 and B37 are single-gated and must not be grouped**, per D48's exception list — `BUILD_PLAN.md`
+§5's gate table covered stage 2 only.
 
-What is already true and constrains the whole stage:
+What stage 3 established and still constrains the build:
 
 - **`SIMULATOR.md` is the spec and it is complete to the parameter.** Every chunk's verification is
   a comparison against a table already in that document — §21 is the parameter appendix — so *"does
@@ -1026,7 +1072,7 @@ What is already true and constrains the whole stage:
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
 1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5 as amended by D48.
-   **In progress, 26/64** — stages 0, 1 and 2 closed.
+   **In progress, 39/66** — stages 0, 1, 2 and 3 closed.
 2. **Phase 6 — packaging:** README, demo script, the "life of one event" trace, the AI artifact.
    These are `BUILD_PLAN.md` stage 7 (B57–B62) rather than a separate effort.
 

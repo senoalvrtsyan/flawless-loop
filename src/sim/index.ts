@@ -23,7 +23,16 @@ import { derivedId } from './rng.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
 import { demand, demandFactor } from './noise.ts';
 import { WORLD_URL, currentWorld, liveAds, pollWorld, type LiveAd } from './world.ts';
-import { clicksForTick, cpmAccrualCents, isSpendBoundary, spendCents } from './emit.ts';
+import {
+  clicksForTick,
+  converts,
+  cpmAccrualCents,
+  isSpendBoundary,
+  orderValueCents,
+  spendCents,
+} from './emit.ts';
+import { scheduleFor } from './lag.ts';
+import { temperatureOf } from './fixtures.ts';
 import { pacing } from './pacing.ts';
 import { FAULT_NAMES, emptyCounts, injectFaults, type Held } from './faults.ts';
 import { SPEND_TICK_S } from './params.ts';
@@ -39,7 +48,7 @@ import {
   pacingSection,
   type DryRunOptions,
 } from './dry-run.ts';
-import type { IngestResult, Signal } from '../shared/types.ts';
+import type { AdConfig, IngestResult, Signal } from '../shared/types.ts';
 
 /**
  * The seed used for `--dry-run` ONLY.
@@ -155,6 +164,94 @@ function accrue(adId: string, tick: number, cents: number): void {
   else open.cents += cents;
 }
 
+/** A conversion that has been decided but not yet told to us — §11's reporting lag, in flight. */
+type Scheduled = { receivedAt: number; signal: Signal };
+
+/**
+ * §11's in-flight conversions, live half. In-process and NOT durable, exactly like `held` above and
+ * for the same reason: a process that dies loses them, and D40-A forbids the emitter a store.
+ *
+ * The backfilled half needs no queue at all — `GET /api/sim/world` hands back every backfilled
+ * click still inside the cutoff whose conversion has not arrived, and this process re-derives the
+ * schedule from `click_id` each tick (§15.3(b)). So the two populations differ in where the PENDING
+ * SET comes from and in nothing else. The restart limit that leaves is real and bounded: a live
+ * click emitted before a restart loses its conversion, because `PENDING_CLICKS_SQL` is restricted
+ * to `source = 'backfill'` (B31a, deliberately — "a live click's schedule is known to the process
+ * that emitted it"). Most of what a demo SEES converting is the backfilled population, which is
+ * the reason §15.3(b) exists.
+ */
+let scheduled: Scheduled[] = [];
+
+/** Backfilled clicks already POSTed this run, so a poll that has not caught up does not re-send. */
+const sentConversions = new Set<string>();
+
+/**
+ * The conversion a click earns, or `null` if it does not convert or the purchase falls past §11's
+ * 7-day cutoff — in which case the conversion is simply lost, which is the truncation §11.2 prints.
+ *
+ * ONE function for both populations, and that is the seam. §15.3(b) promises a click's whole future
+ * is re-derivable from its `click_id`, so the backfill generator that DROPPED an after-`T0`
+ * conversion and this emitter must answer identically for the same click. Two implementations of
+ * that promise is precisely how the two sides of `T0` come to disagree, with every number still
+ * plausible.
+ *
+ * `clickTsMs` is all the caller needs to supply, including for a handed-over click, which arrives
+ * as `{click_id, ad_id, ts}` and nothing else: `spreadMs` is `tick * 1000 + min(i, 999)`, so the
+ * tick is the whole second and the click's index within it is the sub-second remainder. Recovering
+ * both here is what lets a handed-over click produce the SAME `event_id` the generator would have.
+ * Per §10 a tick carries 0-3 clicks, so the clamp cannot bind and the decode is exact.
+ */
+function conversionFor(ad: AdConfig, clickId: string, clickTsMs: number): Scheduled | null {
+  const tick = Math.floor(clickTsMs / 1_000);
+  const index = clickTsMs - tick * 1_000;
+  // D62: one Bernoulli per click, keyed by `click_id` alone. Drawn at the TICK's instant, not the
+  // click's, because that is what the backfill generator passes — `atMs`, not `clickTsMs`.
+  if (!converts(SEED, clickId, ad, tick * 1_000)) return null;
+  const schedule = scheduleFor(SEED, clickId, clickTsMs, temperatureOf(ad.audience_id));
+  if (schedule === null) return null;
+  return {
+    receivedAt: schedule.received_at,
+    signal: {
+      event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 'v', index),
+      // D27-B's whole point: the purchase's own instant, which may be days before now. The bucket
+      // this rewrites is the CLICK's, and whether that bucket had settled is decided by
+      // `received_at` — which is when we POST it, not when it happened.
+      ts: new Date(schedule.ts).toISOString(),
+      ad_id: ad.ad_id,
+      event: 'conversion',
+      attributed_click_id: clickId,
+      value_cents: orderValueCents(SEED, ad, schedule.ts, [clickId]),
+    },
+  };
+}
+
+/**
+ * §15.3(b)'s seam, made to arrive: the backfilled clicks whose conversions came due while we were
+ * running, plus any that came due while nothing was running at all.
+ *
+ * The world's pending set is the queue. A click leaves it the moment its conversion is in the LOG,
+ * so this converges on its own; `sentConversions` only stops us re-POSTing in the second or two
+ * before the next poll reflects the write. It is pruned against the pending set each tick, so it
+ * cannot grow past it.
+ */
+function dueBackfillConversions(world: { pending_backfill_clicks: readonly { click_id: string;
+  ad_id: string; ts: string }[] }, ads: ReadonlyMap<string, AdConfig>, nowMs: number): Signal[] {
+  const stillPending = new Set<string>();
+  const due: Signal[] = [];
+  for (const click of world.pending_backfill_clicks) {
+    stillPending.add(click.click_id);
+    if (sentConversions.has(click.click_id)) continue;
+    const ad = ads.get(click.ad_id);
+    if (ad === undefined) continue; // an ad the fold no longer carries: nothing to attribute to
+    const conversion = conversionFor(ad, click.click_id, Date.parse(click.ts));
+    if (conversion === null || conversion.receivedAt > nowMs) continue;
+    due.push(conversion.signal);
+    sentConversions.add(click.click_id);
+  }
+  for (const id of sentConversions) if (!stillPending.has(id)) sentConversions.delete(id);
+  return due;
+}
+
 function eventsForAd(live: LiveAd, tick: number): Signal[] {
   const ad = live.config;
   const count = impressionsForTick(live, tick);
@@ -187,14 +284,19 @@ function eventsForAd(live: LiveAd, tick: number): Signal[] {
     mChannel: demand('channel', ad.channel, tick * 1_000),
   });
   for (const click of clicks) {
+    const clickTsMs = spreadMs(tick, click.index);
     events.push({
       event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 'c', click.index),
-      ts: new Date(spreadMs(tick, click.index)).toISOString(),
+      ts: new Date(clickTsMs).toISOString(),
       ad_id: ad.ad_id,
       event: 'click',
       click_id: click.click_id,
       cost_cents: click.cost_cents,
     });
+    // §11: the click's future is decided now and delivered later. A catch-up re-derives the same
+    // click and schedules the same conversion, so the duplicate lands as `duplicate_identical`.
+    const conversion = conversionFor(ad, click.click_id, clickTsMs);
+    if (conversion !== null) scheduled.push(conversion);
   }
 
   // §10 / I1's `spend`: one delta per 60 s per live ad, carrying the CPM accrual of the interval
@@ -307,7 +409,7 @@ async function post(batch: readonly Signal[]): Promise<boolean> {
         ` · injected ${FAULT_NAMES.filter((n) => faultCounts[n] > 0)
           .map((n) => `${n} ${faultCounts[n]}`)
           .join(' ')}` +
-        ` · held ${held.length}`,
+        ` · held ${held.length} · in flight ${scheduled.length}`,
     );
     return true;
   } catch (err) {
@@ -364,6 +466,34 @@ async function tick(): Promise<void> {
       pending.push(...injected.now);
       held.push(...injected.held);
     }
+
+    // §15.3(b)'s seam. Both halves of the in-flight population join the batch the moment their
+    // reporting lag is up: the live clicks this process emitted, and the backfilled clicks the seed
+    // dropped because their `received_at` fell after `T0`. A conversion carries its ORIGINAL `ts`,
+    // days back if the purchase was days back, so it rewrites its click's bucket (D27-B) and — if
+    // that bucket has settled — restates it. This is HR4 arriving on its own.
+    const nowMs = Date.now();
+    if (scheduled.length > 0) {
+      const due = scheduled.filter((c) => c.receivedAt <= nowMs);
+      if (due.length > 0) {
+        scheduled = scheduled.filter((c) => c.receivedAt > nowMs);
+        for (const c of due) pending.push(c.signal);
+      }
+    }
+    // **D63: a conversion from a click that ALREADY HAPPENED arrives even if the ad has since been
+    // paused** — so the lookup is `world.ads`, every ad the fold carries, and NOT the `live`
+    // subset. §3's pause convention is a rule about λ ("a paused ad emits nothing: λ = 0"), and a
+    // conversion is not drawn from λ: it is the settlement of a click already in the log, credited
+    // to that click's minute (D27-B). Silencing it would delete revenue the strategist was already
+    // charged for, and would take the in-flight population away from `a_12` — the one ad that has
+    // to carry both the pause demo (HR3) and late attribution (HR4).
+    //
+    // Consequence, and the demo script owes it a sentence: a conversion can land on `a_12` seconds
+    // after the pause visibly stops its impressions. §1's self-check — "the arrival count for a
+    // paused ad should read zero" — is therefore PER KIND (impression, click, spend), never per ad,
+    // or it reports a false failure the first time this fires.
+    pending.push(...dueBackfillConversions(world, new Map(world.ads.map((a) => [a.ad_id, a])),
+      nowMs));
 
     // Anything whose hold has expired joins this tick's batch. Released events carry their ORIGINAL
     // `ts`, which is what makes them genuinely out of order rather than merely late-looking: D12

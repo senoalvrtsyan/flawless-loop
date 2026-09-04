@@ -217,8 +217,7 @@ throughout; the stage-1 number keeps moving.
 | [x] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
 | [x] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'`. **Owed from B09: the seeder must NOT call `stream.markDirty()`** — measured, one batch across 20,000 minutes gave a **6.20 MiB** frame and a **142 ms** event-loop stall; ~17 MiB / ~400 ms at 56,160 seeded buckets | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
 | [x] | **B34a** | **Attribution reads a log PREFIX, not the whole log.** `resolveAttribution()` takes a REQUIRED `as_of_ingest_seq` and bounds its click lookup with `ingest_seq <= ?`; `apply()` supplies `signal.ingest_seq` at both call sites — the conversion branch, and `promoteOrphans()`, where the prefix is the CLICK's seq because the parked conversion's own prefix is precisely the one its click does not exist in. Fixes §14's first B34 trap: unbounded, the rebuild resolved every conversion against clicks that had not yet arrived, could not produce an orphan at all, and reported divergence on a correct store. `replay.ts` (B23) states the rule for the other check path and is the spec. **The tempting wrong fix — dropping `resolved_at` from `DIFFED` — is not taken.** `verify.ts` is untouched: `apply()` already held the prefix | `src/server/attribute.ts`, `src/server/apply.ts`, `src/server/attribute.test.ts`, `src/server/verify.test.ts` | On a store holding a PROMOTED orphan, `GET /api/verify` goes 409 → **200** — measured on a 1-day scratch seed (360,740 signals, 49 conversions promoted by a later-arriving click): pre-fix `conversion_attribution.resolved_at` diverges, post-fix every hash matches. `npm run agree` still OK. Two new tests, both of which fail without the bound | D§7, §10.2; D55 | **HR4 HR5** |
-| [ ] | **B35** | The `T0` handover seam: anything whose `received_at` falls after the seed boundary is **not** seeded but handed to the live emitter; progress printing during the seed | `src/sim/seed-history.ts`, `src/sim/index.ts` | Boot on an empty DB: the seed prints progress and finishes in ~28 s (B06 measurement; ~12 s was §18.4's
-narrower benchmark), then conversions from before `T0` keep arriving live for minutes afterwards — a real in-flight population, not a manufactured one | S§15.3(b) | **HR4 HR7** |
+| [x] | **B35** | **The `T0` handover seam, and the live emitter's conversions.** Before this chunk the emitter emitted NO conversions at all — B29 built the lag and emits nothing by design, B31a built `pending_backfill_clicks` and nothing consumed it, and B34 dropped every conversion arriving after `T0` on the promise the emitter would re-derive it. One `conversionFor()` serves both populations, which IS the seam: the tick and the click's index are decoded from the click's own `ts` (`spreadMs` = `tick*1000 + min(i,999)`), so a handed-over click — which arrives as `{click_id, ad_id, ts}` and nothing else — mints the same `event_id` the generator that dropped it would have. Live clicks schedule in-process (non-durable, like `held`); backfilled clicks need no queue because the world's pending set IS the queue. **D63**: a paused ad's already-earned conversion still arrives, so the lookup is `world.ads`, not `live`. `temperatureOf()` moved to `fixtures.ts` — both sides of the seam need the same answer. Seed progress printing was already delivered at B34 | `src/sim/index.ts`, `src/sim/fixtures.ts`, `src/sim/seed-history.ts` | Measured on a 1-day scratch seed (`T0` 16:32:34, **7,166 backfilled clicks handed over**): five conversions arrived live, **every one on a `source='backfill'` click and every one crediting a minute before `T0`** — oldest `2026-09-03T21:13`, **19.5 h late**. Restart identity holds: the catch-up re-emitted 412 events as **400 `duplicate_identical` / 0 `duplicate_conflicting`**. `/api/verify` **200** and `npm run agree` **OK** afterwards (362,084 events, 17,086 buckets) | S§15.3(b) | **HR4 HR7** |
 
 ### The seed budget, re-measured at B06 — the D39 revisit B34 owes
 
@@ -513,6 +512,26 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+**The newest (B35), all three about the `T0` seam, where a disagreement is invisible by construction:**
+
+- **The conversion draw must be taken at the TICK's instant, not the click's `ts`.** The backfill
+  generator calls `converts(seed, click_id, ad, atMs)` with `atMs = tick * 1000`; the live emitter
+  must pass the same. Passing `clickTsMs` instead shifts `pCvr`'s day-of-week/temperature lookup by
+  up to 999 ms — almost always the same answer, and *occasionally not*. A different set of clicks
+  then converts on either side of `T0`, every individual number stays plausible, and the only
+  symptom is a conversion that the seed expected and the emitter never sent, or vice versa. Nothing
+  errors and no test fails.
+- **The seam decodes the tick and the click index out of the click's `ts`**, because a handed-over
+  click carries `{click_id, ad_id, ts}` and nothing else. That decode is only correct while
+  `spreadMs` stays `tick * 1000 + min(i, 999)`. **Change the sub-second placement and every
+  handed-over conversion silently mints a DIFFERENT `event_id`** — it still ingests, still
+  attributes, still shows a plausible number, and is simply not the event the generator planned to
+  hand over. D58 already moved this formula once. If it moves again, the seam moves with it.
+- **§1's "a paused ad's arrival count reads zero" self-check is PER KIND, not per ad** (D63). A
+  paused ad still receives conversions from clicks it earned while live. Written per-ad, the check
+  reports a false failure the first time a pause demo runs on a store with history — which is
+  exactly the demo, on exactly `a_12`.
 
 - **Attribution must read a log PREFIX, not the whole table — FIXED at B34a, and the hazard stays
   here** (found at B34; latent in **B22** since it shipped). `verify.ts` replays

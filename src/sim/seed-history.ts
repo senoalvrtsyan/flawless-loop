@@ -38,21 +38,11 @@ import { componentOf, novelty, noveltyKey, pairKey, phiAd, slotFrequency } from 
 import { scheduleFor, reportingLagMs } from './lag.ts';
 import { injectFaults, emptyCounts, type FaultCounts } from './faults.ts';
 import { SPEND_TICK_S } from './params.ts';
-import { AUDIENCES } from './fixtures.ts';
+// B35: `temperatureOf` moved to `fixtures.ts` — the live emitter needs the same answer for a
+// handed-over click, and two copies of it would put the seam's two sides on different schedules.
+import { temperatureOf } from './fixtures.ts';
 import { localDayStartMs } from '../shared/time.ts';
 import type { AdConfig, Signal } from '../shared/types.ts';
-
-/**
- * §6's temperature for an audience — what §11.1's `p_fast` is keyed by.
- *
- * From `fixtures.ts` rather than from the `ads` projection, because temperature is a property of
- * the AUDIENCE and audiences are static reference data (U3), not something a lever can move.
- */
-const temperatureOf = (audienceId: string): string => {
-  const audience = AUDIENCES.find((a) => a.audience_id === audienceId);
-  if (audience === undefined) throw new Error(`no audience ${audienceId} — SIMULATOR §2.2`);
-  return audience.temperature;
-};
 
 /** One generated delivery and the instant the platform told us about it. */
 type Delivery = { signal: Signal; receivedAt: number };
