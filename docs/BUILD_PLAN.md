@@ -111,7 +111,7 @@ appears in B15 from the decision log, and never before.
 |---|---|---|---|---|---|---|
 | [x] | **B04** | HTTP server, `GET /api/health`, and a dev runner that starts server and simulator as two processes | `src/server/http.ts`, `src/server/index.ts`, `scripts/dev.mjs` | `npm run dev`; `curl /api/health` returns the log position | D§11 | — |
 | [x] | **B05** | `POST /api/ingest` for `impression` only: stamp `received_at` + `ingest_seq`, validate, write `signal_deliveries` **always**, dedupe on `event_id`, insert `signals` — one transaction | `src/server/ingest.ts`, `src/shared/types.ts` | POST one event, then the same `event_id` again: dispositions read `accepted` then `duplicate_identical`; `signals` has one row, `signal_deliveries` two; POST a negative amount → `rejected_invalid` with the raw body kept | D§5.1 | **HR2 HR8** |
-| [ ] | **B06** | `apply()` — the single writer. Rollup upsert for impressions, in B05's transaction. Establishes the rule the rest of the build obeys | `src/server/apply.ts` | POST three impressions spanning two minutes → `rollup_minute` has exactly two rows with the right counts and `max_ingest_seq`; grep proves no other file writes a projection | D§4.3, §1 | **HR2 HR6** |
+| [x] | **B06** | `apply()` — the single writer. Rollup upsert for impressions, in B05's transaction. Establishes the rule the rest of the build obeys | `src/server/apply.ts` | POST three impressions spanning two minutes → `rollup_minute` has exactly two rows with the right counts and `max_ingest_seq`; grep proves no other file writes a projection | D§4.3, §1 | **HR2 HR6** |
 | [ ] | **B07** | `GET /api/snapshot?from&to&ads` — one read transaction, returns buckets + `as_of_ingest_seq` | `src/server/snapshot.ts` | `curl` after B06 and diff the JSON against `sqlite3` output by hand | D§3.1 | **HR2** |
 | [ ] | **B08** | Client shell: fetch the snapshot, render one number. No chart, no styling | `src/web/main.tsx`, `src/web/App.tsx`, `index.html` | Number appears in the browser; **refresh → same number**; stop the server, restart it, refresh → still there | D§3, §3.1 | **HR1 HR8** |
 | [ ] | **B09** | SSE `GET /api/stream`: dirty-set collection, 250–500 ms flush tick, **absolute** bucket rows, `id:` = high-water `ingest_seq` | `src/server/stream.ts` | `curl -N /api/stream` in one terminal, POST in another; one absolute row per touched bucket per tick, never a delta | D§5.5, §11 | **HR2** |
@@ -141,9 +141,9 @@ skeleton from stage 1 keeps working throughout and the numbers get richer.
 | [ ] | **B13** | `applyDecision()`: compare-and-swap preconditions on `from_cents`/`from_id`, write `ads`, close and open `config_generations` — one transaction | `src/server/apply.ts` | Unit test: a stale `from_cents` is rejected; a good one opens generation *n+1* with `valid_to` set on *n* | D§7, §2.4 | **HR6** |
 | [ ] | **B14** | `POST /api/decisions` (returns the new state in the same txn) and `GET /api/decisions` | `src/server/decisions.ts` | `curl` `create_ad` then `launch` → an `ads` row appears with `launched_at`; grep proves **no code path inserts `ads` directly** | D§7, §11 | **HR2 HR6** |
 | [ ] | **B15** | Seeder part 1: `components` and `audiences` fixtures, then 12 `create_ad` + 12 `launch` decisions through `applyDecision` | `src/sim/seed-world.ts`, `src/sim/fixtures.ts` | `npm run seed` on an empty DB → 24 rows in `decisions`, 12 in `ads`, 12 generations; `vl_04` has two versions with `parent_id` set | D§3.2; S§2 | **HR1 HR2 HR6** |
-| [ ] | **B16** | The other three signal kinds through ingest: `click` (`click_id`, `cost_cents`), `spend` (60 s delta), `conversion` (`attributed_click_id`, `value_cents`) | `src/server/ingest.ts`, `src/shared/types.ts` | `curl` each kind; a second click claiming an existing `click_id` is rejected by the partial unique index and **counted**, not silently deduped | D§2.2, §5.1 | **HR2** |
-| [ ] | **B17** | Attribution: resolve `attributed_click_id` against `signals.click_id`; `credited_ad_id` from **the click**; `ad_id_conflict`; `credited_generation_id` = generation live at the click's `ts` | `src/server/attribute.ts` | click at T, conversion later → `conversion_attribution` is `resolved` with the generation covering T; send a conversion whose own `ad_id` disagrees → `ad_id_conflict = 1`, nothing silently reconciled | D§5.2 | **HR2** |
-| [ ] | **B18** | Cohort placement (D27-B): a conversion counts in **its click's minute**; rollup upsert extended to all four kinds, click cost and spend kept disjoint | `src/server/apply.ts` | Click at 14:02, conversion at 16:40 → the **14:02** bucket carries the conversion; total spend is the read-time sum of two columns, never a third stored one | D§5.3, §4.5 | **HR2** |
+| [ ] | **B16** | `click` (`click_id`, `cost_cents`) and `spend` (60 s delta) through ingest **and** their additive counts in `apply()` — `clicks`, `click_cost_cents`, `spend_cents`, kept disjoint. Neither kind needs attribution, so both close end to end here | `src/server/ingest.ts`, `src/server/apply.ts`, `src/shared/types.ts` | `curl` a click and a spend; both land in `rollup_minute` at their own minute; a second click claiming an existing `click_id` is rejected by the partial unique index and **counted**, not silently deduped | D§2.2, §5.1, §5.3 | **HR2** |
+| [ ] | **B17** | Attribution: resolve `attributed_click_id` against `signals.click_id`; `credited_ad_id` from **the click**; `ad_id_conflict`; `credited_generation_id` = generation live at the click's `ts`. A module with no caller yet — **conversions do not enter ingest until B18**, so this chunk is exercised against a hand-built fixture and its `curl` verification is B18's | `src/server/attribute.ts` | Fixture: click at T, conversion later → `conversion_attribution` is `resolved` with the generation covering T; a conversion whose own `ad_id` disagrees → `ad_id_conflict = 1`, nothing silently reconciled. The end-to-end `curl` is at B18 | D§5.2 | **HR2** |
+| [ ] | **B18** | `conversion` through ingest **and** cohort placement (D27-B) together: a conversion counts in **its click's minute**. They cannot be split — `ingest()` calls `apply()` for every accepted signal, so a conversion that ingests before `apply()` handles it would need a silent no-op branch, which is the divergence the `default: throw` exists to prevent. D27-B needs B17's attribution to know which minute | `src/server/ingest.ts`, `src/server/apply.ts` | Click at 14:02, conversion at 16:40 → the **14:02** bucket carries the conversion; total spend is the read-time sum of two columns, never a third stored one | D§5.3, §4.5 | **HR2** |
 | [ ] | **B19** | Orphans: `orphan_provisional` at its own minute into the `provisional_*` columns; `orphan_expired` past the horizon | `src/server/attribute.ts`, `src/server/apply.ts` | Conversion before its click → `provisional_conversions` moves and the settled counts do **not**; an orphan older than 72 h reads `orphan_expired`, still counted, never deleted | D§5.2 | **HR4** |
 | [ ] | **B20** | **Restatement.** `applyConversion(ev, prev)`: decrement the old bucket, credit the new; `settled_at(B, ev.received_at)` — *never* wall-clock `now`; `restated_at` + `restatement_count`; orphan promotion via `ix_signals_attr` | `src/server/apply.ts` | Send the withheld click → the orphan promotes, **two** buckets change, the provisional one is decremented; send a conversion into a >72 h bucket → `restated_at` set, count bumped | D§5.4; S§15.3(c) | **HR4** |
 | [ ] | **B21** | Settlement state on the read side: `live` / `settled` / `restated` per bucket, in the snapshot and the SSE row; the 72 h horizon and the `America/New_York` constant in one config module | `src/server/settlement.ts`, `src/shared/config.ts` | Snapshot rows carry a state; a 7-day-old bucket reads `settled`, a 10-minute-old one `live` | D§5.4, §5.7 | **HR4** |
@@ -190,11 +190,57 @@ throughout; the stage-1 number keeps moving.
 | [ ] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
 | [ ] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
 | [ ] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'` | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
-| [ ] | **B35** | The `T0` handover seam: anything whose `received_at` falls after the seed boundary is **not** seeded but handed to the live emitter; progress printing during the seed | `src/sim/seed-history.ts`, `src/sim/index.ts` | Boot on an empty DB: the seed prints progress and finishes in ~12 s, then conversions from before `T0` keep arriving live for minutes afterwards — a real in-flight population, not a manufactured one | S§15.3(b) | **HR4 HR7** |
+| [ ] | **B35** | The `T0` handover seam: anything whose `received_at` falls after the seed boundary is **not** seeded but handed to the live emitter; progress printing during the seed | `src/sim/seed-history.ts`, `src/sim/index.ts` | Boot on an empty DB: the seed prints progress and finishes in ~28 s (B06 measurement; ~12 s was §18.4's
+narrower benchmark), then conversions from before `T0` keep arriving live for minutes afterwards — a real in-flight population, not a manufactured one | S§15.3(b) | **HR4 HR7** |
+
+### The seed budget, re-measured at B06 — the D39 revisit B34 owes
+
+**Nothing regressed. `SIMULATOR.md` §18.4 measured the store, not the write path** — it answered a
+narrower question than the one B34 asks, and both its numbers are right for that question.
+
+Measured 2026-09-04 against the real `ingest()` → `apply()` path, 1,625,000 events, batches of 5,000:
+**27.5 s** (59,002/s, drifting 60k → 57k as the tables grow) and **716 MB**.
+
+**Time, fully accounted.** Per event, 16.9 µs. The four line items §18.4's benchmark never ran:
+
+| | µs/event | In §18.4's benchmark? |
+|---|---|---|
+| `signals` insert + `RETURNING ts_effective` | 6.0 | yes |
+| `apply()` rollup upsert | 2.0 | yes |
+| `signal_deliveries` insert | 2.7 | **no** |
+| canonicalise + `JSON.stringify` + sha256 | 1.8 | **no** |
+| `signals` PK dedupe probe | 0.9 | **no** |
+| `JSON.parse`, allocation, per-batch overhead | 3.5 | **no** |
+
+Subtract the four and 16.9 µs becomes **8.0 µs = 125k/s**, against D39's ratified 133.6k/s. The
+figures agree; they are measurements of two different paths.
+
+**Store, same cause.** By `dbstat` over a 300k-event store: `signal_deliveries` plus its index is
+**233 B/event — 53% of the file**. Everything §18.4 measured — `signals`, `rollup_minute` and their
+indexes — is **205 B/event → ~332 MB at 1.625M**, against the ratified ~315 MB.
+
+**Five levers for B34, with costs attached.** This is a D39 revisit, not a B34 implementation
+detail — the first four are free of evidence loss, the fifth is not:
+
+1. **Accept ~28 s** with the progress printing §18.4 consequence 2 already requires (B35).
+2. **Pull the 5-day fallback** §15.2 names: ~1.16M events, ~20 s. Already cut-line row 10.
+3. **Drop `RETURNING`**, computing `ts_effective` in JS as `ts < received_at ? ts : received_at` —
+   identical *because* B05 guarantees canonical form. ~1.7 µs/event ≈ 2.8 s. Costs the property
+   that the projection reads the store's own generated value rather than a second implementation
+   of it.
+4. **Create `signals`' three indexes after the seed** rather than during it. The largest lever and
+   the most invasive; it changes what `migrate()` owns.
+5. **Skip `payload_json` for accepted `backfill` deliveries.** The least evidential 216 B/event in
+   the store — for a seeded event it is a re-serialisation of an object the seeder itself built one
+   millisecond earlier, not a record of anything a foreign system sent. Keeps every count,
+   disposition and hash. **Costs B55's `trace` a body on seeded events, which is an HR5 cost and a
+   real one** — the walk-back would show the delivery row and its disposition but not the payload,
+   on exactly the six days of history a reviewer is most likely to click into.
 
 > ### ▶ Demo checkpoint 3 — *"the data is a design artifact"*
 >
-> Boot on an empty database. Twelve ads with seven days of history appear in about twelve seconds,
+> Boot on an empty database. Twelve ads with seven days of history appear in about half a minute
+> (~28 s measured at B06 — see the D39 revisit above; lever 2 or 4 brings it down),
 > every figure derived from ~1.6M persisted events. The stream runs live at 1× wall clock.
 > `curl` a pause on `a_12` and its events stop within a second; double its budget and the rate rises
 > within a tick. Then open `sqlite3` and show the evidence: the same video burned on one audience
@@ -443,6 +489,21 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   `new Date(ts).toISOString()`** — same shape everywhere makes lexicographic order chronological
   order, and `signals.ts` still stays "as emitted, never altered". Normalising instead of rejecting
   would break that guarantee; this is why B05 validates the *format*, not just the parseability.
+
+- **Replay passes each event's OWN `received_at` as `apply()`'s `applied_at`** — never a rebuild
+  clock. `apply()` takes the parameter, so the mechanism is already there; what is not written down
+  is that B22/B23 must use it. A rebuild stamped with `Date.now()` writes a different
+  `first_written_at` into **every** bucket, and `/api/verify` then reports total divergence on a
+  store that is in fact correct. The tempting fix at that moment is to drop the column from the
+  diff, which would silently retire the one field that makes a restatement legible against the
+  bucket's first materialisation.
+
+- **Migrations are append-only from B06 onward.** `migrate()` tracks `PRAGMA user_version` and keeps
+  no content hash, so an edit to an already-applied file does not re-run and is not detected: a
+  fresh store and an existing store diverge with no error at any layer. (B05 edited a *comment* in
+  `001_logs.sql`, which is harmless and is the last such edit — comments inside `CREATE TABLE` live
+  in `sqlite_master`, so even that much makes `.schema` differ between a fresh store and an old
+  one.) Schema changes get a new numbered file.
 
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.

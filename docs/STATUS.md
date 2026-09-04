@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 0 CLOSED · 3 / 62 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1 half-built · 6 / 62 chunks**
 
 ---
 
@@ -13,14 +13,15 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 document is provisional.
 
 **Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stage 0 (B01–B03) is
-closed**: the store exists and executes, and nothing reads or writes it yet. Three commits, one per
-chunk, each approved before it landed.
+closed** — the store. **Stage 1 (B04–B11) is half-built**: B04–B06 are in, so the write half of the
+walking skeleton works end to end. An event POSTed to `/api/ingest` is stamped, validated, deduped,
+persisted and rolled up into `rollup_minute` in one transaction, and survives a restart. Six commits,
+one per chunk, each approved before it landed.
 
-**Next is B04** — the HTTP server and the dev runner — which opens **stage 1, the walking
-skeleton**. `BUILD_PLAN.md` §4 calls it *"the riskiest thing in the build"*: one simulated event
-persisted, aggregated, transported over SSE, on screen, surviving a browser refresh **and** a
-restart of both processes, before any breadth at all. Everything after it is width on a proven
-spine.
+**Next is B07** — `GET /api/snapshot?from&to&ads`, the first read path. Then B08 puts a number on
+screen (the first client code in the repo), B09/B10 make it live over SSE, and B11 replaces `curl`
+with the simulator process. `BUILD_PLAN.md` §4 calls stage 1 *"the riskiest thing in the build"*:
+everything after it is width on a proven spine.
 
 **No decision blocks anything from here to B35.** For the first time since Phase 0 the path is
 clear. D44/D45 are *deferred* (**F4**) and come back at the stage 3 → 4 seam; see "What is open".
@@ -48,24 +49,41 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/server/migrate.ts`** | B02. Migration runner + CLI. `PRAGMA user_version`, no bookkeeping table. |
 | **`migrations/001_logs.sql`** | B02. `components`, `audiences`, `signal_deliveries`, `signals`, `decisions`. |
 | **`migrations/002_projections.sql`** | B03. `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios`. |
-| **`src/{server,sim,web,shared}/…`** | B01 placeholders, still empty: `src/server/index.ts` (B04), `src/sim/index.ts` (B11), `src/web/main.tsx` (B08), `src/shared/types.ts` (B05). |
+| **`src/server/http.ts`** | B04. `createRouter()` (method+pathname match, 404, handler error → 500), `sendJson()`, `readBody()`, `openSse()`. D42: no framework. |
+| **`src/server/index.ts`** | B04/B05. One `DatabaseSync` for the process; refuses to boot on an unmigrated store; `GET /api/health` (log position), `POST /api/ingest`; clean close on SIGINT/SIGTERM. Port **8787**, `PORT` overrides. |
+| **`scripts/dev.mjs`** | B04. Server + simulator as two OS processes (D32). A crash in either tears the other down; a **clean** exit does not — which is what lets the empty B11 simulator placeholder return immediately. |
+| **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
+| **`src/server/ingest.ts`** | B05. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
+| **`src/server/apply.ts`** | B06. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert. Impressions only; B16/B18 widen it. |
+| **`src/{sim,web}/…`** | B01 placeholders, still empty: `src/sim/index.ts` (B11), `src/web/main.tsx` (B08). |
 
 ## How to run what exists
 
 ```
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
+npm run dev           # server on :8787 + the (still empty) simulator process
 npm run typecheck     # tsc --noEmit, must be clean
 npm test              # node --test — no test files yet (D43), exits 0
 sqlite3 data/loop.sqlite ".schema"
+
+curl -s localhost:8787/api/health        # status, schema_version, log_position, uptime
+TS=$(node -e "console.log(new Date(Date.now()-3600e3).toISOString())")   # PAST — see the clamp note
+curl -s -X POST -H 'content-type: application/json' localhost:8787/api/ingest \
+  -d '[{"event_id":"e1","ts":"'$TS'","ad_id":"a_12","event":"impression"}]'
+sqlite3 data/loop.sqlite "SELECT * FROM rollup_minute; SELECT event_id,disposition FROM signal_deliveries;"
 ```
+
+**Hand-verifying bucketing needs `ts` in the PAST.** A future `ts` is clamped to `received_at` by
+I10, so future-dated test events all collapse into the current minute — correct behaviour, and it
+cost one confused verification run at B06.
 
 `data/` is gitignored. **Deleting it is the supported reset**; `npm run db:migrate` rebuilds from
 empty. `node:sqlite` prints an `ExperimentalWarning` on every run — that is **deliberate** (**U9**).
 
 ## The build plan in one paragraph
 
-Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11) is the walking skeleton and the whole
+Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B06 done) is the walking skeleton and the whole
 point of the ordering**: one simulated event, persisted, aggregated, transported over SSE, on screen,
 surviving a refresh *and* a restart of both processes — impressions only, one hard-coded ad, before
 any breadth. Stage 2 (B12–B24) is the full write path — fold, generations, all four signal kinds,
@@ -110,7 +128,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B04 to B35.**
+**Nothing blocks any chunk from B07 to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -131,17 +149,18 @@ obligations come with that, both of which bite silently if dropped, and both are
 
 | | |
 |---|---|
-| **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, not yet started |
-| **Last completed chunk** | **B03** — `002_projections.sql`, commit `954a3dc`. Closed stage 0. |
-| **Next chunk** | **B04** — HTTP server, `GET /api/health`, and a dev runner starting server + simulator as two processes. Files `src/server/http.ts`, `src/server/index.ts`, `scripts/dev.mjs`. Spec `DESIGN.md` §11. Under **D42**: `node:http` + a ~40-line router, no framework. |
+| **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
+| **Last completed chunk** | **B06** — `apply()`, the single projection writer, commit `811c007`. |
+| **Next chunk** | **B07** — `GET /api/snapshot?from&to&ads`: one read transaction, returns buckets + `as_of_ingest_seq`. File `src/server/snapshot.ts`. Spec `DESIGN.md` §3.1. Verify by `curl` and diffing the JSON against `sqlite3` by hand. |
 | **In flight** | nothing |
-| **Chunks ticked** | **3 / 62** (B01, B02, B03) |
+| **Chunks ticked** | **6 / 62** (B01–B06) |
 | **Cut line status** | nothing cut |
+| **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 
 **The convention.** A chunk is done when: it is announced, built, reported, and Seno says ok. Then
 commit referencing it, tick the box in `docs/BUILD_PLAN.md`, update this table, and **stop and take
-the next instruction**. Never chain two chunks on one approval. Seno has independently re-run the
-verification on all three chunks so far — expect that and make the steps reproducible.
+the next instruction**. Never chain two chunks on one approval. Seno independently re-runs the
+verification on every chunk — expect that and make the steps reproducible.
 
 ## Traps that will not fail loudly
 
@@ -162,6 +181,12 @@ against the real store, and are not in any design document.
 - **Ingest never rejects on ad status** (I11). A conversion attributed to a pre-pause click arrives
   after the pause and is the event we care most about.
 - **Ratios are never stored** (D10). Rollups carry additive counts only.
+- **Replay must pass each event's own `received_at` as `apply()`'s `applied_at`** (added at B06,
+  bites at B22/B23). A rebuild clock writes a different `first_written_at` into every bucket and
+  `/api/verify` reports total divergence on a correct store — whose tempting fix is to drop the
+  column from the diff.
+- **Migrations are append-only from B06 on.** `migrate()` has no content hash, so editing an applied
+  file does not re-run and is not detected: a fresh store and an existing one diverge silently.
 - **`STRICT` does not type-check the way the name suggests** (found at B02). Binding the JS number
   `12` into `signals.ad_id` (`TEXT`) is *accepted* and stored as **`'12.0'`** — STRICT converts
   across affinity where lossless, and `node:sqlite` binds a JS number as REAL. **B05's U6 validation
@@ -199,8 +224,23 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   README change.
 - **`BRIEF_GAPS.md` § Extensions is the README's assembly source.** Any new extension in Phase 5
   gets a row there first.
-- **The two Phase 5 findings above are not in `BRIEF_GAPS.md`** and should not be — they are SQLite
-  behaviours, not defects in the brief.
+- **The Phase 5 SQLite findings are not in `BRIEF_GAPS.md`** and should not be — they are driver and
+  engine behaviours, not defects in the brief. **I19 is** in the register (B05): a delivery with no
+  usable `event_id`, keyed `(no event_id):<payload_hash>`.
+- **B34 owes the D39 revisit.** The seed is ~28 s and ~716 MB through the real write path, not ~12 s
+  and ~315 MB. Nothing regressed — §18.4 measured the store, not the write path — and the full
+  accounting plus **five levers with their costs** (the fifth costs B55's trace a body on seeded
+  events, an HR5 cost) is in `BUILD_PLAN.md` § "The seed budget, re-measured at B06". `SIMULATOR.md`
+  §18.4 carries a pointer to it.
+- **B12 owes the fifth D43 test target**, `isCanonicalIso`, with the argument already written onto
+  B12's row: loosened, the event is accepted, `ts_effective` silently takes the later instant, and
+  B24's sweep re-derives from that same column and agrees with itself.
+- **B33 owes a fault split.** Malformed (0.1%) and dual click-id (0.05%) both read `rejected_invalid`
+  and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
+  bodies, which is only correct once `SUPPORTED` covers all four kinds.
+- **B59 owes a named limit**: `payload_json` is a re-serialisation of the parsed element, not the
+  received bytes — `JSON.parse` has already collapsed duplicate keys and rewritten `1e2` and `\u0041`.
+  The DDL comment and `DESIGN.md` §2.2 both promised "exactly as received" and were corrected at B05.
 
 ## What was verified, not assumed
 
@@ -218,6 +258,11 @@ reproducible with the commands in "How to run what exists".
 | **B02** — both migrations from empty; four pragmas; the I10 clamp (a `ts` of 2099 clamps `ts_effective` while `ts` stays intact); all six `CHECK`s and the partial unique `click_id` index reject; `tx()` rolls back; a forced mid-file failure leaves `user_version` unchanged and the partial table gone | **passes** (Seno re-ran independently) |
 | **B03** — the D29 upsert twice → one row, counts summed, `first_written_at` held at the first write, `max_ingest_seq` advanced; FKs reject an unknown component; the `channel` enum rejects a bad value | **passes** (Seno re-ran independently) |
 | **B03** — §2.4's access paths: hot read `SEARCH … USING PRIMARY KEY`; portfolio window `USING INDEX ix_rollup_time` | **passes** |
+| **B04** — health reports real high-water marks (seeded store: `ingest_seq` 7, `decision_seq` 3); unmigrated store gives the migrate instruction; `EADDRINUSE` exits 1 and the runner tears down; Ctrl-C leaves no process, no bound port, no `-wal` | **passes** |
+| **B05** — accepted → duplicate_identical → (keys reordered) duplicate_identical → (different `ad_id`) duplicate_conflicting; four reject classes with the raw body kept; `ad_id: 12` rejected, nothing stored as `'12.0'`; in-batch duplicate; I10 clamp; **forced throw on element 3 of 3 rolls the whole batch back**; restart preserves `ingest_seq` | **passes** |
+| **B05** — `now(index)` gives a distinct `received_at` per seeded event; two distinct malformed bodies get two distinct `(no event_id):<hash>` keys, one sent twice gets one | **passes** |
+| **B06** — 3 impressions over a minute boundary → 2 buckets + a third for another ad; rollup sum == raw signal count; duplicate moves nothing; a late event bumps the closed bucket with `first_written_at` held and `max_ingest_seq` advanced; **D7 grep: one file, one statement, one importer** | **passes** |
+| **B06** — full-scale seed through the real path: **1.625M events in 27.5 s (59,002/s), 716 MB**; `apply()` alone 490k/s; `dbstat` says `signal_deliveries` + index is 53% of the store | **measured** — see `BUILD_PLAN.md` § "The seed budget, re-measured at B06" |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that
@@ -225,12 +270,14 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B04, build it, report, wait.** Nothing needs deciding first.
+**Announce B07, build it, report, wait.** Nothing needs deciding first.
 
-B04 opens stage 1. Read `DESIGN.md` §11 before writing it — it fixes the process topology (simulator
-is a **separate OS process**, D32), the synchronous-transaction requirement, and the two
-backpressure points. Under **D42** the router is `node:http` and ~40 lines: a `switch` on method and
-pathname, a JSON body reader, an SSE helper. Do not add a framework.
+B07 is the first **read** path: `GET /api/snapshot?from&to&ads`, one read transaction, buckets plus
+`as_of_ingest_seq`. Read `DESIGN.md` §3.1 before writing it — it fixes what the client gets on a
+cold start and why the rows are absolute. Two things already built that it must use: `rollup_minute`
+holds **counts only** (D10 — ratios are derived at read time, never stored), and `max_ingest_seq` per
+bucket is the as-of stamp (D31). §2.4's access paths were verified at B03: the hot read goes through
+the `WITHOUT ROWID` primary key, the portfolio window through `ix_rollup_time`.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 

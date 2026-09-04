@@ -766,6 +766,14 @@ Two consequences:
 2. **The seed prints progress.** Twelve seconds of silence on the one command that is supposed to
    just work reads as a hang.
 
+> **Re-measured at B06 (2026-09-04).** The table above measures **the store**; B34 asks about **the
+> write path**, which also writes a `signal_deliveries` row, hashes it and probes for a duplicate.
+> Through the real `ingest()` → `apply()`, 1.625M events take **27.5 s** and **716 MB**. Subtracting
+> the four line items this benchmark never ran reconciles the two exactly (16.9 µs → 8.0 µs =
+> 125k/s against the 133.6k/s above). Nothing regressed; the figures answer different questions. The
+> accounting and the five levers for B34 are in `BUILD_PLAN.md` § "The seed budget, re-measured at
+> B06". Consequence 2 holds harder: ~28 s of silence is worse than twelve.
+
 ---
 
 ## 19 — Separating signal from noise, on the read side
