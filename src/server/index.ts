@@ -9,6 +9,7 @@ import { createServer } from 'node:http';
 import { openDb, DB_PATH } from './db.ts';
 import { createRouter, readBody, sendJson, type Route } from './http.ts';
 import { ingest } from './ingest.ts';
+import { parseSnapshotQuery, snapshot } from './snapshot.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -54,6 +55,22 @@ const routes: readonly Route[] = [
       // `source` is server-assigned (E15/D38): the wire cannot set it. Live POSTs are 'live';
       // 'backfill' belongs to the in-process seeder alone.
       sendJson(res, 200, ingest(db, parsed, 'live'));
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/snapshot',
+    handler: (_req, res, url) => {
+      // DESIGN §3.1 step 1. The response is the buckets plus the cursor and nothing more: the
+      // envelope's other members arrive with the projections that produce them — `ads[]` and
+      // `generations[]` with the fold (B12), `decisions[]` with the decision log read (B36),
+      // `stream_health` with the telemetry block (B44).
+      const parsed = parseSnapshotQuery(url.searchParams);
+      if (!parsed.ok) {
+        sendJson(res, 400, { error: 'bad_request', message: parsed.error });
+        return;
+      }
+      sendJson(res, 200, snapshot(db, parsed.query));
     },
   },
   {

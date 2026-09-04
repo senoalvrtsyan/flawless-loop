@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1 half-built · 6 / 62 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, read half open · 7 / 63 chunks**
 
 ---
 
@@ -13,14 +13,15 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 document is provisional.
 
 **Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stage 0 (B01–B03) is
-closed** — the store. **Stage 1 (B04–B11) is half-built**: B04–B06 are in, so the write half of the
-walking skeleton works end to end. An event POSTed to `/api/ingest` is stamped, validated, deduped,
-persisted and rolled up into `rollup_minute` in one transaction, and survives a restart. Six commits,
-one per chunk, each approved before it landed.
+closed** — the store. **Stage 1 (B04–B11) is over halfway**: B04–B07 are in. The write half works
+end to end — an event POSTed to `/api/ingest` is stamped, validated, deduped, persisted and rolled
+up into `rollup_minute` in one transaction, and survives a restart — and the read half now has its
+first path: `GET /api/snapshot` returns the bucket rows for a minute-aligned window plus the cursor,
+in one read transaction. Seven commits, one per chunk, each approved before it landed.
 
-**Next is B07** — `GET /api/snapshot?from&to&ads`, the first read path. Then B08 puts a number on
-screen (the first client code in the repo), B09/B10 make it live over SSE, and B11 replaces `curl`
-with the simulator process. `BUILD_PLAN.md` §4 calls stage 1 *"the riskiest thing in the build"*:
+**Next is B08** — the first client code in the repo: fetch the snapshot, render one number, no chart
+and no styling. Then B09/B10 make it live over SSE, and B11 replaces `curl` with the simulator
+process. `BUILD_PLAN.md` §4 calls stage 1 *"the riskiest thing in the build"*:
 everything after it is width on a proven spine.
 
 **No decision blocks anything from here to B35.** For the first time since Phase 0 the path is
@@ -42,10 +43,10 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 62 chunks `B01`–`B62`; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · §7 the D44/D45 gate before B36 · §11 scope coverage · §12 cut line · §13 schedule risk · **§14 the traps**. |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 63 chunks `B01`–`B62` **plus `B20a`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · §7 the D44/D45 gate before B36 · §11 scope coverage · §12 cut line · §13 schedule risk · **§14 the traps**. |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
-| **`src/server/db.ts`** | B02. `openDb()` (four pragmas, throws if not WAL), `tx()`, `DB_PATH`. |
+| **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
 | **`src/server/migrate.ts`** | B02. Migration runner + CLI. `PRAGMA user_version`, no bookkeeping table. |
 | **`migrations/001_logs.sql`** | B02. `components`, `audiences`, `signal_deliveries`, `signals`, `decisions`. |
 | **`migrations/002_projections.sql`** | B03. `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta`, `sim_scenarios`. |
@@ -54,6 +55,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`scripts/dev.mjs`** | B04. Server + simulator as two OS processes (D32). A crash in either tears the other down; a **clean** exit does not — which is what lets the empty B11 simulator placeholder return immediately. |
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
 | **`src/server/ingest.ts`** | B05. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
+| **`src/server/snapshot.ts`** | B07. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
 | **`src/server/apply.ts`** | B06. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert. Impressions only; B16/B18 widen it. |
 | **`src/{sim,web}/…`** | B01 placeholders, still empty: `src/sim/index.ts` (B11), `src/web/main.tsx` (B08). |
 
@@ -83,7 +85,7 @@ empty. `node:sqlite` prints an `ExperimentalWarning` on every run — that is **
 
 ## The build plan in one paragraph
 
-Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B06 done) is the walking skeleton and the whole
+Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B07 done) is the walking skeleton and the whole
 point of the ordering**: one simulated event, persisted, aggregated, transported over SSE, on screen,
 surviving a refresh *and* a restart of both processes — impressions only, one hard-coded ad, before
 any breadth. Stage 2 (B12–B24) is the full write path — fold, generations, all four signal kinds,
@@ -128,7 +130,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B07 to B35.**
+**Nothing blocks any chunk from B08 to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -150,12 +152,13 @@ obligations come with that, both of which bite silently if dropped, and both are
 | | |
 |---|---|
 | **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
-| **Last completed chunk** | **B06** — `apply()`, the single projection writer, commit `811c007`. |
-| **Next chunk** | **B07** — `GET /api/snapshot?from&to&ads`: one read transaction, returns buckets + `as_of_ingest_seq`. File `src/server/snapshot.ts`. Spec `DESIGN.md` §3.1. Verify by `curl` and diffing the JSON against `sqlite3` by hand. |
+| **Last completed chunk** | **B07** — `GET /api/snapshot?from&to&ads`, the first read path. |
+| **Next chunk** | **B08** — client shell: fetch the snapshot, render one number. No chart, no styling (D45 is deferred — unstyled HTML, and say so). Files `src/web/main.tsx`, `src/web/App.tsx`, `index.html`. Spec `DESIGN.md` §3, §3.1. **First client code in the repo.** Verify: number appears, refresh → same number, restart the server → still there. |
 | **In flight** | nothing |
-| **Chunks ticked** | **6 / 62** (B01–B06) |
+| **Chunks ticked** | **7 / 63** (B01–B07) — 63 because B20a was added, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
+| **Plan edits, cont.** | **B20a added** (2026-09-04, Seno's call, after B07): `src/shared/time.ts` — one implementation of the timestamp invariant (`isCanonicalIso` / `toCanonicalIso` / `floorMinute`), inserted immediately **before B21** because B21's horizon sweep would otherwise be the *fourth* copy of that rule (ingest's round-trip B05, `apply()`'s regex B06, snapshot's inline snap B07). Lettered, not renumbered: `B21`–`B62` are cited by id across four documents. |
 
 **The convention.** A chunk is done when: it is announced, built, reported, and Seno says ok. Then
 commit referencing it, tick the box in `docs/BUILD_PLAN.md`, update this table, and **stop and take
@@ -195,6 +198,15 @@ against the real store, and are not in any design document.
   inverts I10's clamp silently: `MIN('…09:00:00.500Z','…09:00:00Z')` returns the **later** instant.
   **Ingest rejects any `ts` that is not exactly `new Date(ts).toISOString()`** — same-shape strings
   make byte order chronological order, and `ts` stays unaltered.
+- **A window bound must be canonical ISO, carry an explicit offset, AND be minute-aligned** (found
+  at B07, the read-side half of the bullet above). Three silent failures, all measured: no offset →
+  JS parses it as **local** time (`…T12:00:00` became `08:00:00.000Z` on this UTC+4 machine, zero
+  buckets, a different answer on another laptop); unsnapped canonical → `'…12:00:00Z' >
+  '…12:00:00.000Z'` skips the minute it names (1 of 3 buckets returned); a bound *inside* a minute →
+  the same event is **over-counted at `to`** and **under-counted at `from`**. Snapshot snaps `from`
+  down and `to` up and echoes the resolved window. **B53's drill-down asserts raw == buckets over
+  `[from, to)`**, so unaligned it reports FAIL for a reason that is not corruption. The read side
+  canonicalises where the write side rejects — a bound is a query, `signals.ts` is a fact.
 - **A partial index is only used if the query spells its predicate literally** (found at B03).
   `WHERE state = 'orphan_provisional'` and `WHERE state IN (...)` both **full-scan**
   `conversion_attribution`; only `WHERE state <> 'resolved'` reaches `ix_attr_unresolved`. **Every
@@ -263,6 +275,9 @@ reproducible with the commands in "How to run what exists".
 | **B05** — `now(index)` gives a distinct `received_at` per seeded event; two distinct malformed bodies get two distinct `(no event_id):<hash>` keys, one sent twice gets one | **passes** |
 | **B06** — 3 impressions over a minute boundary → 2 buckets + a third for another ad; rollup sum == raw signal count; duplicate moves nothing; a late event bumps the closed bucket with `first_written_at` held and `max_ingest_seq` advanced; **D7 grep: one file, one statement, one importer** | **passes** |
 | **B06** — full-scale seed through the real path: **1.625M events in 27.5 s (59,002/s), 716 MB**; `apply()` alone 490k/s; `dbstat` says `signal_deliveries` + index is 53% of the store | **measured** — see `BUILD_PLAN.md` § "The seed budget, re-measured at B06" |
+| **B07** — API JSON byte-identical to `sqlite3` for the same window; rollup impressions == raw `COUNT(*)`; per-ad plan `SEARCH … USING PRIMARY KEY`, portfolio `USING INDEX ix_rollup_time` + `USE TEMP B-TREE FOR ORDER BY`; server restart → same snapshot and same `as_of`; a write commits after a read tx; `grep` finds no write statement in `snapshot.ts` | **passes** |
+| **B07** — the bound traps: `…T12:00:00` (no offset) resolved to `08:00:00.000Z` here; an unsnapped `…12:00:00Z` returned **1 of 3** buckets; `[12:00:00Z,12:00:30Z)` over-counted and `[12:00:20Z,13:00:00Z)` under-counted the same 12:00:50 impression. After snapping, raw == buckets on all three windows | **measured, then fixed** |
+| **B07** — `Z`, `+HH:MM`, `+HHMM`, `-HH:MM` all resolve to the same instant; V8 returns `NaN` for hour-only `+02`; date-only and space-separated forms rejected | **passes** |
 
 **Environment note.** `sqlite3` CLI **3.45.1** is installed; `node:sqlite` embeds **3.51.2**. Both
 read the same file without complaint, but if a `.schema` or a query plan ever looks wrong, that
@@ -270,14 +285,18 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B07, build it, report, wait.** Nothing needs deciding first.
+**Announce B08, build it, report, wait.** Nothing needs deciding first.
 
-B07 is the first **read** path: `GET /api/snapshot?from&to&ads`, one read transaction, buckets plus
-`as_of_ingest_seq`. Read `DESIGN.md` §3.1 before writing it — it fixes what the client gets on a
-cold start and why the rows are absolute. Two things already built that it must use: `rollup_minute`
-holds **counts only** (D10 — ratios are derived at read time, never stored), and `max_ingest_seq` per
-bucket is the as-of stamp (D31). §2.4's access paths were verified at B03: the hot read goes through
-the `WITHOUT ROWID` primary key, the portfolio window through `ix_rollup_time`.
+B08 is the **first client code in the repo**: fetch `/api/snapshot` and render one number, no chart
+and no styling. D45 (styling) is **deferred** until B36, so B08 uses unstyled HTML and says so in
+its report — a stylesheet here would settle D45 by drift, which §2 of `BUILD_PLAN.md` forbids. Read
+`DESIGN.md` §3 before writing it: the persistence-boundary table is what fixes *what the client is
+allowed to own* (viewport, SSE cursor, a render cache — nothing durable, no `localStorage`). The
+number must come back after a refresh AND after a server restart, which is HR1.
+
+Two things B07 leaves for the client to know: the snapshot echoes the **snapped** window in
+`query`, so the client renders the window the server actually answered rather than the one it asked
+for; and `as_of_ingest_seq` is the cursor B09 hands back as `Last-Event-ID`.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 

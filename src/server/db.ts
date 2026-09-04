@@ -56,3 +56,27 @@ export function tx<T>(db: DatabaseSync, fn: () => T): T {
     throw err;
   }
 }
+
+/**
+ * Run `fn` inside one READ transaction — `BEGIN DEFERRED`, deliberately not `tx()`.
+ *
+ * Two reasons this is its own function rather than a flag on `tx()`:
+ *
+ *  1. `BEGIN IMMEDIATE` takes the WRITE lock. A snapshot read through `tx()` would serialise
+ *     every read against the ingest path for the duration of the read, for no benefit: under WAL
+ *     a deferred read gets a stable snapshot of the store WITHOUT blocking a concurrent writer.
+ *  2. The thing this guards is a read spanning several statements that must agree with each
+ *     other — DESIGN.md §3.1's "one request, one read transaction, consistent by construction".
+ *     A named function is the guard; `tx(db, fn, 'deferred')` reads like a tuning knob.
+ */
+export function readTx<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec('BEGIN DEFERRED');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}

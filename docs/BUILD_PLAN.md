@@ -112,7 +112,7 @@ appears in B15 from the decision log, and never before.
 | [x] | **B04** | HTTP server, `GET /api/health`, and a dev runner that starts server and simulator as two processes | `src/server/http.ts`, `src/server/index.ts`, `scripts/dev.mjs` | `npm run dev`; `curl /api/health` returns the log position | D§11 | — |
 | [x] | **B05** | `POST /api/ingest` for `impression` only: stamp `received_at` + `ingest_seq`, validate, write `signal_deliveries` **always**, dedupe on `event_id`, insert `signals` — one transaction | `src/server/ingest.ts`, `src/shared/types.ts` | POST one event, then the same `event_id` again: dispositions read `accepted` then `duplicate_identical`; `signals` has one row, `signal_deliveries` two; POST a negative amount → `rejected_invalid` with the raw body kept | D§5.1 | **HR2 HR8** |
 | [x] | **B06** | `apply()` — the single writer. Rollup upsert for impressions, in B05's transaction. Establishes the rule the rest of the build obeys | `src/server/apply.ts` | POST three impressions spanning two minutes → `rollup_minute` has exactly two rows with the right counts and `max_ingest_seq`; grep proves no other file writes a projection | D§4.3, §1 | **HR2 HR6** |
-| [ ] | **B07** | `GET /api/snapshot?from&to&ads` — one read transaction, returns buckets + `as_of_ingest_seq` | `src/server/snapshot.ts` | `curl` after B06 and diff the JSON against `sqlite3` output by hand | D§3.1 | **HR2** |
+| [x] | **B07** | `GET /api/snapshot?from&to&ads` — one read transaction, returns buckets + `as_of_ingest_seq` | `src/server/snapshot.ts` | `curl` after B06 and diff the JSON against `sqlite3` output by hand | D§3.1 | **HR2** |
 | [ ] | **B08** | Client shell: fetch the snapshot, render one number. No chart, no styling | `src/web/main.tsx`, `src/web/App.tsx`, `index.html` | Number appears in the browser; **refresh → same number**; stop the server, restart it, refresh → still there | D§3, §3.1 | **HR1 HR8** |
 | [ ] | **B09** | SSE `GET /api/stream`: dirty-set collection, 250–500 ms flush tick, **absolute** bucket rows, `id:` = high-water `ingest_seq` | `src/server/stream.ts` | `curl -N /api/stream` in one terminal, POST in another; one absolute row per touched bucket per tick, never a delta | D§5.5, §11 | **HR2** |
 | [ ] | **B10** | Client subscribes, merges absolute rows by `(ad_id, minute)`, resumes on `Last-Event-ID` | `src/web/stream.ts`, `src/web/store.ts` | Number ticks up live; kill the server mid-stream and restart → the client reconnects and the number is **not** double-counted | D§3.1, §5.5 | **HR1 HR2** |
@@ -146,10 +146,20 @@ skeleton from stage 1 keeps working throughout and the numbers get richer.
 | [ ] | **B18** | `conversion` through ingest **and** cohort placement (D27-B) together: a conversion counts in **its click's minute**. They cannot be split — `ingest()` calls `apply()` for every accepted signal, so a conversion that ingests before `apply()` handles it would need a silent no-op branch, which is the divergence the `default: throw` exists to prevent. D27-B needs B17's attribution to know which minute | `src/server/ingest.ts`, `src/server/apply.ts` | Click at 14:02, conversion at 16:40 → the **14:02** bucket carries the conversion; total spend is the read-time sum of two columns, never a third stored one | D§5.3, §4.5 | **HR2** |
 | [ ] | **B19** | Orphans: `orphan_provisional` at its own minute into the `provisional_*` columns; `orphan_expired` past the horizon | `src/server/attribute.ts`, `src/server/apply.ts` | Conversion before its click → `provisional_conversions` moves and the settled counts do **not**; an orphan older than 72 h reads `orphan_expired`, still counted, never deleted | D§5.2 | **HR4** |
 | [ ] | **B20** | **Restatement.** `applyConversion(ev, prev)`: decrement the old bucket, credit the new; `settled_at(B, ev.received_at)` — *never* wall-clock `now`; `restated_at` + `restatement_count`; orphan promotion via `ix_signals_attr` | `src/server/apply.ts` | Send the withheld click → the orphan promotes, **two** buckets change, the provisional one is decremented; send a conversion into a >72 h bucket → `restated_at` set, count bumped | D§5.4; S§15.3(c) | **HR4** |
+| [ ] | **B20a** | `src/shared/time.ts` — **one** implementation of the timestamp invariant: `isCanonicalIso` / `toCanonicalIso` (explicit-offset check included) / `floorMinute`, and the callers switched to it. No behaviour change | `src/shared/time.ts`, `src/server/ingest.ts`, `src/server/apply.ts`, `src/server/snapshot.ts` | Every §14 timestamp case re-run against the shared module: B05's four reject classes, B06's bucketing, B07's snapping and offset rejections — all unchanged. `grep -n "toISOString()\s*===\|\\.\\d{3}Z\|60_000" src/` finds the invariant in one file | §14 | — |
 | [ ] | **B21** | Settlement state on the read side: `live` / `settled` / `restated` per bucket, in the snapshot and the SSE row; the 72 h horizon and the `America/New_York` constant in one config module | `src/server/settlement.ts`, `src/shared/config.ts` | Snapshot rows carry a state; a 7-day-old bucket reads `settled`, a 10-minute-old one `live` | D§5.4, §5.7 | **HR4** |
 | [ ] | **B22** | `GET /api/verify`: rebuild every projection from the logs into temp tables, diff row by row, return the first divergence or a clean bill with the log position; `content_hash` fast path | `src/server/verify.ts` | Runs clean; hand-`UPDATE` one `rollup_minute` row and see it caught with the offending key | D§7 | **HR5 HR6** |
 | [ ] | **B23** | `replay(descriptor)` — pure function over a log prefix. Reads **raw `signals` only**, restricted to `ingest_seq <= as_of`, re-deriving attribution over that prefix. No HTTP yet | `src/server/replay.ts` | Unit test on a hand-built fixture; assert it never opens `rollup_minute` | D§10.2 | **HR5** |
 | [ ] | **B24** | **P14 agreement sweep** as `npm run agree`: one ordered whole-log pass, rebuild, diff every bucket, print mismatches | `scripts/agree.ts` | Runs clean on the curl-built dataset in milliseconds; corrupt a bucket → caught. **Must be a single pass, not `replay()` per bucket** — per-bucket is O(buckets × N) and takes hours | D§10.2; S§18.4 | **HR5** |
+
+**Why B20a exists, and why it is lettered rather than numbered.** Added 2026-09-04, Seno's call,
+after B07. The timestamp invariant of §14 — canonical ISO, explicit offset, minute-aligned — had
+acquired **three** implementations linked only by a §14 note: ingest's `toISOString()` round-trip
+(B05), `apply()`'s regex (B06), and snapshot's inline canonicalise-and-snap (B07). B21's horizon
+sweep would be the fourth, and a fourth reading of one rule is how the rule stops holding. It sits
+immediately before B21 so that sweep is written against the shared module and not against a copy.
+It is `B20a`, not a renumber, because `B21`–`B62` are cited by id across four documents and §11's
+coverage table; a renumber would invalidate every one of those references to save a letter.
 
 **Why the agreement sweep lands here and not in stage 6.** It is the independent check on every
 chunk that follows. Built now, it guards the simulator (stage 3) and the whole read side (stage 4);
@@ -489,6 +499,30 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   `new Date(ts).toISOString()`** — same shape everywhere makes lexicographic order chronological
   order, and `signals.ts` still stays "as emitted, never altered". Normalising instead of rejecting
   would break that guarantee; this is why B05 validates the *format*, not just the parseability.
+
+- **Every timestamp reaching a SQL comparison must be canonical ISO — and a window bound must
+  additionally be minute-aligned.** The read-side half of the bullet above, found at B07 against
+  the real store. Three ways a bound goes wrong, all silent:
+
+  | Bound as given | What happens |
+  |---|---|
+  | `?from=2026-09-03T12:00:00Z` (canonical, unaligned is fine here) | correct |
+  | `?from=2026-09-03T12:00:00` (no offset) | JS parses it as **local** time — `08:00:00.000Z` on a UTC+4 machine, zero buckets, and a **different answer on another laptop** |
+  | `?from=2026-09-03T12:00:00Z` compared unsnapped against `minute_start` | `'…T12:00:00Z' > '…T12:00:00.000Z'` (`'Z'` 0x5A after `'.'` 0x2E): the minute it names is **skipped** — measured, 1 of 3 buckets returned |
+  | `[12:00:00Z, 12:00:30Z)` / `[12:00:20Z, 13:00:00Z)` | the same 12:00:50 impression is **over-counted at `to`** and **under-counted at `from`** |
+
+  So: **window bounds must be minute-aligned, because a bound inside a minute resolves to whole
+  buckets in opposite directions at the two ends.** `from` snaps down, `to` snaps up, and the
+  snapped window is echoed in the response — down/up so the window never loses data, never
+  collapses to zero width, and a live window ending mid-minute keeps its in-progress bucket. The
+  property this protects is the one **B53**'s drill-down asserts: raw events re-summed over
+  `[from, to)` equal the buckets' counts. Unaligned, that drill-down prints **FAIL** for a reason
+  that is not corruption, and the tempting fix is to loosen the assertion.
+
+  Note the read side **canonicalises** where the write side **rejects** (B05): `signals.ts` is a
+  received fact that must be stored as emitted, whereas a window bound is a query, so normalising
+  it loses nothing. An explicit offset is still required rather than assumed — see **B20a**, which
+  gives this invariant one implementation instead of four.
 
 - **Replay passes each event's OWN `received_at` as `apply()`'s `applied_at`** — never a rebuild
   clock. `apply()` takes the parameter, so the mechanism is already there; what is not written down
