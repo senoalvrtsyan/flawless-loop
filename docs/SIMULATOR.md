@@ -434,7 +434,7 @@ consequence 3), and it rides the rate curve the simulator needs anyway.
 p_ctr(minute)  ~ Beta(p̄_ctr·κ, (1−p̄_ctr)·κ),  κ = 200     -- ONCE PER MINUTE  [D57]
 clicks(t)      ~ Binomial(N(t), p_ctr(minute))             -- so the MINUTE is BetaBinomial
 p̄_ctr          = ctr_base(temperature) × ctr_mult(channel) × φ_ad × ν
-conversions    ~ BetaBinomial(clicks(t), p_cvr, κ = 60)
+conversions    ~ Bernoulli(p_cvr) PER CLICK, keyed by click_id           [D62]
 p_cvr          = cvr(temperature) × cvr_mult(channel) × dow_cvr
 order value    ~ LogNormal(median = order_value(temperature) × dow_aov, σ = 0.6)
 ```
@@ -451,10 +451,20 @@ order value    ~ LogNormal(median = order_value(temperature) × dow_aov, σ = 0.
 > same second as the impression that produced it. The minute is `DEMAND.stepMs`, the same grid D57
 > ratified for §12's demand factors.
 >
-> **`κ = 60` for conversions is unchanged and is still inert.** A conversion draw is over one tick's
-> *clicks*, which is 0–1, and stays 0–1 over a minute; only an hour-wide window would give it an
-> effect, and that is a further decision about where cohort-rate uncertainty lives. Named as a limit
-> rather than absorbed — `BUILD_PLAN.md` §14.
+> **`κ = 60` for conversions is GONE, and the reason is §15.3(b) rather than the parameter — D62
+> (2026-09-04, at B34).** It was already inert: a conversion draw is over one tick's *clicks*, which
+> is 0–1 and stays 0–1 over a minute, so the urn's `(N−1)/(κ+1)` was exactly zero. What forced the
+> change is the **handover contract**. §15.3(b) promises the pending-conversion queue is *derivable,
+> not stored* — the emitter re-derives a backfilled click's schedule from
+> `hash(seed, 'conv_lag', click_id)`. That covers the **lag**. It did not cover **whether the click
+> converts at all**, because a BetaBinomial over the tick's clicks needs the tick's click count and
+> the click's index within it, and a handed-over `click_id` carries neither.
+>
+> `Bernoulli(p_cvr)` keyed by `click_id` alone makes a bare `click_id` sufficient, which is what
+> §15.3(b) says it already was. Nothing measurable is lost — the urn it replaces did nothing at
+> N = 0–1 — and the same move was made on the click side by D57, in the opposite direction: there a
+> dead κ was made real, here a dead κ is removed. Cohort-rate uncertainty on conversions remains
+> unmodelled and is still a stated limit.
 
 - Every click mints a **`click_id`** distinct from its `event_id` (**E3**), derived from the keyed
   RNG (§14) so it is reproducible and so a conversion can reference it before it is emitted.
@@ -621,7 +631,10 @@ the true one"*:
 (seed + decision log + scenario log)  →  world
 ```
 
-All three are persisted — the decision log by **D7**, the scenario log by **D40** — so replaying a
+All three are persisted — the decision log by **D7**, the scenario log by **D40**, and **the seed
+by D60** (2026-09-04, at B34: a one-row table written by the seeder at `T0` and served in
+`GET /api/sim/world`, so the emitter has no seed of its own and cannot continue a history under a
+seed that history was not generated with) — so replaying a
 specific interesting moment is genuinely possible. That is a stronger claim than seed-only
 determinism, and unlike seed-only determinism it is true.
 
@@ -709,6 +722,7 @@ Historical restatements are now visible immediately; **P16** remains the only wa
 | `spend_so_far_today` per ad, account-local day | §9's pacing term |
 | Backfilled clicks still inside the 7-day lag window | §15.3(b)'s pending-conversion re-derivation |
 | Pending scenario triggers | §17, so there is no second control channel |
+| **The world seed** (**D60**) | §14's first term. The emitter holds no seed of its own, so it cannot disagree with the backfill about which world this is |
 
 **Why recompute rather than derive.** Deriving fatigue from `seed + clock` would reconstruct what the
 model *would* have produced — which equals the store only if nothing was rejected, lost or truncated.
@@ -724,6 +738,14 @@ query the Workbench wants anyway.
 we hope for. Cold start, restart, lever propagation and scenario delivery are **one code path**.
 Killing the simulator mid-demo loses nothing: it re-reads and resumes, and duplicate emissions
 dedupe by construction (§14).
+
+**How far back it resumes is 60 seconds — ratified as D61** (2026-09-04, at B34), and bounded below
+by `T0` per §15.3(b), so the start is `max(now − 60 s, T0)`. One `rollup_minute` bucket (D28), so a
+restart re-emits at most the minute you are watching. The alternative — a server-derived resume
+position carried in this same poll, which would remove the re-emission entirely — was rejected
+deliberately: **the re-emission IS the demonstration** that derived ids make restart safety free
+(B11 measured 14 `duplicate_identical`, 0 conflicting). Removing it would optimise away the thing
+§14 exists to show.
 
 ---
 
@@ -962,7 +984,7 @@ NOISE                                                                 [D37]
   m_ad                         log-AR(1), τ 20 min, sd 0.25
   impressions                  NegBinomial(λ, α = 8)
   clicks                       BetaBinomial(N, p_ctr, κ = 200)
-  conversions                  BetaBinomial(clicks, p_cvr, κ = 60)
+  conversions                  Bernoulli(p_cvr) per click, keyed by click_id   [D62]
   order value                  LogNormal(σ 0.6)
   CPC                          LogNormal(σ 0.35) × m_channel^0.6
 

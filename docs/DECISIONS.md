@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D59 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D62 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -122,6 +122,9 @@ level — and not a severity.
 | D57 | Does §12's demand noise preserve mean volume, at what interval, and does κ do anything | **ACCEPTED — A / Δ = 60 s / A** (`E[m] = 1` by a −sd²/2 drift; the click rate drawn once a minute) | 2026-09-04 |
 | D58 | `ρ_pacing` is path-dependent, and §14's restart identity is not | **ACCEPTED — B** (sub-second placement made independent of the count) | 2026-09-04 |
 | D59 | `ρ_catchup` boosts delivery the model has no inventory for | **ACCEPTED — B** (ceiling 1.6 → 1.0: pacing throttles, never boosts) | 2026-09-04 |
+| D60 | Where the world seed lives | **ACCEPTED — B** (one-row table, written by the seeder, served in `GET /api/sim/world`) | 2026-09-04 |
+| D61 | The emitter's boot catch-up window | **ACCEPTED — A** (60 s ratified; the re-emission is the demonstration) | 2026-09-04 |
+| D62 | The handover contract is one function short (`converted?`) | **ACCEPTED — A** (conversion becomes a per-click Bernoulli keyed by `click_id`) | 2026-09-04 |
 
 ---
 
@@ -3216,3 +3219,187 @@ is exogenous, so it does not. The failure was invisible in the spec and obvious 
 against §2.3's own column, which is exactly the check stage 3 was designed around: every chunk
 compares against a table already in the document, so *"does it match"* is arithmetic rather than
 judgement. It did not match, by up to 47%, and the number is in the entry.
+
+---
+
+# THE B34 PASS — D60, D61, D62
+
+All three were surfaced **before B34 began**, because all three are load-bearing for the 1.6M
+backfilled events B34 writes and two of them had been carried as unratified assumptions since B11.
+
+**Wording of record — Seno's words, one line ratifying all three:**
+
+> 60 - B, 61 - A, 62 - A
+
+**The mapping, recorded explicitly rather than restated in each entry** (`CLAUDE.md` §3): *60 - B*
+ratifies **D60 option B** — a one-row table written by the seeder and served in the world poll.
+*61 - A* ratifies **D61 option A** — 60 s, ratified as it stands. *62 - A* ratifies **D62 option A**
+— conversion becomes a per-click Bernoulli keyed by `click_id`.
+
+---
+
+## DECISION #60 — Where the world seed lives
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Blocks:** B34
+**Relates to:** `SIMULATOR.md` §14, §16 · D7 · D40 · D32 · B11's unratified assumption
+
+### Question
+
+§14's honest claim is `(seed + decision log + scenario log) → world`. The decision log is persisted
+by D7 and the scenario log by D40. **The seed was not** — it was
+`process.env.SIM_SEED ?? 'flawless-loop'`, a code constant carrying an `ASSUMPTION (unratified)`
+label in `src/sim/index.ts` since B11. B34 makes it load-bearing: 1.6M backfilled events are
+generated under it, and a live emitter continuing that history under a different seed produces an
+incoherent world with nothing recording the fork.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Keep the code constant; `SIM_SEED` still overrides | Rejected — a forked run is remembered rather than recorded, and §14's first term would be the only one of three not in the store |
+| **B** | **New one-row table (`migrations/003_*.sql`), written by the seeder at `T0`, served in `GET /api/sim/world`; the emitter stops having a seed of its own** | **CHOSEN** |
+| C | Reuse `sim_scenarios` with a `name = 'seed'` row | Rejected — a seed is not a scenario trigger, and D40 defined that table as one. It would read as a shortcut |
+
+### Rationale, in Seno's words
+
+> 60 - B, 61 - A, 62 - A
+
+**Recorded as a bare option choice** (see the pass header for the mapping), so the reasoning of
+record is the one put with the recommendation: B is the only option where **the emitter cannot
+disagree with the backfill about the seed**, and that disagreement is silent — the world simply
+stops being reproducible while every number on screen stays plausible.
+
+### Consequences
+
+1. **A third migration.** Migrations are append-only from B06 on, so a new file is the supported
+   path rather than an edit to an applied one.
+2. **The emitter reads the seed from the world poll**, alongside status, `F` and spend-so-far. One
+   more field on a contract that already exists.
+3. **`SIM_SEED` becomes a SEEDING-time override, not an emission-time one.** Forking a run means
+   seeding a new store, which is the honest shape: a fork is a different world, not a different
+   process argument.
+4. **§14 and §16 are amended in place** — §14's "all three are persisted" now says how, and §16's
+   table gains the row.
+
+### What it forecloses
+
+Changing the seed of a running world without reseeding. That is the point: under A it was possible
+and untracked.
+
+### How I'd defend this in review
+
+The reproducibility claim is the one place this simulator makes a strong promise, and it was resting
+on a constant in a file. Two of its three terms were already in the store; this puts the third
+there, and does it by making the emitter *stateless about the seed* rather than by asking it to
+remember the right one.
+
+---
+
+## DECISION #61 — The emitter's boot catch-up window
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B34; read by B35
+**Relates to:** `SIMULATOR.md` §15.3(b), §16 · §14 property 1 · D28 · B11's unratified assumption
+
+### Question
+
+`CATCHUP_S = 60` is forced to *exist* by B11's restart property and §16's *"it re-reads and
+resumes"*, but no document fixed its **length**. §15.3(b) makes the start `max(now − CATCHUP_S, T0)`
+once the seeder owns everything up to `T0`.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **Ratify 60 s as it stands** — one `rollup_minute` bucket (D28), so a restart re-emits at most the minute you are watching | **CHOSEN** |
+| B | Have `GET /api/sim/world` carry a server-derived resume position, so the emitter resumes where the log ends and re-emits nothing | Rejected — it removes the duplicates *and the restart demonstration with them* |
+
+### Rationale, in Seno's words
+
+> 60 - B, 61 - A, 62 - A
+
+Reasoning of record, as put with the recommendation: **the re-emission IS the demonstration.** B11
+measured 14 `duplicate_identical` and 0 conflicting on a kill-and-restart, which is §14 property 1
+made visible. Option B is a real improvement to a production emitter and a net loss to *this*
+artifact, whose job is to show that derived ids make restart safety free.
+
+### Consequences
+
+1. **60 s stops being an assumption** and the `ASSUMPTION (unratified)` label comes off
+   `src/sim/index.ts`. B11's two labelled assumptions are now both answered (D60, D61).
+2. **B35's seam is `max(now − 60 s, T0)`**, so a cold start immediately after seeding re-emits
+   nothing the seeder already owns.
+3. **The window stays aligned down to a spend boundary** (B27), so catch-up covers 60–119 s. That
+   was already true and is not changed here.
+4. **§16 is amended in place** with the number and with the reason B was refused.
+
+### What it forecloses
+
+Removing restart duplicates later without also removing a demo the README will point at.
+
+### How I'd defend this in review
+
+The alternative was strictly better engineering and strictly worse evidence. We are building an
+artifact whose claim is *"derived ids mean the simulator does not need to remember what it sent"* —
+a resume cursor would make that claim untestable by making it unnecessary.
+
+---
+
+## DECISION #62 — The handover contract is one function short (`converted?`)
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B34
+**Relates to:** `SIMULATOR.md` §10, §15.3(b), §21 · D57 consequence 6 · D40-A · found at B31a
+
+### Question
+
+§15.3(b) promises the pending-conversion queue is *derivable, not stored*: the emitter re-derives a
+backfilled click's schedule from `hash(seed, 'conv_lag', click_id)`. **That covers the lag. It does
+not cover whether the click converts at all** — that was §10's `BetaBinomial(clicks, p_cvr, κ = 60)`,
+a draw over *the tick's clicks*, needing the tick's click count and the click's index within it.
+`GET /api/sim/world`'s `pending_backfill_clicks` hands over `{ click_id, ad_id, ts }` and carries
+neither. Found at B31a and recorded in that endpoint's `PENDING_CLICKS_SQL` docstring.
+
+Already on the record: **κ = 60 is inert and was ratified as inert** (D57 consequence 6) — a
+conversion draw is over one tick's clicks, 0–1, and stays 0–1 over a minute.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **Per-click `Bernoulli(p_cvr)` keyed by `click_id`**, §10 amended in place | **CHOSEN** |
+| B | Widen the handover so `pending_backfill_clicks` carries the tick's click count and the click's index | Rejected — it makes *"re-derivable from `click_id`"* false and puts simulator-private indices on a public endpoint |
+| C | Store the schedule | Rejected by §14 property 2 and D40-A; presented only so the batch was complete |
+
+### Rationale, in Seno's words
+
+> 60 - B, 61 - A, 62 - A
+
+Reasoning of record: A is the only option that leaves **§15.3(b) true as written**, and it costs
+nothing measurable because the urn it replaces was already doing nothing at N = 0–1. It is the same
+move D57 made on the click side, in the opposite direction — there a dead κ was made real by drawing
+the rate per minute; here a dead κ is removed because making it real would require an hour-wide
+window, which D57 already named as a further decision.
+
+### Consequences
+
+1. **§10 and §21 are amended in place.** `conversions ~ Bernoulli(p_cvr) per click, keyed by
+   `click_id``. The `κ = 60` row is gone rather than annotated, because it no longer exists.
+2. **A bare `click_id` is now a sufficient handover.** B34's backfill and the live emitter derive
+   the same answer for the same click, which is what makes the `T0` seam (B35) checkable.
+3. **`emit.ts`'s conversion draw changes**, and the dry run's conversion column moves slightly —
+   the *distribution* is unchanged in mean, only the correlation structure within a tick is (it was
+   already zero at N = 0–1).
+4. **Cohort-rate uncertainty on conversions stays unmodelled** and stays a stated limit, owed to
+   the README. D62 does not change that; it removes a parameter that pretended to model it.
+
+### What it forecloses
+
+Modelling correlated conversion behaviour within a single tick's clicks. Reinstating it means
+reinstating a draw that needs the tick's population, which is exactly what breaks the handover — so
+it would have to come with option B's wider contract.
+
+### How I'd defend this in review
+
+The gap was found by writing down what `GET /api/sim/world` would have to carry for §15.3(b)'s
+promise to be true, and noticing it carried less. The fix removes a parameter rather than adding a
+field, and the parameter it removes had already been measured as having no effect — so the model got
+simpler and one of its stated properties got true at the same time.
