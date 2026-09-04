@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D62 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D63 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -125,6 +125,7 @@ level — and not a severity.
 | D60 | Where the world seed lives | **ACCEPTED — B** (one-row table, written by the seeder, served in `GET /api/sim/world`) | 2026-09-04 |
 | D61 | The emitter's boot catch-up window | **ACCEPTED — A** (60 s ratified; the re-emission is the demonstration) | 2026-09-04 |
 | D62 | The handover contract is one function short (`converted?`) | **ACCEPTED — A** (conversion becomes a per-click Bernoulli keyed by `click_id`) | 2026-09-04 |
+| D63 | Does a paused ad's already-earned conversion still arrive | **ACCEPTED — A** (it arrives; pause is a λ rule, and a conversion is not drawn from λ) | 2026-09-04 |
 
 ---
 
@@ -3403,3 +3404,81 @@ The gap was found by writing down what `GET /api/sim/world` would have to carry 
 promise to be true, and noticing it carried less. The fix removes a parameter rather than adding a
 field, and the parameter it removes had already been measured as having no effect — so the model got
 simpler and one of its stated properties got true at the same time.
+
+---
+
+# THE B35 PASS — D63
+
+Surfaced **mid-build**, under `CLAUDE.md` §5's stop clause: B35's conversion path needed to know
+which ads to look up, and the answer changes what the pause demo looks like. The sixth time that
+clause has fired.
+
+**Wording of record — Seno's words:**
+
+> A — record D63 then commit B35
+
+---
+
+## DECISION #63 — Does a paused ad's already-earned conversion still arrive?
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B35's commit, and the demo
+script's pause beat
+**Relates to:** `SIMULATOR.md` §3, §11, §15.3(b) · D27-B · D62 · HR3 · HR4 · found at B35
+
+### Question
+
+`SIMULATOR.md` §3 says *"A paused ad emits nothing: `λ = 0` while `status ≠ 'live'`"* — and λ is the
+**impression** rate. A conversion is not drawn from λ; it is the settlement of a click that is
+already in the log, hours or days old, and under **D27-B** it counts in that click's minute rather
+than its own. So §3 does not answer whether pausing an ad also silences the purchases its earlier
+clicks already earned. Concretely it decides whether `dueBackfillConversions()` looks up
+`world.ads` or only the `live` subset — one line, and two different stories about what a lever does.
+
+The ad it decides it for is **`a_12`**, which is both `SIMULATOR.md` §2.3's stated pause target and
+the brief's own example (*"Pausing `a_12` stops its events"*, HR3).
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **It arrives.** The lookup is `world.ads` — every ad the fold carries, whatever its status | **CHOSEN** |
+| B | Pause silences the ad completely, in-flight conversions included | Rejected — it makes the model say that pausing an ad retroactively cancels purchases people already made, and it deletes the in-flight population from precisely the ad the pause demo uses |
+
+### Rationale, in Seno's words
+
+> A — record D63 then commit B35
+
+Reasoning of record: for a slice being judged on **event modelling**, *"the lever stops new
+delivery, and money already earned still settles"* is the more defensible sentence — and it is the
+one that lets `a_12` carry **HR3 and HR4 at once** instead of forcing them onto different ads.
+Option B's appeal was demo legibility, not correctness: it makes the pause beat unambiguous. That is
+a narration problem, and the README's event trace already has to explain that a conversion counts in
+its click's minute — a paused ad's late conversion is the same sentence, said once.
+
+### Consequences
+
+1. **A conversion can land on `a_12` seconds after the pause visibly stops its impressions**, and
+   the demo script must say so rather than be surprised by it. Owed to `DEMO.md` (D50).
+2. **`dueBackfillConversions()` reads `world.ads`**, so the ad lookup cannot be narrowed to `live`
+   later without reopening this. The `ASSUMPTION (unratified)` comment in `src/sim/index.ts` is
+   replaced by a citation of this entry.
+3. **HR3's self-check stays exact.** §1's convention — *the arrival count for a paused ad should
+   read zero* — is about λ's kinds: impression, click, spend. A conversion arriving for a paused ad
+   is not a violation of it, and the check must be written per-kind rather than per-ad or it will
+   report a false failure the first time this fires.
+4. **Revenue is never deleted by a lever**, which keeps `apply()`'s single-writer story clean: no
+   lever silently changes what a past bucket holds.
+
+### What it forecloses
+
+An unambiguous *"after the pause, nothing with `a_12` on it appears"* claim. We can no longer make
+that statement without qualification, and any future read-gate or alert that assumes it will be
+wrong. The reverse is one line, but the demo narration built on top of it would have to change with
+it.
+
+### How I'd defend this in review
+
+Pausing an ad stops you buying more impressions; it does not un-buy the ones people already clicked,
+and a platform that reported otherwise would be lying about revenue. The model follows the money
+rather than the switch, and the one cost — that the pause demo needs a sentence of narration — buys
+the ability to demonstrate the lever and late attribution on the same ad.
