@@ -2623,3 +2623,68 @@ without a descriptor. D10 is untouched: counts aggregate, the division comes aft
 
 **The trade, stated.** A makes client arithmetic bugs *impossible*; D makes them *caught on click*.
 D buys the live path for that price.
+
+### D47 — The `resnapshot` threshold, and how the cursor reaches the server
+
+**Raised and ratified 2026-09-04, at B10a's announce.** `docs/DECISIONS.md` § Wave 8.
+
+**Blocked:** B10a. **Context:** `DESIGN.md` §3.1 says a cursor "older than the server can serve
+cheaply" gets a `resnapshot` frame, *"stated rather than left to a timeout"* — but "cheaply" is not
+a number. The replay is `rollup_minute WHERE max_ingest_seq > cursor`: unbounded in both ads and
+time, where the snapshot the client falls back to is **window-scoped**. Past some size the replay
+transfers more than the thing it exists to avoid.
+
+**The shape, which rules out the obvious answers.**
+
+| Threshold on | Verdict |
+|---|---|
+| Seq distance (`current - cursor > K`) | **Rejected.** Mispredicts by orders of magnitude *both ways*: 100,000 impressions in one minute dirty **one** bucket; 20,000 late conversions over 20,000 minutes dirty **20,000** — identical seq distance. It resnapshots when the replay is trivial and replays when it is 6 MiB |
+| Wall-clock age of the cursor | **Rejected.** Same defect, less information — it does not know how much happened |
+| Log floor / retention | **Cannot fire.** D11 builds no compaction and retention is unbounded, so there is no floor. Becomes a *necessary extra* condition only if compaction is ever added |
+| **Row count of the replay** | **Chosen.** The thing that actually costs, and free to measure: `LIMIT N+1` on the query already being run. `N+1` rows back → `resnapshot`. No `COUNT(*)` pass, and with no `ORDER BY` SQLite stops scanning as soon as it has them — so it bails **earliest in exactly the expensive case** |
+
+**The value, anchored on Seno's B09 measurement** — 6.20 MiB / 20,000 rows = **325 B/row**;
+142 ms / 20,000 = **7.1 µs/row**.
+
+| Replay size | Frame | Stringify | What it is |
+|---|---|---|---|
+| ~12 rows | 4 KB | — | a one-second blip |
+| **720 rows** | 0.23 MiB | 5 ms | **12 ads × a full hour offline — the reference point** |
+| **2,000 rows** | **0.65 MiB** | **14 ms** | **chosen threshold** |
+| 5,000 rows | 1.6 MiB | 35 ms | the alternative offered |
+| 56,160 rows | ~17 MiB | ~400 ms | a cursor from before the seed |
+
+The crossover is not a comfort level: the client's fallback fetches its **visible window**, which
+portfolio-wide at B36 is 12 ads × 60 minutes = **720 rows**. Above that the replay transfers more
+than a fresh snapshot *and* is unbounded in time, so the constant sits just above a full-portfolio
+hour with enough headroom that a normal reconnect never trips it. **5,000** was offered as the
+alternative — it keeps a genuine `late_cascade` (D40) replayable rather than resnapshotted, at
+1.6 MiB. Seno chose **2,000**.
+
+**Two conditions that are not about cost**, both ratified with the threshold:
+
+1. **`cursor > current high-water seq` → resnapshot, unconditionally.** The silent one. Delete
+   `data/`, re-migrate, restart: the browser reconnects with `Last-Event-ID: 500` against a store at
+   seq 3, `max_ingest_seq > 500` matches nothing, and the client sits on **stale numbers forever,
+   believing it is current**. No error at any layer — and `rm -rf data/` is the *supported* reset
+   (U8), so this is reachable by ordinary use.
+2. **A non-numeric cursor → resnapshot**, not `400`. A `400` on an `EventSource` produces an
+   infinite retry against the same bad URL; `resnapshot` tells the client to re-snapshot and rebuild
+   it.
+
+**Seno's amendment — how the cursor reaches the server at all.** My proposal had *absent
+`Last-Event-ID` → no replay, just go live*, on the assumption that the client had just snapshotted.
+That is wrong, and it is the whole point of the mechanism: **`EventSource` cannot set a request
+header** (its constructor takes only `withCredentials`), so the header exists **only on the
+browser's own reconnect**, never on the first connect after a snapshot. Absent-means-live therefore
+drops the **snapshot-to-subscribe gap on every refresh** — events landing between §3.1 step 1 and
+step 2 are flushed to the other subscribers and gone, leaving buckets stale until they happen to
+move again.
+
+So the cursor arrives two ways and the server takes **`max(header, query)`**: `?cursor=N` on the URL
+(the client's own, from the snapshot's `as_of_ingest_seq`) and `Last-Event-ID` (the browser's, on
+reconnect only). **Why `max` and not `min`:** both are *true* statements of "I hold everything up to
+X" — the query cursor because the snapshot returned it, the header because the browser only sends an
+id it actually dispatched — so the max is the **tightest true lower bound**. `min` would be
+correct-but-redundant on every reconnect, and on a long-lived session the extra rows since the
+original snapshot could trip the 2,000 threshold and force a resnapshot for no reason.

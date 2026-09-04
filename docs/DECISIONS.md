@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D46 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D47 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -107,6 +107,7 @@ level — and not a severity.
 | D43 | Test runner, and what gets a test at all | **ACCEPTED — A** (`node:test`, four pure functions) | 2026-09-04 |
 | D44, D45 | Chart rendering · styling | **DEFERRED to stage 4** (B36/B37) — see F4 | 2026-09-04 |
 | D46 | Where window aggregation lives — who computes a displayed total | **ACCEPTED — D**, Seno's own option (an amendment to the three offered) | 2026-09-04 |
+| D47 | The `resnapshot` threshold, and how the cursor reaches the server | **ACCEPTED — 2,000 rows**, plus Seno's `max(header, query)` amendment | 2026-09-04 |
 | F4 | D44/D45 are deferred, not open | **DECIDED** | 2026-09-04 |
 | U8, U9 | Store path `data/loop.sqlite` · `ExperimentalWarning` left visible | **ACCEPTED** — ratified at B02 | 2026-09-04 |
 
@@ -2250,3 +2251,81 @@ The descriptor is the query, not the answer — so the client is allowed to aggr
 aggregates *the server's question*, which the drill-down then re-answers from raw events and checks
 against what is on screen; that keeps the stream's absolute per-minute rows, and their idempotent
 resume, intact.
+
+---
+
+## DECISION #47 — The `resnapshot` threshold, and how the cursor reaches the server
+
+**Status:** ACCEPTED — **2,000 rows**, with Seno's amendment to the cursor channel ·
+**Date:** 2026-09-04 · **Blocked:** B10a · **Shapes:** B10b
+
+### Question
+
+`DESIGN.md` §3.1 promises that a cursor "older than the server can serve cheaply" gets a
+`resnapshot` frame, *"stated rather than left to a timeout"*. What is the number — and what shape
+should it even have, given the replay (`max_ingest_seq > cursor`) is unbounded in ads and time
+while the snapshot it falls back to is window-scoped?
+
+### Options as presented (full analysis in `OPEN_QUESTIONS.md` § Wave 8)
+
+- **Shape.** Seq distance and cursor age both **rejected**: they mispredict the cost by orders of
+  magnitude in both directions (100,000 impressions in a minute dirty *one* bucket; 20,000 late
+  conversions over 20,000 minutes dirty *20,000*, at identical seq distance). Retention floor
+  **cannot fire** — D11 builds no compaction. **Chosen: row count**, measured with `LIMIT N+1` on
+  the query already being run, which also bails earliest in the expensive case.
+- **Value.** **2,000 rows** (0.65 MiB, 14 ms) — chosen — against **5,000** (1.6 MiB, 35 ms), which
+  would keep a genuine `late_cascade` replayable. Anchored on the 720-row cost of the client's own
+  fallback: 12 ads × a 60-minute window.
+
+### Chosen
+
+**2,000 rows**, plus two non-cost conditions (`cursor > high-water` → resnapshot; non-numeric
+cursor → resnapshot, not `400`) — and **the cursor arrives as `max(?cursor=N, Last-Event-ID)`**.
+
+### Rationale — Seno's words
+
+> "2,000 — but first fix "absent → go live": EventSource can't set the header on first connect
+> (measured), so accept ?cursor=N too and use max(header, query), or every refresh silently drops
+> the snapshot-to-subscribe gap."
+
+### The correction this makes to my proposal
+
+I had *absent `Last-Event-ID` → no replay, just go live*, reasoning that the client had only just
+snapshotted. That defeats the mechanism. **`EventSource` cannot set a request header** — its
+constructor takes `withCredentials` and nothing else — so the header exists **only on the browser's
+own reconnect**, never on the first connect after a snapshot. Under my version, every refresh would
+silently drop the **snapshot-to-subscribe gap**: events landing between §3.1 step 1 and step 2 are
+flushed to whatever subscribers exist and gone, so those buckets read stale until they happen to
+move again. The failure is invisible and it is on the most common path in the app.
+
+**Why `max` and not `min`.** Both cursors are *true* statements of "I hold everything up to X" — the
+query cursor because the snapshot returned it, the header because the browser only replays an id it
+actually dispatched. The max is therefore the **tightest true lower bound** and loses nothing. `min`
+would be merely redundant on a short reconnect, but on a long-lived session the rows dirtied since
+the original snapshot could exceed 2,000 and force a resnapshot for no reason at all.
+
+### Consequences
+
+1. **B10a** reads `max(?cursor=N, Last-Event-ID)`, replays with `LIMIT 2001`, and sends
+   `resnapshot` on 2,001 rows, on a cursor above the high-water seq, or on a non-numeric cursor.
+2. **B10b's `EventSource` URL must carry `?cursor=<as_of_ingest_seq>`** from the snapshot it just
+   took. Written onto B10b's row — without it the gap returns, and nothing fails loudly.
+3. The threshold is a constant in `stream.ts` until **B21** creates `src/shared/config.ts`, which is
+   where it belongs alongside the horizon.
+4. **Subscribe before replaying** (my note, kept): reversed, an event landing between the replay and
+   the subscribe is lost, whereas subscribing first can only duplicate a row — and duplication is
+   free, because absolute rows are idempotent (D30).
+
+### What it forecloses
+
+Nothing structural. If compaction is ever built (D11 declines to), the retention floor becomes a
+**third** resnapshot condition rather than a replacement for this one. Raising 2,000 later is a
+one-line change with no migration.
+
+### How I'd defend this in review
+
+The threshold is on the quantity that actually costs — rows, not elapsed sequence — measured with a
+`LIMIT` on the query already being issued, and its value is pinned to the cost of the fallback it
+chooses between: above roughly one portfolio-hour of rows, replaying transfers more than
+re-snapshotting would. And the cursor is taken as the max of two independently-true lower bounds,
+because the browser's `EventSource` cannot send a header on the connect that matters most.
