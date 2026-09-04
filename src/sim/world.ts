@@ -28,8 +28,43 @@ export const WORLD_URL =
 let latest: SimWorld | null = null;
 let consecutiveFailures = 0;
 
+/**
+ * §15.3(b)'s handover, held for the run — **B35a**.
+ *
+ * Fetched ONCE, on the first poll that sees a seeded world, and then not again. That is not an
+ * optimisation of a per-tick fact; it is what the fact IS. The pending set is fixed at `T0` — no
+ * new backfilled click can ever appear — and it only shrinks as conversions arrive, which this
+ * process is the one causing. Re-asking every second cost 1.96 MiB and ~62 ms a call, 99.8% of the
+ * poll's payload, against a list D62 makes us discard ~25 of every 26 rows of.
+ *
+ * Keyed by the seed it was fetched for, so a store that is seeded *after* the emitter booted — or
+ * reseeded under it — refetches rather than carrying a handover belonging to a world that no longer
+ * exists. In-process and not durable, exactly like `held` and `scheduled` in `index.ts`: a restart
+ * refetches, and refetching is always correct because the set only ever shrank.
+ */
+let handover: { seed: string; clicks: PendingClick[] } | null = null;
+
+export type PendingClick = { click_id: string; ad_id: string; ts: string };
+
 export function currentWorld(): SimWorld | null {
   return latest;
+}
+
+/**
+ * The backfilled clicks still awaiting a conversion, as of the boot-time handover.
+ *
+ * `null` until the handover has been fetched, which is a different answer from `[]` (fetched, none
+ * pending) and the caller must keep them apart — an emitter that reads "not yet fetched" as "none"
+ * silently delivers no handed-over conversions at all, and every number on screen stays plausible.
+ * `take()` removes what has been emitted, so the list drains rather than being re-filtered.
+ */
+export function pendingHandover(seed: string): PendingClick[] | null {
+  return handover !== null && handover.seed === seed ? handover.clicks : null;
+}
+
+export function takeFromHandover(seed: string, clickIds: ReadonlySet<string>): void {
+  if (handover === null || handover.seed !== seed || clickIds.size === 0) return;
+  handover.clicks = handover.clicks.filter((c) => !clickIds.has(c.click_id));
 }
 
 /**
@@ -39,8 +74,12 @@ export function currentWorld(): SimWorld | null {
  * otherwise bury the emitter's own output, which is the pattern B11's ingest path established.
  */
 export async function pollWorld(): Promise<boolean> {
+  // B35a: ask for the pending set only while we do not have one for this world's seed. That is at
+  // most one poll per run — and one more if the store is seeded after we booted.
+  const seed = latest?.run?.seed ?? null;
+  const wantPending = seed === null || handover === null || handover.seed !== seed;
   try {
-    const res = await fetch(WORLD_URL);
+    const res = await fetch(wantPending ? `${WORLD_URL}?include=pending` : WORLD_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // ANNOTATED on purpose, exactly as `IngestResult` is on the ingest response: the wire shape is
     // invisible to `tsc` across a `fetch`, and this is the one place a change to `SimWorld` can be
@@ -51,6 +90,16 @@ export async function pollWorld(): Promise<boolean> {
       consecutiveFailures = 0;
     }
     latest = world;
+    // Recorded only once we know which seed it belongs to. A world with no `sim_run` row has no
+    // handover to take, and asking again next tick is correct rather than wasteful — it is how a
+    // store seeded under a running emitter is picked up.
+    if (world.pending_backfill_clicks !== null && world.run !== null) {
+      handover = { seed: world.run.seed, clicks: world.pending_backfill_clicks };
+      console.log(
+        `[sim] handover: ${handover.clicks.length.toLocaleString('en-US')} backfilled click(s)` +
+          ' awaiting a conversion — fetched once, not polled',
+      );
+    }
     return true;
   } catch (err) {
     consecutiveFailures++;

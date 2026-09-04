@@ -105,8 +105,19 @@ export type SimWorld = {
   ads: WorldAd[];
   /** Named for what it is: delivery per (lineage, version, audience). See `WorldDelivery`. */
   deliveries: WorldDelivery[];
-  /** §15.3(b)'s pending-conversion re-derivation. Empty until B34 seeds. */
-  pending_backfill_clicks: { click_id: string; ad_id: string; ts: string }[];
+  /**
+   * §15.3(b)'s pending-conversion re-derivation — **served only when asked for** (`?include=pending`,
+   * B35a). This is a **boot-time handover, not a per-tick fact**: the set is fixed at `T0` and only
+   * shrinks, so re-sending it on every 1 Hz poll cost 1.96 MiB and ~62 ms per call — 99.8% of the
+   * payload and ~7% of an event loop that also owns ingest and the 250 ms flush — for a list the
+   * emitter discards ~25 of every 26 rows of (D62).
+   *
+   * **`null` means "not requested"; `[]` means "requested, and none are pending".** The distinction
+   * is the point: collapsing both to `[]` would let an emitter that forgot to ask silently emit no
+   * handed-over conversions at all, with every number on screen still plausible. Empty until B34
+   * seeds.
+   */
+  pending_backfill_clicks: { click_id: string; ad_id: string; ts: string }[] | null;
   /** §17's scenario triggers, so there is no second control channel. */
   pending_scenarios: { scenario_id: string; name: string; args_json: string; ts: string }[];
 };

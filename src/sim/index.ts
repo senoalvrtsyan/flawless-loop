@@ -22,7 +22,16 @@
 import { derivedId } from './rng.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
 import { demand, demandFactor } from './noise.ts';
-import { WORLD_URL, currentWorld, liveAds, pollWorld, type LiveAd } from './world.ts';
+import {
+  WORLD_URL,
+  currentWorld,
+  liveAds,
+  pendingHandover,
+  pollWorld,
+  takeFromHandover,
+  type LiveAd,
+  type PendingClick,
+} from './world.ts';
 import {
   clicksForTick,
   converts,
@@ -182,8 +191,6 @@ type Scheduled = { receivedAt: number; signal: Signal };
  */
 let scheduled: Scheduled[] = [];
 
-/** Backfilled clicks already POSTed this run, so a poll that has not caught up does not re-send. */
-const sentConversions = new Set<string>();
 
 /**
  * The conversion a click earns, or `null` if it does not convert or the purchase falls past §11's
@@ -226,30 +233,41 @@ function conversionFor(ad: AdConfig, clickId: string, clickTsMs: number): Schedu
 }
 
 /**
- * §15.3(b)'s seam, made to arrive: the backfilled clicks whose conversions came due while we were
- * running, plus any that came due while nothing was running at all.
+ * §15.3(b)'s seam, made to arrive: the backfilled clicks whose conversions have come due — while we
+ * were running, or while nothing was running at all.
  *
- * The world's pending set is the queue. A click leaves it the moment its conversion is in the LOG,
- * so this converges on its own; `sentConversions` only stops us re-POSTing in the second or two
- * before the next poll reflects the write. It is pruned against the pending set each tick, so it
- * cannot grow past it.
+ * **B35a: the handover is a list we hold and DRAIN, not a fact we re-poll.** It is fixed at `T0`
+ * and only shrinks, so `world.ts` fetches it once and this removes what it emits. Re-asking the
+ * server every second cost 1.96 MiB and ~62 ms a call for an answer that changes only because of
+ * what we ourselves just sent.
+ *
+ * A click is dropped from the handover the moment its conversion is GENERATED, not when the POST
+ * succeeds — a failed batch is held and coalesced by `post()`, so the event is not lost, and
+ * re-generating it would only produce the same `event_id` twice.
  */
-function dueBackfillConversions(world: { pending_backfill_clicks: readonly { click_id: string;
-  ad_id: string; ts: string }[] }, ads: ReadonlyMap<string, AdConfig>, nowMs: number): Signal[] {
-  const stillPending = new Set<string>();
+function dueBackfillConversions(
+  clicks: readonly PendingClick[],
+  ads: ReadonlyMap<string, AdConfig>,
+  nowMs: number,
+): { due: Signal[]; taken: Set<string> } {
   const due: Signal[] = [];
-  for (const click of world.pending_backfill_clicks) {
-    stillPending.add(click.click_id);
-    if (sentConversions.has(click.click_id)) continue;
+  const taken = new Set<string>();
+  for (const click of clicks) {
     const ad = ads.get(click.ad_id);
     if (ad === undefined) continue; // an ad the fold no longer carries: nothing to attribute to
     const conversion = conversionFor(ad, click.click_id, Date.parse(click.ts));
-    if (conversion === null || conversion.receivedAt > nowMs) continue;
+    if (conversion === null) {
+      // D62 says this click never converts, or §11's cutoff dropped it. Either way it will never
+      // come due, and keeping it in the list means re-deciding that every tick forever — which is
+      // ~25 of every 26 rows.
+      taken.add(click.click_id);
+      continue;
+    }
+    if (conversion.receivedAt > nowMs) continue;
     due.push(conversion.signal);
-    sentConversions.add(click.click_id);
+    taken.add(click.click_id);
   }
-  for (const id of sentConversions) if (!stillPending.has(id)) sentConversions.delete(id);
-  return due;
+  return { due, taken };
 }
 
 function eventsForAd(live: LiveAd, tick: number): Signal[] {
@@ -409,7 +427,8 @@ async function post(batch: readonly Signal[]): Promise<boolean> {
         ` · injected ${FAULT_NAMES.filter((n) => faultCounts[n] > 0)
           .map((n) => `${n} ${faultCounts[n]}`)
           .join(' ')}` +
-        ` · held ${held.length} · in flight ${scheduled.length}`,
+        ` · held ${held.length} · in flight ${scheduled.length}` +
+        ` · handover ${pendingHandover(SEED)?.length ?? '-'}`,
     );
     return true;
   } catch (err) {
@@ -492,8 +511,16 @@ async function tick(): Promise<void> {
     // after the pause visibly stops its impressions. §1's self-check — "the arrival count for a
     // paused ad should read zero" — is therefore PER KIND (impression, click, spend), never per ad,
     // or it reports a false failure the first time this fires.
-    pending.push(...dueBackfillConversions(world, new Map(world.ads.map((a) => [a.ad_id, a])),
-      nowMs));
+    //
+    // B35a: `null` here means the handover has not been fetched yet, which is NOT the same as
+    // "none pending" — so we wait rather than concluding there is nothing to deliver.
+    const handover = pendingHandover(SEED);
+    if (handover !== null && handover.length > 0) {
+      const { due, taken } = dueBackfillConversions(
+        handover, new Map(world.ads.map((a) => [a.ad_id, a])), nowMs);
+      pending.push(...due);
+      takeFromHandover(SEED, taken);
+    }
 
     // Anything whose hold has expired joins this tick's batch. Released events carry their ORIGINAL
     // `ts`, which is what makes them genuinely out of order rather than merely late-looking: D12

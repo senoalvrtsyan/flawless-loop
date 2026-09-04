@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · STAGE 3 CLOSED — THE SIMULATOR IS DONE · 39 / 66 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · STAGE 3 CLOSED · B36 GATE CLEARED · 40 / 67 chunks**
 
 ---
 
@@ -143,7 +143,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/sim/fatigue.ts`** | B26/B28. `pool()`, `phi()`, `phiAd()`, `rest()` (2^(−Δt/5 d)), `versionAdjusted()` (`r = 0.35`), `nominalAccrual()`, `adFatigue()` — plus §8's novelty: `novelty()`, `noveltyKey()` (**keyed `(lineage, VERSION, audience)`**), `noveltyAgesAtT0()`, `adNovelty()` (**the video slot only** — `BRIEF_GAPS` §H3). Accrual is keyed by **(lineage × audience)**, both slots of every ad. `nominalAccrual()` is the projection §7.2 was calibrated with, **not** the measurement — B31 recomputes `F` from the signal log. |
 | **`src/sim/emit.ts`** | B27/B30. `betaBinomial()` (Pólya urn), `logNormal()`, `pCtr()` (**where φ and ν enter — D56**), `pCvr()`, `orderValueCents()`, `clicksForTick()` (takes a `ClickFactors` object: `phiAd`, `nu`, `mChannel`), `cpmAccrualCents()`, `spendCents()`, `isSpendBoundary()`. |
 | **`src/sim/lag.ts`** | B29. `purchaseLagMs()` (fast/slow mixture by `p_fast`, `null` past the 7-day cutoff — the truncation IS a dropped conversion), `reportingLagMs()` (the straggler is additive), `scheduleFor()`. **Keyed by `click_id` and nothing else**, per §15.3(b), which is what lets B31 hand over a bare list of pending click ids. **Emits nothing** — see "What is owed". |
-| **`src/server/sim-world.ts`** | B31a. `GET /api/sim/world` in one read transaction: `ads` from the fold, `last_decision_seq`, **deliveries per `(lineage, version, audience)`** from §8's temporal reverse join, `spend_so_far_today` on the account-local day, pending backfill clicks, pending scenarios. READ-ONLY; unqualified table names per D55. |
+| **`src/server/sim-world.ts`** | B31a. `GET /api/sim/world` in one read transaction: `ads` from the fold, `last_decision_seq`, **deliveries per `(lineage, version, audience)`** from §8's temporal reverse join, `spend_so_far_today` on the account-local day, pending scenarios. **B35a: the pending backfill clicks are served ONLY behind `?include=pending`** and typed `[] | null` — they were 99% of the payload of a 1 Hz poll, for a boot-time handover. READ-ONLY; unqualified table names per D55. |
 | **`src/sim/world.ts`** | B31b. The emitter's half: `pollWorld()` (1 Hz, holds the last good world — a failure stalls, it does not stop), `liveAds()` (**status is the gate**, φ from the log's `F`, ν from the pair's first exposure). One implementation of the φ rule via `fatigue.ts`'s `slotFrequency`, two sources of input. |
 | **`src/sim/noise.ts`** | B30. `demand()`, `demandFactor()`, `demandConstants()`, `stepIndex()`. §12's two log-AR(1) factors as a **truncated innovation sum, never an accumulator** — see the traps. Innovation sd rescaled so the stationary variance is exact at any truncation; Box–Muller pairs shared across adjacent steps so `K` innovations cost `K` draws. |
 | **`src/sim/dry-run.ts`** | B25/B26/B27. **Stage 3's whole verification surface**, three sections from ONE simulation pass. Emits nothing. `arrivalProcess()` returns the per-ad tallies `clickAndCostPath()` prints; `fatigue()` diffs itself against §7.2 and prints **MATCH/DIFFERS** per row. |
@@ -481,6 +481,16 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
 plan. **Each produces wrong or slow output with no error.** Twenty-eight now — the Phase 5 ones were
 found against the real store and are in no design document.
+
+**The newest (B35a):**
+
+- **`pending_backfill_clicks` is `[] | null` and the two must never be collapsed.** `null` = not
+  requested, `[]` = requested and none pending. Reading the first as the second emits no handed-over
+  conversions at all, with no error and every number still plausible. A `?? []` removes the guard.
+- **The held handover is keyed by the world's SEED**, or a store seeded under a running emitter
+  leaves it draining a list from a world that no longer exists.
+- **Never-converting clicks are dropped on first sight**, which is what makes the drain ~150 rows a
+  tick instead of ~7,000. Losing that costs 50× per tick and nothing says so.
 
 **The newest (B35), all three about the `T0` seam:**
 
@@ -888,7 +898,14 @@ reframed as *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"* — tha
 not `BUILD_PLAN.md` §12's, and they number differently. **`docs/DEMO.md` is created by the B36 group
 and appended to by every stage-4/5 group thereafter (D50).**
 
-**Next is B35a — the world poll's pending set (see "Next action")** — then B36.
+**B35a is closed: the world poll's pending set left the 1 Hz path.** It was 99% of every poll's
+payload for a list §15.3(b) makes a **boot-time handover** — fixed at `T0`, only shrinking, and
+shrinking only because of what the emitter itself just sent. Now behind `?include=pending`, typed
+`[] | null` so *not requested* and *none pending* cannot be confused. Measured: **571,432 → 5,716
+bytes** per poll, `simWorld()` **33.2 → 17.3 ms**, and the emitter's held list drains from 7,161 to
+149 on the first tick because D62's Bernoulli rejects the rest once instead of every tick.
+
+**Next is B36 — the app shell, single-gated.** The gate above it is cleared.
 
 **Stage 3 is closed and `SIMULATOR.md` is fully implemented.** What that leaves owed is written
 under "What is owed" — none of it blocks B36.

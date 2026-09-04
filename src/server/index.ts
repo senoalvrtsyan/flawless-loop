@@ -146,15 +146,22 @@ const routes: readonly Route[] = [
   {
     method: 'GET',
     path: '/api/sim/world',
-    handler: (_req, res) => {
+    handler: (req, res) => {
       // B31a / D40-A. The simulator's one window onto the world, polled once per tick: config and
       // status, the fold's high-water mark, §7's F per pair recomputed from the log,
-      // `spend_so_far_today` on the account-local day, pending backfilled clicks and pending
-      // scenarios — all in one read transaction, because the emitter acts on all of it at once.
+      // `spend_so_far_today` on the account-local day and pending scenarios — all in one read
+      // transaction, because the emitter acts on all of it at once.
       //
       // A GET the Workbench half-wants anyway (DESIGN §8): cumulative delivery per
       // (lineage, audience) is the temporal reverse join, not a simulator-only query.
-      sendJson(res, 200, simWorld(db));
+      //
+      // **B35a: `?include=pending` adds §15.3(b)'s pending set, and nothing else does.** It is a
+      // boot-time handover rather than a per-tick fact — fixed at `T0`, only shrinking — and it was
+      // 99.8% of this response. Opt-IN rather than opt-out, so the 1 Hz path is small by default.
+      // Unrecognised `include` values are ignored rather than rejected: this endpoint has one
+      // caller and a 400 here stalls the emitter, which is the worse failure.
+      const include = new URL(req.url ?? '/', 'http://localhost').searchParams.get('include');
+      sendJson(res, 200, simWorld(db, Date.now(), include === 'pending'));
     },
   },
   {

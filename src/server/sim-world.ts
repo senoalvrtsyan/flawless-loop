@@ -135,7 +135,17 @@ const PENDING_CLICKS_SQL = `
  * or pacing against a budget that no longer exists. `readTx` is BEGIN DEFERRED — under WAL a reader
  * needs no lock to get a stable snapshot (B07), so this cannot block the ingest writer.
  */
-export function simWorld(db: DatabaseSync, nowMs = Date.now()): SimWorld {
+export function simWorld(
+  db: DatabaseSync,
+  nowMs = Date.now(),
+  /**
+   * B35a: the pending set is served ONLY on request. §15.3(b) makes it a boot-time handover — the
+   * set is fixed at `T0` and only shrinks — so putting it in the 1 Hz poll was paying 1.96 MiB and
+   * ~62 ms a second for a fact that changes once. Default `false`, so the hot path is small unless
+   * a caller opts in, rather than small only if every caller remembers to opt out.
+   */
+  includePending = false,
+): SimWorld {
   return readTx(db, () => {
     const dayStartMs = localDayStartMs(nowMs);
     const dayStart = new Date(dayStartMs).toISOString();
@@ -159,13 +169,11 @@ export function simWorld(db: DatabaseSync, nowMs = Date.now()): SimWorld {
 
     // §16's window is the 7-day LAG CUTOFF, not the 72 h settlement horizon: a click older than
     // the cutoff can no longer produce a conversion at all (§11.1), so it is not pending.
-    const pending = db
-      .prepare(PENDING_CLICKS_SQL)
-      .all(new Date(nowMs - CONVERSION_LAG_CUTOFF_MS).toISOString()) as {
-      ad_id: string;
-      ts: string;
-      click_id: string;
-    }[];
+    const pending = !includePending
+      ? null
+      : (db.prepare(PENDING_CLICKS_SQL).all(
+          new Date(nowMs - CONVERSION_LAG_CUTOFF_MS).toISOString(),
+        ) as { ad_id: string; ts: string; click_id: string }[]);
 
     const scenarios = db
       .prepare(
@@ -192,7 +200,7 @@ export function simWorld(db: DatabaseSync, nowMs = Date.now()): SimWorld {
       account_day: { tz: ACCOUNT_TZ, starts_at: dayStart },
       ads,
       deliveries,
-      pending_backfill_clicks: pending.map((c) => ({
+      pending_backfill_clicks: pending === null ? null : pending.map((c) => ({
         click_id: c.click_id,
         ad_id: c.ad_id,
         ts: c.ts,
