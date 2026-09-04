@@ -10,22 +10,33 @@
 // input, D40 — and apply() does not own it.)
 //
 // D29: counts are maintained incrementally, at ingest, in the ingest transaction. D10: ratios are
-// never stored — nothing here computes one. B06 covers impressions; B13+ widen the switch.
+// never stored — nothing here computes one. B06 covered impressions; B16 added click and
+// spend; B18 adds the conversion, which is the one kind that does not land at its own minute.
 
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
-import type { SignalKind } from '../shared/types.ts';
 import { tx } from './db.ts';
 import { fold, precondition, type FoldErrorCode, type FoldState } from './fold.ts';
 import type { AdConfig, Decision, DecisionBody } from '../shared/decisions.ts';
 
-/** One accepted signal, as the store holds it. `ts_effective` is the clamped value (I10). */
+/**
+ * One accepted signal, as the store holds it. `ts_effective` is the clamped value (I10).
+ *
+ * A DISCRIMINATED UNION, not a bag with optional money (B16). The money is not decoration: a
+ * click's `cost_cents` and a spend's `amount_cents` are summed into different columns that
+ * DESIGN §2.4 keeps deliberately disjoint. With optional fields, a caller that forgot one would
+ * add zero to a total and report a free click — arithmetic that is wrong on screen and raises
+ * nothing. The union makes the omission a compile error at the narrowing site instead.
+ */
 export type AppliedSignal = {
   event_id: string;
   ingest_seq: number;
   ts_effective: string;
   ad_id: string;
-  kind: SignalKind;
-};
+} & (
+  | { kind: 'impression' }
+  | { kind: 'click'; cost_cents: number }
+  | { kind: 'spend'; amount_cents: number }
+);
 
 /** The bucket a signal moved. Returned so B09 can collect the dirty set without reaching in here. */
 export type BucketKey = { ad_id: string; minute_start: string };
@@ -47,17 +58,30 @@ projection, which means the B05 boundary was bypassed`);
 }
 
 /**
- * D29's upsert. `first_written_at` is deliberately absent from the DO UPDATE — it records when the
- * bucket was FIRST materialised and is what makes a restatement legible against it. `max_ingest_seq`
- * only ever advances, so it stays a true as-of stamp (D31) even if a lower seq is applied later
- * during a replay.
+ * D29's upsert, one statement for every additive kind (B16 generalised B06's impression-only
+ * form). The deltas are computed in JS and bound; SQLite adds them.
+ *
+ * `first_written_at` is deliberately absent from the DO UPDATE — it records when the bucket was
+ * FIRST materialised and is what makes a restatement legible against it. `max_ingest_seq` only
+ * ever advances, so it stays a true as-of stamp (D31) even if a lower seq is applied later during
+ * a replay — AND it is the resume contract (B10a): a path that moves a bucket without raising it
+ * is invisible to every resuming client, and B24's sweep will not catch it because the counts are
+ * right.
+ *
+ * D10: only additive counts. `click_cost_cents` and `spend_cents` stay disjoint because the brief
+ * keeps them disjoint (L79-80) — total spend is a read-time sum of the two, never a stored third
+ * column that could disagree with its parts.
  */
-const UPSERT_IMPRESSION = `
-  INSERT INTO rollup_minute (ad_id, minute_start, impressions, first_written_at, max_ingest_seq)
-  VALUES (?, ?, 1, ?, ?)
+const UPSERT_ROLLUP = `
+  INSERT INTO rollup_minute (ad_id, minute_start, impressions, clicks, click_cost_cents,
+                             spend_cents, first_written_at, max_ingest_seq)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT (ad_id, minute_start) DO UPDATE SET
-    impressions    = impressions + 1,
-    max_ingest_seq = MAX(max_ingest_seq, excluded.max_ingest_seq)
+    impressions      = impressions      + excluded.impressions,
+    clicks           = clicks           + excluded.clicks,
+    click_cost_cents = click_cost_cents + excluded.click_cost_cents,
+    spend_cents      = spend_cents      + excluded.spend_cents,
+    max_ingest_seq   = MAX(max_ingest_seq, excluded.max_ingest_seq)
 `;
 
 /**
@@ -67,10 +91,10 @@ const UPSERT_IMPRESSION = `
  */
 const cache = new WeakMap<DatabaseSync, StatementSync>();
 
-function upsertImpression(db: DatabaseSync): StatementSync {
+function upsertRollup(db: DatabaseSync): StatementSync {
   let stmt = cache.get(db);
   if (stmt === undefined) {
-    stmt = db.prepare(UPSERT_IMPRESSION);
+    stmt = db.prepare(UPSERT_ROLLUP);
     cache.set(db, stmt);
   }
   return stmt;
@@ -85,19 +109,36 @@ function upsertImpression(db: DatabaseSync): StatementSync {
  * own `received_at`, so `first_written_at` describes the seeded world rather than the boot minute.
  */
 export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: string): BucketKey {
+  // §5.3: event time, never arrival time — impressions, clicks and spend all land at their own
+  // minute. The conversion is the one kind that does NOT (D27-B places it at its CLICK's minute),
+  // which is why it is a separate path at B18 rather than another case here.
+  const minute_start = floorMinute(signal.ts_effective);
+
+  let impressions = 0;
+  let clicks = 0;
+  let click_cost_cents = 0;
+  let spend_cents = 0;
+
   switch (signal.kind) {
-    case 'impression': {
-      const minute_start = floorMinute(signal.ts_effective);
-      upsertImpression(db).run(signal.ad_id, minute_start, applied_at, signal.ingest_seq);
-      return { ad_id: signal.ad_id, minute_start };
-    }
-    // B13-B20 add click, spend and conversion. Until then an unsupported kind cannot reach here —
-    // ingest rejects it (B05) — and if one ever does, failing is the only safe answer: silently
-    // ignoring it would leave a signal in the log with no bucket, which is exactly the divergence
-    // B24's sweep exists to catch, discovered at the worst possible moment.
-    default:
-      throw new Error(`apply: kind '${signal.kind}' is not implemented yet (B13+)`);
+    case 'impression':
+      impressions = 1;
+      break;
+    case 'click':
+      clicks = 1;
+      // L78: the CPC charge. Disjoint from `spend_cents` below, which is L79-80's non-click
+      // charges — CPM and fees.
+      click_cost_cents = signal.cost_cents;
+      break;
+    case 'spend':
+      // I1: a DELTA for one 60 s interval, not a running total. Summing a cumulative series here
+      // would grow quadratically with no error anywhere; the emitter's contract is SIMULATOR §10.
+      spend_cents = signal.amount_cents;
+      break;
   }
+
+  upsertRollup(db).run(signal.ad_id, minute_start, impressions, clicks, click_cost_cents,
+    spend_cents, applied_at, signal.ingest_seq);
+  return { ad_id: signal.ad_id, minute_start };
 }
 
 // ---------------------------------------------------------------------------------------------

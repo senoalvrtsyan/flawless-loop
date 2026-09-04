@@ -14,8 +14,35 @@ import { tx } from './db.ts';
 import { apply, type BucketKey } from './apply.ts';
 import type { Disposition, IngestResult, SignalKind, SignalSource } from '../shared/types.ts';
 
-/** Kinds this build ingests. B12 widens it; until then the rest are rejected, not ignored. */
-const SUPPORTED: readonly SignalKind[] = ['impression'];
+/** Kinds this build ingests. B18 adds `conversion`; until then it is rejected, not ignored. */
+const SUPPORTED: readonly SignalKind[] = ['impression', 'click', 'spend'];
+
+/**
+ * The variant fields, and which kind owns each. DESIGN §2.2's four CHECK constraints say the same
+ * thing in SQL; this says it at the boundary so the reject reason names the field.
+ *
+ * Driven off one table rather than per-kind `if`s because the failure being prevented is a field
+ * belonging to ANOTHER kind arriving unnoticed — `cost_cents` on a spend event is money that would
+ * be silently dropped by an insert that never mentions the column.
+ */
+const OWN_FIELDS: Record<SignalKind, readonly string[]> = {
+  impression: [],
+  click: ['click_id', 'cost_cents'],
+  spend: ['amount_cents'],
+  conversion: ['attributed_click_id', 'value_cents'],
+};
+
+const ALL_VARIANT_FIELDS = ['click_id', 'cost_cents', 'amount_cents', 'attributed_click_id',
+  'value_cents'] as const;
+
+/**
+ * U6: money is a NON-NEGATIVE INTEGER of cents. Checked in JavaScript, never left to `STRICT` —
+ * B02 measured that binding a JS number into a TEXT column stores `'12.0'`, and a REAL bound into
+ * an INTEGER column converts where lossless. `1.5` and `1e400` are not integers of cents.
+ */
+function isCents(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
 
 /**
  * A delivery whose body has no usable `event_id` still gets a row, keyed as
@@ -89,9 +116,23 @@ function validate(raw: unknown): string | null {
   if (typeof kind !== 'string') return 'event_missing';
   if (!SUPPORTED.includes(kind as SignalKind)) return `unsupported_kind:${kind}`;
 
-  // Impression carries no money fields at all (the schema's fourth CHECK says the same thing).
-  for (const field of ['cost_cents', 'amount_cents', 'value_cents']) {
-    if (e[field] !== undefined) return `impression_has_${field}`;
+  const own = OWN_FIELDS[kind as SignalKind];
+  // A field belonging to another kind is a reject, not a field to ignore: it is money or an id
+  // that the insert for THIS kind never mentions, so tolerating it would drop it in silence.
+  for (const field of ALL_VARIANT_FIELDS) {
+    if (!own.includes(field) && e[field] !== undefined) return `${kind}_has_${field}`;
+  }
+  // E3: `click_id` is distinct from `event_id` — the conversion references the click by it, so a
+  // click that arrives without one can never be attributed against.
+  if (kind === 'click') {
+    if (!isNonEmptyString(e['click_id'])) return 'click_id_missing_or_not_a_string';
+    if (!isCents(e['cost_cents'])) return 'cost_cents_not_a_non_negative_integer';
+  }
+  // I1: spend is a DELTA for one fixed 60 s interval, not a running total. Nothing at this
+  // boundary can tell the two apart — the emitter's contract is stated in SIMULATOR §10 and the
+  // rollup's `spend_cents` is a sum, so a cumulative emitter would double-count with no error.
+  if (kind === 'spend' && !isCents(e['amount_cents'])) {
+    return 'amount_cents_not_a_non_negative_integer';
   }
   return null;
 }
@@ -135,9 +176,17 @@ export function ingest(
   // statement, so the projection is fed the store's own value rather than a JS recomputation of
   // MIN() that could drift from it.
   const insertSignal = db.prepare(`
-    INSERT INTO signals (event_id, ingest_seq, received_at, ts, ad_id, kind, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO signals (event_id, ingest_seq, received_at, ts, ad_id, kind, source,
+                         click_id, cost_cents, amount_cents)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING ts_effective
+  `);
+  // §13 injects a 0.05% "dual click-id" fault: two DIFFERENT events claiming one `click_id`.
+  // `ux_signals_click_id` would refuse the second insert and, inside one transaction, take the
+  // whole batch down with it — so the collision is detected here and recorded as a reject, which
+  // is also what makes it COUNTABLE at B33 rather than merely survivable.
+  const findClickId = db.prepare(`
+    SELECT event_id FROM signals WHERE click_id = ? AND kind = 'click'
   `);
   const highWater = db.prepare('SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals');
 
@@ -173,7 +222,7 @@ export function ingest(
           : NO_EVENT_ID_PREFIX + hash;
 
       const receivedAt = now(index);
-      const reason = validate(element);
+      let reason = validate(element);
 
       let disposition: Disposition;
       if (reason !== null) {
@@ -184,6 +233,18 @@ export function ingest(
         // counted — but the first write still wins (D15/I7).
         const prior = findDelivery.get(eventId) as { payload_hash: string } | undefined;
         disposition = prior?.payload_hash === hash ? 'duplicate_identical' : 'duplicate_conflicting';
+      } else if (
+        // ORDER MATTERS, and it is not obvious. The `click_id` collision test sits AFTER the
+        // `event_id` dedupe on purpose: a redelivery of one click carries its own `click_id` too,
+        // so testing it first would call every honest retry a dual-click-id fault — and B11's
+        // restart property, measured as 14 `duplicate_identical` / 0 conflicting, would read as
+        // 14 rejects instead. A collision is only a collision between two DIFFERENT `event_id`s.
+        (element as Record<string, unknown>)['event'] === 'click' &&
+        (findClickId.get((element as Record<string, unknown>)['click_id'] as string) as
+          { event_id: string } | undefined) !== undefined
+      ) {
+        disposition = 'rejected_invalid';
+        reason = 'click_id_already_claimed';
       } else {
         disposition = 'accepted';
       }
@@ -194,8 +255,14 @@ export function ingest(
         const e = element as Record<string, unknown>;
         seq += 1;
         const kind = e['event'] as SignalKind;
+        // `?? null` and not `?? 0`: an absent money column stays NULL, so the schema's four
+        // variant CHECKs keep meaning what they say and a spend row can never carry a zero
+        // `cost_cents` that reads as "a click that cost nothing".
         const stored = insertSignal.get(
           eventId, seq, receivedAt, e['ts'] as string, e['ad_id'] as string, kind, source,
+          (e['click_id'] as string | undefined) ?? null,
+          (e['cost_cents'] as number | undefined) ?? null,
+          (e['amount_cents'] as number | undefined) ?? null,
         ) as { ts_effective: string };
 
         // Same transaction, immediately: D29's incremental upsert. A reader can never observe a
@@ -203,12 +270,18 @@ export function ingest(
         // whose bucket happens to be old — restatement stops being a subsystem (§4.3).
         // apply() returns the bucket it moved; B09 collects it here. Coalescing is the flush
         // tick's job (DESIGN §5.5) — one batch can touch the same bucket many times.
-        dirty.push(
-          apply(db, {
-            event_id: eventId, ingest_seq: seq, ts_effective: stored.ts_effective,
-            ad_id: e['ad_id'] as string, kind,
-          }, receivedAt),
-        );
+        const base = {
+          event_id: eventId, ingest_seq: seq, ts_effective: stored.ts_effective,
+          ad_id: e['ad_id'] as string,
+        };
+        // The union is narrowed HERE, where `validate()` has just proved the fields are present,
+        // rather than inside apply() with a cast. apply() then cannot be called for a kind whose
+        // money it has not been given — a compile error instead of a runtime one.
+        dirty.push(apply(db, kind === 'click'
+          ? { ...base, kind, cost_cents: e['cost_cents'] as number }
+          : kind === 'spend'
+            ? { ...base, kind, amount_cents: e['amount_cents'] as number }
+            : { ...base, kind: 'impression' }, receivedAt));
       }
 
       result[disposition] += 1;
