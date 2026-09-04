@@ -140,6 +140,22 @@ export function resolveAttribution(
 export const HORIZON_MS = 72 * 60 * 60 * 1000;
 
 /**
+ * Was bucket `B` already settled when an event arriving at `at` touched it? **D38, §5.4.**
+ *
+ * `at` is the arriving event's `received_at`, NEVER wall-clock `now`. The question a restatement
+ * flag answers is *"was this bucket settled when this event arrived"*; for a live event the two
+ * are the same, and they diverge exactly once and expensively — during the seed, where `now` is
+ * boot time and the wall-clock form would stamp `restated_at` on every backfilled event landing in
+ * a bucket older than 72 h (SIMULATOR §15.3(c)).
+ *
+ * A bucket closes at `minute_start + 60 s`; the horizon runs from there. Strictly greater than, so
+ * a bucket is live for the full horizon and settles the instant after.
+ */
+export function settledAt(minute_start: string, at: string, horizon_ms: number = HORIZON_MS): boolean {
+  return Date.parse(at) - (Date.parse(minute_start) + 60_000) > horizon_ms;
+}
+
+/**
  * What we say about a conversion AT A GIVEN INSTANT — §5.2's third state, computed.
  *
  * The same arithmetic as §5.4's `settled_at(B, at)`: a bucket closes at `minute_start + 60 s`, and
@@ -156,8 +172,10 @@ export function attributionStateAt(
   horizon_ms: number = HORIZON_MS,
 ): AttributionState {
   if (row.state === 'resolved') return 'resolved';
-  const closed = Date.parse(row.credited_minute) + 60_000;
-  return Date.parse(at) - closed > horizon_ms ? 'orphan_expired' : 'orphan_provisional';
+  // The SAME arithmetic settlement uses, and deliberately the same function: an orphan expires
+  // when the bucket holding it would have settled, so two copies of this could drift apart and
+  // produce a conversion that is expired in one panel and provisional in another.
+  return settledAt(row.credited_minute, at, horizon_ms) ? 'orphan_expired' : 'orphan_provisional';
 }
 
 /** The data-health figure §5.2 asks for: unresolved conversions, split by derived state. */

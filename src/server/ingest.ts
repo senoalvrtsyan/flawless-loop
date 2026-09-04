@@ -293,7 +293,7 @@ export function ingest(
         // SPREAD, not push: apply() returns the buckets it moved, and a conversion whose click
         // has not arrived moves none (B18). Zero is a real answer here, not an empty edge case.
         dirty.push(...apply(db, kind === 'click'
-          ? { ...base, kind, cost_cents: e['cost_cents'] as number }
+          ? { ...base, kind, click_id: e['click_id'] as string, cost_cents: e['cost_cents'] as number }
           : kind === 'spend'
             ? { ...base, kind, amount_cents: e['amount_cents'] as number }
             : kind === 'conversion'

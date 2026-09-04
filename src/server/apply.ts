@@ -20,7 +20,7 @@ import { fold, precondition, type FoldErrorCode, type FoldState } from './fold.t
 // function declarations used only at call time, so neither module observes the other
 // half-initialised. The alternative — attribution resolved by the caller — is the one
 // the doc comment on apply() rules out.
-import { resolveAttribution } from './attribute.ts';
+import { resolveAttribution, settledAt } from './attribute.ts';
 import type { AdConfig, Decision, DecisionBody } from '../shared/decisions.ts';
 
 /**
@@ -39,7 +39,7 @@ export type AppliedSignal = {
   ad_id: string;
 } & (
   | { kind: 'impression' }
-  | { kind: 'click'; cost_cents: number }
+  | { kind: 'click'; click_id: string; cost_cents: number }
   | { kind: 'spend'; amount_cents: number }
   | { kind: 'conversion'; attributed_click_id: string; value_cents: number }
 );
@@ -93,7 +93,14 @@ const UPSERT_ROLLUP = `
     value_cents      = value_cents      + excluded.value_cents,
     provisional_conversions = provisional_conversions + excluded.provisional_conversions,
     provisional_value_cents = provisional_value_cents + excluded.provisional_value_cents,
-    max_ingest_seq   = MAX(max_ingest_seq, excluded.max_ingest_seq)
+    max_ingest_seq   = MAX(max_ingest_seq, excluded.max_ingest_seq),
+    -- P7/§5.4. Only reachable on DO UPDATE, and that is the definition, not an accident of the
+    -- statement: "restated" means it was settled AND IT MOVED ANYWAY. A bucket being materialised
+    -- for the first time was not settled, it was absent — nothing on screen changed, because
+    -- there was nothing on screen. Were this in the INSERT branch too, a late orphan creating a
+    -- week-old bucket would arrive already stamped, restated_at equal to first_written_at.
+    restated_at       = CASE WHEN ? = 1 THEN ? ELSE restated_at END,
+    restatement_count = restatement_count + ?
 `;
 
 /**
@@ -109,6 +116,36 @@ const INSERT_ATTRIBUTION = `
                                       credited_minute, credited_generation_id, ad_id_conflict,
                                       resolved_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+/**
+ * A promotion REPLACES what we believed about a conversion. Every column the resolver decides is
+ * rewritten — `credited_ad_id` to the click's (I8/G30) and `credited_generation_id` to the
+ * generation live at the click (D14), not just the state — because a half-updated row would leave
+ * the orphan's own claim standing next to a `resolved` state and read as agreement.
+ */
+const UPDATE_ATTRIBUTION = `
+  UPDATE conversion_attribution
+     SET state = ?, click_event_id = ?, credited_ad_id = ?, credited_minute = ?,
+         credited_generation_id = ?, ad_id_conflict = ?, resolved_at = ?
+   WHERE event_id = ?
+`;
+
+/**
+ * Every conversion still waiting on this `click_id` — §5.2's *"a click arrives later"*.
+ *
+ * `kind = 'conversion'` and `state <> 'resolved'` are both spelled LITERALLY: the first is
+ * `ix_signals_attr`'s predicate, the second `ix_attr_unresolved`'s, and SQLite's implication
+ * prover is syntactic (the B03 finding). Written any other way this is two full scans of the two
+ * largest tables in the store, on every click.
+ */
+const SELECT_WAITING = `
+  SELECT s.event_id AS event_id, s.ad_id AS ad_id, s.ts_effective AS ts_effective,
+         s.value_cents AS value_cents,
+         a.credited_ad_id AS prev_ad_id, a.credited_minute AS prev_minute
+    FROM signals s
+    JOIN conversion_attribution a ON a.event_id = s.event_id
+   WHERE s.attributed_click_id = ? AND s.kind = 'conversion' AND a.state <> 'resolved'
 `;
 
 /**
@@ -134,13 +171,137 @@ function prepared(db: DatabaseSync, sql: string): StatementSync {
 }
 
 /**
+ * One bucket's movement. Every field defaults to zero, and **negative values are legitimate**: a
+ * promotion decrements the provisional bucket it leaves. Optional rather than eight positional
+ * arguments because the promotion moves two of the eight and a positional call site would be a row
+ * of zeros with a `-1` somewhere in it.
+ */
+type RollupDelta = {
+  impressions?: number;
+  clicks?: number;
+  click_cost_cents?: number;
+  spend_cents?: number;
+  conversions?: number;
+  value_cents?: number;
+  provisional_conversions?: number;
+  provisional_value_cents?: number;
+};
+
+const DELTA_FIELDS = ['impressions', 'clicks', 'click_cost_cents', 'spend_cents', 'conversions',
+  'value_cents', 'provisional_conversions', 'provisional_value_cents'] as const;
+
+/** Every bucket one signal moves, and by how much, before any of it is written. */
+type Moves = Map<string, { bucket: BucketKey; delta: RollupDelta }>;
+
+/**
+ * Accumulate one bucket's movement. **Coalesced, and that is load-bearing** — §5.4 bumps
+ * `restatement_count` once *per touched bucket*, not once per write, and one event can write the
+ * same bucket more than once: a click whose promoted conversion lands in the click's own minute
+ * touches it twice, and two conversions promoted by one click can land in the same minute. Written
+ * as it comes, each of those double-counts a number on screen while every count stays correct —
+ * so it fails the way §14's traps fail, silently.
+ *
+ * It also settles an ordering question that would otherwise be decided by accident: a bucket this
+ * very event materialises must not then be marked restated by that event's second write to it.
+ * One write per bucket per event makes that unrepresentable rather than order-dependent.
+ */
+function addDelta(moves: Moves, bucket: BucketKey, delta: RollupDelta): void {
+  // NUL-joined: `ad_id` is free text, and 'a_1' + '2026…' must not collide with 'a_12' + '026…'.
+  const key = `${bucket.ad_id}\u0000${bucket.minute_start}`;
+  const seen = moves.get(key);
+  if (seen === undefined) {
+    moves.set(key, { bucket, delta: { ...delta } });
+    return;
+  }
+  for (const field of DELTA_FIELDS) {
+    const value = delta[field];
+    if (value !== undefined) seen.delta[field] = (seen.delta[field] ?? 0) + value;
+  }
+}
+
+/**
+ * Move one bucket. **The only place `rollup_minute` is written**, so the three things every path
+ * owes cannot be forgotten by one of them: the counts, the `max_ingest_seq` raise, and the
+ * settlement test.
+ *
+ * `at` is the arriving event's `received_at` (D38) — `apply()`'s `applied_at`, which ingest sets
+ * per delivery. The settlement test lives HERE rather than at the call sites because a path that
+ * moved a bucket without evaluating it would produce a silently un-flagged restatement: right
+ * counts, missing flag, nothing raised.
+ */
+function writeRollup(
+  db: DatabaseSync,
+  bucket: BucketKey,
+  delta: RollupDelta,
+  at: string,
+  ingest_seq: number,
+): void {
+  // A bucket past the horizon that MOVES is the whole of P7. `restated_at` is the arriving event's
+  // own clock, never `new Date()` — see settledAt().
+  const restating = settledAt(bucket.minute_start, at) ? 1 : 0;
+  prepared(db, UPSERT_ROLLUP).run(
+    bucket.ad_id, bucket.minute_start,
+    delta.impressions ?? 0, delta.clicks ?? 0, delta.click_cost_cents ?? 0,
+    delta.spend_cents ?? 0, delta.conversions ?? 0, delta.value_cents ?? 0,
+    delta.provisional_conversions ?? 0, delta.provisional_value_cents ?? 0,
+    at, ingest_seq,
+    restating, at, restating,
+  );
+}
+
+/**
+ * §5.2's *"a click arrives later"*: every conversion parked on this click is promoted, and each
+ * promotion moves TWO buckets — the provisional one it leaves and the click's bucket it joins.
+ *
+ * This is why §5.4 insists restatement is GENERIC — *a fact changed, recompute the affected
+ * buckets* — rather than lateness-specific. D27-B forced it: a promotion moves a conversion
+ * between two buckets regardless of how late anything was, so a lateness-only mechanism would have
+ * been wrong on the very first orphan.
+ *
+ * The click's own `signals` row is already written when this runs (ingest inserts, then applies),
+ * so `resolveAttribution()` re-derives each conversion against the real store and cannot disagree
+ * with what a rebuild would decide.
+ */
+function promoteOrphans(
+  db: DatabaseSync,
+  click: { click_id: string },
+  at: string,
+  moves: Moves,
+): void {
+  const waiting = prepared(db, SELECT_WAITING).all(click.click_id) as {
+    event_id: string; ad_id: string; ts_effective: string; value_cents: number;
+    prev_ad_id: string; prev_minute: string;
+  }[];
+
+  for (const row of waiting) {
+    const next = resolveAttribution(db, {
+      event_id: row.event_id, ad_id: row.ad_id, ts_effective: row.ts_effective,
+      attributed_click_id: click.click_id,
+    }, at);
+
+    prepared(db, UPDATE_ATTRIBUTION).run(
+      next.state, next.click_event_id, next.credited_ad_id, next.credited_minute,
+      next.credited_generation_id, next.ad_id_conflict, next.resolved_at, next.event_id,
+    );
+
+    // OUT of the provisional bucket it was parked in, INTO the bucket its click earns it. The
+    // decrement is why `credited_minute` is stored rather than recomputed (§2.4): without the
+    // previous placement on record, the bucket to take it out of cannot be found.
+    addDelta(moves, { ad_id: row.prev_ad_id, minute_start: row.prev_minute },
+      { provisional_conversions: -1, provisional_value_cents: -row.value_cents });
+    addDelta(moves, { ad_id: next.credited_ad_id, minute_start: next.credited_minute },
+      { conversions: 1, value_cents: row.value_cents });
+  }
+}
+
+/**
  * Apply one accepted signal to the projections, returning the buckets it moved.
  *
- * A LIST, not one key. Every signal moves exactly one bucket TODAY — but no longer necessarily its
- * own, and B20's orphan promotion moves two: the provisional bucket it leaves and the click's
- * bucket it joins. The flush treats every key it is handed as a row that certainly exists
- * (`stream.ts` logs "apply/flush disagree" otherwise), so the count of moved buckets has to be
- * stated by this function rather than assumed by its caller.
+ * A LIST, not one key, and it is no longer bounded at one: a signal moves its own bucket, and a
+ * CLICK additionally moves two per conversion it promotes (the provisional bucket each leaves and
+ * the bucket each joins). The flush treats every key it is handed as a row that certainly exists
+ * (`stream.ts` logs "apply/flush disagree" otherwise), so how many buckets moved has to be stated
+ * by this function rather than assumed by its caller.
  *
  * MUST be called inside the caller's transaction —
  * DESIGN §11 makes ingest one synchronous transaction, so a reader can never see a signal whose
@@ -155,29 +316,25 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
   // branch below replaces BOTH halves of the key rather than just the minute.
   let bucket: BucketKey = { ad_id: signal.ad_id, minute_start: floorMinute(signal.ts_effective) };
 
-  let impressions = 0;
-  let clicks = 0;
-  let click_cost_cents = 0;
-  let spend_cents = 0;
-  let conversions = 0;
-  let value_cents = 0;
-  let provisional_conversions = 0;
-  let provisional_value_cents = 0;
+  const moves: Moves = new Map();
 
   switch (signal.kind) {
     case 'impression':
-      impressions = 1;
+      addDelta(moves, bucket, { impressions: 1 });
       break;
     case 'click':
-      clicks = 1;
       // L78: the CPC charge. Disjoint from `spend_cents` below, which is L79-80's non-click
       // charges — CPM and fees.
-      click_cost_cents = signal.cost_cents;
+      addDelta(moves, bucket, { clicks: 1, click_cost_cents: signal.cost_cents });
+      // §5.2: the click that finally arrives settles every conversion parked on it. Added to the
+      // same map as the click's own credit, so a promotion landing in the click's own minute is
+      // one movement of one bucket and not two.
+      promoteOrphans(db, { click_id: signal.click_id }, applied_at, moves);
       break;
     case 'spend':
       // I1: a DELTA for one 60 s interval, not a running total. Summing a cumulative series here
       // would grow quadratically with no error anywhere; the emitter's contract is SIMULATOR §10.
-      spend_cents = signal.amount_cents;
+      addDelta(moves, bucket, { spend_cents: signal.amount_cents });
       break;
     case 'conversion': {
       // Attribution is resolved HERE and not handed in by the caller, and that is what keeps
@@ -198,16 +355,15 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
         attribution.credited_generation_id, attribution.ad_id_conflict, attribution.resolved_at,
       );
 
+      let creditDelta: RollupDelta;
       if (attribution.state === 'resolved') {
-        conversions = 1;
-        value_cents = signal.value_cents;
+        creditDelta = { conversions: 1, value_cents: signal.value_cents };
       } else {
         // D16/§5.2: with no click there is no click-minute, so the orphan is credited at its OWN
         // minute and into the PROVISIONAL columns — held apart from the settled counts so that an
         // orphan can never be read as an attributed conversion, and so that B20's promotion has a
         // decrement to make rather than a discrepancy to explain.
-        provisional_conversions = 1;
-        provisional_value_cents = signal.value_cents;
+        creditDelta = { provisional_conversions: 1, provisional_value_cents: signal.value_cents };
       }
 
       // Taken from the attribution row and not recomputed: this is the placement the store now
@@ -218,14 +374,18 @@ export function apply(db: DatabaseSync, signal: AppliedSignal, applied_at: strin
       // ad. A conversion can therefore move a bucket belonging to an ad its own body never names —
       // the mechanism that makes CPA(T) and ROAS(T) cohort ratios, not a bug to reconcile.
       bucket = { ad_id: attribution.credited_ad_id, minute_start: attribution.credited_minute };
+      addDelta(moves, bucket, creditDelta);
       break;
     }
   }
 
-  prepared(db, UPSERT_ROLLUP).run(bucket.ad_id, bucket.minute_start, impressions, clicks,
-    click_cost_cents, spend_cents, conversions, value_cents, provisional_conversions,
-    provisional_value_cents, applied_at, signal.ingest_seq);
-  return [bucket];
+  // Written only now, one statement per bucket, after every movement this signal causes is known.
+  const moved: BucketKey[] = [];
+  for (const move of moves.values()) {
+    writeRollup(db, move.bucket, move.delta, applied_at, signal.ingest_seq);
+    moved.push(move.bucket);
+  }
+  return moved;
 }
 
 // ---------------------------------------------------------------------------------------------
