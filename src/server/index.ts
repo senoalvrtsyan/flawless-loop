@@ -7,7 +7,8 @@
 
 import { createServer } from 'node:http';
 import { openDb, DB_PATH } from './db.ts';
-import { createRouter, sendJson, type Route } from './http.ts';
+import { createRouter, readBody, sendJson, type Route } from './http.ts';
+import { ingest } from './ingest.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -31,6 +32,30 @@ const logPosition = db.prepare(`
 const startedAt = Date.now();
 
 const routes: readonly Route[] = [
+  {
+    method: 'POST',
+    path: '/api/ingest',
+    handler: async (req, res) => {
+      const body = await readBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        // No parseable structure means no per-event attribution, so there is nothing to record
+        // a delivery AGAINST. Failing the whole POST is the honest answer: the emitter still
+        // holds the batch and retries, rather than us dropping it (DESIGN §5.1).
+        sendJson(res, 400, { error: 'malformed_json' });
+        return;
+      }
+      if (!Array.isArray(parsed)) {
+        sendJson(res, 400, { error: 'expected_array_of_signals' });
+        return;
+      }
+      // `source` is server-assigned (E15/D38): the wire cannot set it. Live POSTs are 'live';
+      // 'backfill' belongs to the in-process seeder alone.
+      sendJson(res, 200, ingest(db, parsed, 'live'));
+    },
+  },
   {
     method: 'GET',
     path: '/api/health',

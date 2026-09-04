@@ -43,7 +43,8 @@ CREATE TABLE signal_deliveries (
   delivery_seq INTEGER PRIMARY KEY,        -- rowid alias; monotonic arrival order of deliveries
   event_id     TEXT NOT NULL,
   received_at  TEXT NOT NULL,              -- E1: server clock, at this boundary (D12)
-  payload_json TEXT NOT NULL,              -- exactly as received, before any normalisation
+  payload_json TEXT NOT NULL,              -- the element re-serialised, before any semantic
+                                           -- normalisation. NOT the received bytes: see B05 note
   payload_hash TEXT NOT NULL,              -- to classify a redelivery as identical or conflicting
   disposition  TEXT NOT NULL CHECK (disposition IN
                  ('accepted','duplicate_identical','duplicate_conflicting','rejected_invalid'))

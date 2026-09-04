@@ -136,7 +136,8 @@ CREATE TABLE signal_deliveries (
   delivery_seq INTEGER PRIMARY KEY,        -- rowid alias; monotonic arrival order of deliveries
   event_id     TEXT NOT NULL,
   received_at  TEXT NOT NULL,              -- E1: server clock, at this boundary (D12)
-  payload_json TEXT NOT NULL,              -- exactly as received, before any normalisation
+  payload_json TEXT NOT NULL,              -- the element re-serialised, before any semantic
+                                           -- normalisation. NOT the received bytes: see B05 note
   payload_hash TEXT NOT NULL,              -- to classify a redelivery as identical or conflicting
   disposition  TEXT NOT NULL CHECK (disposition IN
                  ('accepted','duplicate_identical','duplicate_conflicting','rejected_invalid'))
@@ -1106,7 +1107,7 @@ the visible shadow of a scope cut, and a scope cut belongs on the cut line and i
 than encoded into a domain type where a later reader cannot tell deliberate omission from modelling
 claim.
 
-**Eighteen interpretations** (I1–I18) fix meanings the brief leaves open without changing its shape
+**Nineteen interpretations** (I1–I19) fix meanings the brief leaves open without changing its shape
 — spend as a delta, the account timezone, first-write-wins, click-authoritative attribution, and so
 on. They are listed in the same register because an interpretation can be wrong in a way a reviewer
 should be able to check, and I17 in particular is a **correction to the brief**, not a reading of it:

@@ -1586,6 +1586,7 @@ way a reviewer should be able to check, so each is stated rather than assumed.
 | I16 | Currency | USD only; no currency field, no FX | G05 | U1 |
 | I17 | L117's *"everything on screen is derived from the stream"* | Restated as: every **performance** number derives from the signal stream, every **config** value from the decision log folded over its origin, nothing is hard-coded | G39 | — |
 | I18 | L83's *"may land hours or days after its click"* — which lag? | **Two distinct lags.** *Purchase* lag `click.ts → conversion.ts` (the buyer decided later) and *reporting* lag `conversion.ts → received_at` (the platform told us later). `received_at − ts` is the **reporting** lag only; purchase lag is what drives restatement | L83, G16 | D36 |
+| I19 | L73 says *"consumers dedupe on `event_id`"* but never says a delivery can arrive **without** one, and `signal_deliveries.event_id` is `NOT NULL` | A delivery with no usable `event_id` (absent, empty, or not a string) is still retained — nothing is silently dropped — keyed as **`(no event_id):<payload_hash>`**. The hash suffix keeps unrelated malformed bodies in separate keys; a bare sentinel would make B55's `trace` present a dozen unrelated deliveries as one event's arrival history. Such a delivery is always `rejected_invalid` and never reaches `signals` | L73 | B05 |
 
 **I18 matters because collapsing the two lags would corrupt our own telemetry.** Ratified in Seno's
 words: *"If you collapse them then received_at − ts becomes the purchase lag, which would make our

@@ -34,7 +34,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | File | What it is |
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
-| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I18**) — the assembly source for the README's extensions section. |
+| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I19**) — the assembly source for the README's extensions section. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**7** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
 | `docs/DECISIONS.md` | Ratified only — **D1–D43, T1, F1–F4, U8–U9**. **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
 | `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale as of D41–D43/F4/U8–U9**, see "What is owed". |
@@ -166,6 +166,10 @@ against the real store, and are not in any design document.
   `12` into `signals.ad_id` (`TEXT`) is *accepted* and stored as **`'12.0'`** — STRICT converts
   across affinity where lossless, and `node:sqlite` binds a JS number as REAL. **B05's U6 validation
   must check JavaScript types itself and must not lean on `STRICT`.**
+- **`MIN(ts, received_at)` is a lexicographic TEXT compare** (found at B05). Mixed ISO precision
+  inverts I10's clamp silently: `MIN('…09:00:00.500Z','…09:00:00Z')` returns the **later** instant.
+  **Ingest rejects any `ts` that is not exactly `new Date(ts).toISOString()`** — same-shape strings
+  make byte order chronological order, and `ts` stays unaltered.
 - **A partial index is only used if the query spells its predicate literally** (found at B03).
   `WHERE state = 'orphan_provisional'` and `WHERE state IN (...)` both **full-scan**
   `conversion_attribution`; only `WHERE state <> 'resolved'` reaches `ix_attr_unresolved`. **Every
