@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · B31b CLOSED — HR3 IS REAL · 34 / 65 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · B32 + B33 CLOSED · 36 / 65 chunks**
 
 ---
 
@@ -36,16 +36,24 @@ and never λ (**D56**); §10's clicks at a rate drawn once a minute so `κ = 200
 their CPC blended across §5's pricing mix and coupled to `m_channel^0.6`; §11's conversion-lag
 schedule keyed by `click_id`; and I1's 60 s CPM `spend` delta.
 
+**As of B32 + B33 the simulator is feature-complete except for history.** §9's pacing rides λ as
+`ρ_catchup × ρ_terminal`, with `e(t)` integrating the ad's own channel curve over the account-local
+day; §13's ten misbehaviours are injected between generation and the wire on keyed draws. Two
+decisions came out of building it — **D58** (sub-second `ts` no longer depends on the event count)
+and **D59** (`ρ_catchup`'s ceiling 1.6 → 1.0, amending `SIMULATOR.md` §9 and §21 in place). Both are
+in `DECISIONS.md`; the second is the more important, and its finding is in the traps list.
+
 **HR3 is satisfied as of B31b.** The emitter polls `GET /api/sim/world` at 1 Hz and emits for every
 ad the fold says is `live`, with that ad's current config, φ recomputed from the signal log and ν
 aged from the pair's first exposure. Verified live: pausing `a_12` stops its events within one tick
 while eleven ads keep emitting, and resume brings it back in ~6 s. The simulator holds no durable
 state of its own (D40-A) — without a successful poll it emits nothing at all.
 
-**What stage 3 has left: B32 (budget pacing), B33 (injected misbehaviours), B34 (the 7-day backfill)
-and B35 (the `T0` seam).** B34 and B35 are single-gated and carry the owed list below. Until B34
-there is no seeded history, so φ ≈ 1.0 and ν sits near its peak — correct for a store where nothing
-has been burned yet, and the reason §7.2's table is not yet the live check.
+**What stage 3 has left: B34 (the 7-day backfill) and B35 (the `T0` seam).** Both are single-gated
+and carry the owed list below — and **B34's two unratified assumptions must be answered before it
+starts** (the seed's home and the catch-up window; see "What is open"). Until B34 there is no seeded
+history, so φ ≈ 1.0 and ν sits near its peak — correct for a store where nothing has been burned
+yet, and the reason §7.2's table is not yet the live check.
 
 **How stage 3 is verified, and it has not changed:** `SIMULATOR.md` is the spec and is complete to
 the parameter, so each chunk is a comparison against a table already in that document rather than a
@@ -127,8 +135,12 @@ npm run sim           # the simulator alone, against an already-running server.
                       # SINCE B31b IT NEEDS ONE: no world poll -> no emission at all, by design.
                       # It says so on the first failed poll and keeps `nextTick` where it is, so
                       # the seconds are delivered once the server appears rather than lost.
-npm run sim -- --dry-run --hours 24     # B25-B30: emits NOTHING, prints the model vs SIMULATOR.md
-                                        # ~50 s. ONE simulation pass feeds all six sections
+npm run sim -- --dry-run --hours 24     # B25-B33: emits NOTHING, prints the model vs SIMULATOR.md
+                                        # ~51 s. ONE simulation pass feeds all six sections:
+                                        #   B26 fatigue vs §7.2 · B28 novelty · B29 lag vs §11.2
+                                        #   B30 AR(1) vs §12 · B32 pacing vs §9 AND vs §2.3's own
+                                        #   Impr/day column · B33 all ten §13 rates, MATCH/DIFFERS
+npm run sim -- --dry-run --hours 24 2>&1 | sed -n '/B32 · §9/,/B27 · §5/p'   # pacing + faults alone
 npm run sim -- --dry-run --hours 1      # ~12 s; everything but the hour-by-hour diurnal shape.
                                         # ~11 s of that is FIXED: B29's 80k lag draws and B30's
                                         # AR(1) ensemble, neither of which scales with --hours
@@ -251,9 +263,10 @@ both processes). It emits **`a_12` only**, impressions only, at a **constant 0.2
 (20,000/day, `SIMULATOR.md` §2.3) — ~14 a minute. **On boot it re-emits the last 60 s**, which is
 what makes the restart check above work and why a fresh store is never empty.
 
-**A pause does not stop emission yet.** `GET /api/sim/world` is **B29**; until then the emitter has
-no way to learn an ad's status and emits regardless. That is correct for a build with no `ads`
-projection, and it is the one part of HR3 that stage 1 does not yet demonstrate.
+**A pause DOES stop emission, since B31b** — the sentence that stood here said otherwise and named
+the wrong chunk (`GET /api/sim/world` is B31a, not B29). Kept as a correction rather than deleted,
+because a resume doc that once said the opposite is worth flagging: HR3 is real, measured, and the
+top of this file is the current statement.
 
 **In dev, `StrictMode` runs every effect twice**, so ONE browser tab produces two
 `GET /api/snapshot` calls and `stream_subscribers: 2`. Harmless — absolute rows, identical frames —
@@ -333,6 +346,17 @@ one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind
   visible.
 - **8 cheap defaults** — ratified as a block.
 
+- **D58 (2026-09-04, at B32, before the first line)** — `ρ_pacing` reads realised spend, so it is
+  the one λ factor that is not a pure function of `t`, and §14's restart identity cannot also hold.
+  Chosen: make sub-second placement a pure function of `(tick, i)` so a count change can only
+  append or omit at the tail, never rewrite an event already sent. Priced first: 1.66% of a
+  catch-up's impressions would otherwise land `duplicate_conflicting`, 33× §13's injected 0.05%.
+- **D59 (2026-09-04, at B32, after it ran)** — `ρ_catchup`'s ceiling 1.6 → **1.0**: pacing throttles
+  and never boosts. §9's catch-up half assumes an ad is delivery-limited by pacing; §3's λ is
+  exogenous with no auction-supply ceiling, so a boost manufactures impressions the model says do
+  not exist. At 1.6 the whole portfolio ran **1.19–1.47×** §2.3's stated `Impr/day`.
+  **`SIMULATOR.md` §9 and §21 are amended in place** with the measurement, as D56 amended §3.
+
 **The three that most shape the build**, if you only reload three: **D27** (a conversion counts in
 its *click's* minute — this is why CPA/ROAS lag and CTR does not), **D7** (nothing writes a
 projection except the replay/apply function), **D30/D34** (the server owns all arithmetic; the raw
@@ -387,13 +411,14 @@ to 20% of hourly-CPA headroom.
 | | |
 |---|---|
 | **Current stage** | **Stage 3 · the simulator (B25–B35) is RUNNING.** Stage 2 closed with B24. |
-| **Last completed chunk** | **B31b** — the emitter's 1 Hz world poll and emission gating. **HR3 is satisfied**: a `pause` stops that ad's events within one tick, verified live on a seeded store. Before it **B31a** `42ee197` (the endpoint), **B30** `f7390d6`, **B29** `76d9e3e`, **B28** `47e0d41`, behind **D57** `fdd2e1e`. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
-| **Next gate** | **B32 + B33** — budget pacing (`ρ_catchup × ρ_terminal`, the account-local day boundary, +5% tolerance) and the injected misbehaviours. A natural pair: B32 makes `set_budget` visible in the rate within a second, and B33's precondition has held since B18 (`SUPPORTED` covers all four kinds, every handler built in stage 2). **B34 and B35 stay single-gated** and carry a growing owed list — see "What is owed". |
-| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ · ~~**B31a**~~ · ~~**B31b**~~ — all closed. **B32–B35 remain.** |
+| **Last completed chunk** | **B32 + B33** (one commit, `6638ccc`, at Seno's instruction — "you can commit the full group, not chunk by chunk"), behind **D58** `24c991a` and **D59** `5ba2e2d`. Before them **B31b** — the emitter's 1 Hz world poll and emission gating. **HR3 is satisfied**: a `pause` stops that ad's events within one tick, verified live on a seeded store. Before it **B31a** `42ee197` (the endpoint), **B30** `f7390d6`, **B29** `76d9e3e`, **B28** `47e0d41`, behind **D57** `fdd2e1e`. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
+| **Next gate** | **B34, single-gated.** The 7-day backfill. **It is BLOCKED until the two unratified assumptions in "What is open" are answered** — the seed's home and the catch-up window — both of which STATUS has said must be signed off before B34 since B11. It also owes the D39 seed-budget revisit, the D56 gate-margin check on `a_08`, the `converted?` key, and a flush guard. |
+| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ · ~~**B31a**~~ · ~~**B31b**~~ · ~~**G9** B32+B33~~ — all closed. **B34 and B35 remain, both single-gated.** |
+| **G9, for the record** | B32+B33. **It stopped mid-build TWICE under D48** — once before the first line for **D58**, once after B32 built and ran for **D59**. That is the stop clause firing on its two distinct triggers: a decision (§3) and *"the chunk reveals the design was wrong"*. Both were caught by measuring rather than trusting: D58 by pricing the divergence before writing the code, D59 by comparing delivered volume against §2.3's own column. |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **34 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **36 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32, B33) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits, cont.** | **B31 split into B31a/B31b** (2026-09-04, Seno's call): B31 was ~240 diff lines across four files, and B09 at ~230 is what prompted the B10 split. Its verify column already named two separable checks. B31a is the shared account-local clock + `GET /api/sim/world`; B31b is the poll and emission gating. **65 chunks now.** |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
@@ -419,7 +444,22 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 plan. **Each produces wrong or slow output with no error.** Twenty-eight now — the Phase 5 ones were
 found against the real store and are in no design document.
 
-**The two newest (B31b):** grouping `F` by lineage alone loses the version and silently contradicts
+**The three newest (B32/B33), all found by measuring rather than trusting:**
+
+- **`ρ_pacing` is the one λ factor that is not a pure function of `t`.** D58 keeps the consequence
+  to append-or-omit; **anything that reintroduces a count-dependent field into an event body reopens
+  it**, silently, as a fabricated `duplicate_conflicting`.
+- **A derived `spend` delta must be ACCUMULATED, not re-derived, once ρ is live.** Re-deriving the
+  interval's 60 ticks at the boundary uses the current ρ for ticks emitted under a different one —
+  6.3% of spend events off by a cent — and bills a full minute of CPM for an ad paused most of it,
+  because `impressionsForTick` does not know about status. Neither errors.
+- **A pacing term that reads realised spend can pin against its own clamp and nothing says so.**
+  The D59 finding: every individual number was right and the aggregate was wrong by up to 47%. Only
+  the comparison against §2.3's own stated column caught it, and the dry run now prints that column
+  on every run. **§13's two orphan rates are per CLICK, not per event** — measured against all
+  events they read ~20× low and look like a slip in the wrong direction.
+
+**The two before those (B31b):** grouping `F` by lineage alone loses the version and silently contradicts
 §8's fresh novelty window — `a_05`'s recut would inherit `a_01`'s first exposure, which is the claim
 B28 exists to demonstrate, failing with no error. And making φ/ν live puts a **bounded** limit on
 re-emission identity (~1e-4 of one click per catch-up; a click's BODY cannot diverge, and impressions
@@ -617,6 +657,17 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   accounting plus **five levers with their costs** (the fifth costs B55's trace a body on seeded
   events, an HR5 cost) is in `BUILD_PLAN.md` § "The seed budget, re-measured at B06". `SIMULATOR.md`
   §18.4 carries a pointer to it.
+- **B33's fault split is NOT done and cannot live in `src/sim`.** Splitting malformed (0.1%) from
+  dual click-id (0.05%) means re-running `validate()` over retained `payload_json`, which reads the
+  store — and the simulator must never open it (**D32**). It is a `scripts/faults.ts` +
+  `npm run faults` chunk of ~90 lines, in the shape `scripts/agree.ts` already established.
+  **Proposed as B33a at the G9 report; a plan edit is Seno's call and it was left undone.**
+- **The taper's slide is owed a live demonstration.** B32 showed delivery going to zero and back,
+  not the slide — §9's band is 15% of budget wide and one 62c click clears it on a fresh store.
+  **B34's accumulated spend or §17's `budget_squeeze` is where it becomes showable**, and the README
+  should not claim the slide until one of them does.
+- **`duplicate_conflicting` has never been observed live** — 0 in a 2,730-delivery run against ~1.4
+  expected. B34's ~1.6M seeded events are the first run large enough to confirm it.
 - **B33 owes a fault split.** Malformed (0.1%) and dual click-id (0.05%) both read `rejected_invalid`
   and no reason is stored (deliberate, B05) — split them by re-running `validate()` over the retained
   bodies. Its precondition is now met: **B18 completed `SUPPORTED`**, so a click no longer reads as
@@ -738,8 +789,35 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Next is B32 + B33.** Announce the group, build it, report once with a per-chunk block, wait.
-Nothing needs deciding first.
+**Next is B34, and it is SINGLE-GATED and BLOCKED.** Two unratified assumptions must be answered
+first — the world seed's home and the emitter's catch-up window (see "What is open"; both have said
+"needs sign-off before B34" since B11). Surface them as a decision batch **before** announcing B34,
+along with the `converted?` key the handover contract is short of.
+
+**What B32 + B33 established, so a cold resume does not re-derive it:**
+
+- **§9's pacing is real and `set_budget` closes a decision in one tick.** Measured live: squeezing
+  `a_12`'s budget stopped it within two minutes while `a_03` ran on untouched (22–36/min throughout),
+  and the release restored full rate **inside the same minute**. D26 consequence 3, closable.
+- **The taper's SLIDE is not demonstrable on a fresh store, and the report said so.** §9's band is
+  15% of budget wide; with only ~55c of accumulated spend, one 62c click jumps clean through it and
+  `ρ_terminal` lands on 0. Showing the slide needs **B34's** accumulated spend or §17's
+  `budget_squeeze`, which jumps `spend_so_far` to 92% by design. In the dry run it is visible as
+  `a_12` spending 4.2% of ticks in the taper over 24 h.
+- **D59 is the finding that mattered and it came from one comparison.** At §9's original 1.6 ceiling
+  every seeded ad delivered 1.19–1.47× §2.3's stated `Impr/day` — every individual number correct,
+  the aggregate wrong by up to 47%. Post-D59 every ad sits at **0.89–1.05×**. `SIMULATOR.md` §9 and
+  §21 are amended in place with the measurement.
+- **All ten §13 injectors match within 4σ** over 120k events; live over ~7 min, 99.011% accepted /
+  0.916% `duplicate_identical` / 0.073% `rejected_invalid`, 9,290 out-of-order arrival pairs, and
+  I10's clamp firing on 4 skewed events. **`/api/verify` 200 clean and `npm run agree` OK with
+  faults flowing** — duplicates and reordering do not disturb the projections.
+- **`duplicate_conflicting` measured 0** in that run (expected ~1.4 at 0.05% of 2,730). Consistent,
+  not verified. It needs a longer run, and B34's 1.6M seeded events are it.
+- **B33 still owes the fault split**, and it cannot live in `src/sim`: splitting malformed from
+  dual-click-id means re-running `validate()` over retained `payload_json`, which reads the store,
+  and the simulator must never open it (D32). It is a `scripts/faults.ts` + `npm run faults` chunk
+  of ~90 lines. **Proposed as B33a; a plan edit is Seno's call and it was left undone.**
 
 **What B31a/B31b established, so a cold resume does not re-derive it:**
 
@@ -820,21 +898,10 @@ Nothing needs deciding first.
   one ad and still regardless of status until B31. `PHI_AD` is frozen at the nominal `T0` accrual —
   an `ASSUMPTION (unratified)` in `index.ts`, replaced by B31's polled `F`.
 
-**Stage 3's remaining chunks are B28–B35.**
+**Stage 3's remaining chunks are B34 and B35.**
 
-**Announce a group, build it, report once with a per-chunk block, wait.** Nothing needs deciding
-first. **`BUILD_PLAN.md` §5's gate table covered stage 2 only — stage 3 has no gate table**, so
-group under D48's own rule: **3–5 related chunks, never across a stage boundary**, and say in the
-announcement which chunks the group is. **B34 and B35 are single-gated** and must not be grouped.
-
-**A natural next group is B28 + B29 + B30** — novelty, the conversion lag, and the noise that makes
-the counts overdispersed. B28 attaches to `fatigue.ts` and is small; B30 inherits §14's κ gap.
-
-| Chunk | Scope, from the plan row and no wider | Files |
-|---|---|---|
-| **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, CTR only, on the pair's first exposure. Passed as `emit.ts`'s `nu` parameter, which already exists and defaults to 1.0 | `src/sim/fatigue.ts` |
-| **B29** | Conversion lag: fast/slow mixture by `p_fast` (**the only §6 column `params.ts` has not transcribed yet**), separate reporting lag, 7-day cutoff, schedule re-derived from the keyed RNG. B27's dry run already keys the `cvr` stream by `(ad, tick)` — re-derive from that same key | `src/sim/lag.ts` |
-| **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to `m_channel^0.6` (`NOISE.cpcDemandExponent` is already there, unused). **Owns §14's κ gap** | `src/sim/noise.ts` |
+**B34 and B35 are single-gated and must not be grouped.** `BUILD_PLAN.md` §5's gate table covered
+stage 2 only, so stage 3's remaining two are governed by D48's exception list directly.
 
 What is already true and constrains the whole stage:
 

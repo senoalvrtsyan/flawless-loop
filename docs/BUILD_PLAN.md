@@ -213,8 +213,8 @@ throughout; the stage-1 number keeps moving.
 | [x] | **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to channel demand | `src/sim/noise.ts` | Dry-run: variance/mean grows with λ; the channel factor moves every ad on that channel together; autocorrelation at the stated τ | S§12 | **HR7** |
 | [x] | **B31a** | **The account-local clock moved to `src/shared/time.ts`** (forced: `spend_so_far_today` needs the `America/New_York` day boundary on the SERVER, and the only `Intl` offset logic was the simulator's — B20a's argument, one file later) **+ `GET /api/sim/world`**: ads and status, `last_decision_seq`, `F` per pair **recomputed from the log**, `spend_so_far_today`, pending backfilled clicks, pending scenarios | `src/shared/time.ts`, `src/shared/config.ts`, `src/server/sim-world.ts` | `curl` it against a seeded store: 12 ads from the fold, `spend_so_far_today` equals `sum(click_cost_cents + spend_cents)`, `F` per pair equals the rollup, and **a mid-run `swap_component` splits the video pair while leaving the headline pair whole** — 126 + 18 = 144, the temporal join and §7.2's third claim in one check | D§8, §11; S§16 | **HR3** |
 | [x] | **B31b** | The emitter's **1 Hz poll** and emission gating: status decides whether an ad emits at all, `F` from the poll replaces the frozen nominal accrual, ν and `spend_so_far_today` likewise | `src/sim/world.ts`, `src/sim/index.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; φ and ν stop being frozen at `T0` | D§11; S§16 | **HR3** |
-| [ ] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
-| [ ] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
+| [x] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
+| [x] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
 | [ ] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'`. **Owed from B09: the seeder must NOT call `stream.markDirty()`** — measured, one batch across 20,000 minutes gave a **6.20 MiB** frame and a **142 ms** event-loop stall; ~17 MiB / ~400 ms at 56,160 seeded buckets | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
 | [ ] | **B35** | The `T0` handover seam: anything whose `received_at` falls after the seed boundary is **not** seeded but handed to the live emitter; progress printing during the seed | `src/sim/seed-history.ts`, `src/sim/index.ts` | Boot on an empty DB: the seed prints progress and finishes in ~28 s (B06 measurement; ~12 s was §18.4's
 narrower benchmark), then conversions from before `T0` keep arriving live for minutes afterwards — a real in-flight population, not a manufactured one | S§15.3(b) | **HR4 HR7** |
@@ -512,6 +512,36 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+- **`ρ_pacing` is the one λ factor that is NOT a pure function of `t`** (B32). It reads
+  `spend_so_far_today` off the world poll, so a tick re-derived during a catch-up computes a
+  different λ than its own emission did. **D58** decided the shape of the consequence: `ts` no
+  longer depends on the event count, so a divergence can only append or omit at the tail, never
+  rewrite an event already sent. Measured before the decision: at §9's terminal-taper drift, 1.66%
+  of a catch-up's impressions would have landed `duplicate_conflicting` — 33× the 0.05% §13 injects
+  on purpose, on the one channel we keep precisely because it is rare. **Anything that reintroduces
+  a count-dependent field into an event body reopens this**, silently.
+- **A derived `spend` delta must be ACCUMULATED, not re-derived, once ρ is live** (B32, replacing
+  B27's mechanism). Re-deriving the interval's 60 ticks at the boundary uses the CURRENT ρ for
+  ticks emitted under a different one, so the delta bills a different impression count than the
+  bucket holds — measured 6.3% of spend events off by a cent at `a_12`'s drift — and it bills a
+  full minute of CPM for an ad that was paused for most of it, because `impressionsForTick` does
+  not know about status. Neither errors; both are HR5 failing quietly in the money column.
+- **A pacing term that reads realised spend can pin against its own clamp and nothing says so**
+  (B32, the finding behind **D59**). §9's `ρ_catchup` ceiling of 1.6 ran the whole seeded portfolio
+  at **1.19–1.47× §2.3's stated `Impr/day`** for a whole simulated day, because D52's budgets were
+  derived at `φ = ν = 1` while a fatigued world spends far less, leaving every ad 20+ points behind
+  pace permanently. `a_08` — placed near its cap so the taper would be visible — spent **0.1%** of
+  ticks in it. Every individual number was correct; only the comparison against §2.3's own column
+  caught it. **The check is per-ad delivered volume against the stated table, and the dry run now
+  prints that column on every run.**
+- **§13's rates are per event, but two of them are per CLICK** (B33). `orphan_released` (0.4%) and
+  `orphan_never` (0.6%) are stated as a share of clicks; measured against all events they read ~20×
+  low and look like a transcription slip in the wrong direction.
+- **`orphan_released` and `orphan_never` are built but not OBSERVABLE until B34.** Both are defined
+  against a conversion and nothing emits a live conversion yet, so a withheld click currently reads
+  as a late click and a dropped one as loss. The dry run's MATCH is on the trigger rate, not the
+  outcome, and it says so on every run — **B34 must confirm the outcome**, not re-confirm the rate.
 
 - **Nothing writes a projection except `apply()`.** Not a preference — a rule, and one that will not
   show up as a test failure. `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`.
