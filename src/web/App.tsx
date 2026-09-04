@@ -46,6 +46,7 @@ import {
   combined,
   fetchFatigue,
   fetchRestatements,
+  fetchScores,
   fetchSweep,
   fetchTotals,
   formatCents,
@@ -72,6 +73,7 @@ import type { ScenarioRow } from '../server/sim-scenario.ts';
 import { bucketState } from '../server/settlement.ts';
 import { HORIZON_MS } from '../shared/config.ts';
 import type { SweepResult } from '../server/sweep.ts';
+import type { DecisionScore } from '../server/scoring.ts';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
@@ -210,6 +212,15 @@ export function App() {
    * that share no memory, and watching `consumed_at` fill in is how a reviewer sees the poll happen.
    */
   const [scenarioLog, setScenarioLog] = useState<readonly (ScenarioRow & { consumed_at: string | null })[]>([]);
+  /**
+   * **B50a / P18** — the score per decision, keyed by `decision_id`.
+   *
+   * Re-read on the same tick as the totals AND on every horizon change, because the withholding
+   * rule is the horizon's: sweeping to 2 h releases scores that were withheld at 72 h, and a log
+   * still saying "scoring in 68 h" beside a chart drawn as settled would be the disagreement P16
+   * exists to avoid, moved one section down the page.
+   */
+  const [scores, setScores] = useState<ReadonlyMap<string, DecisionScore>>(new Map());
 
   /**
    * Toggling from "all" selects that ad ALONE rather than deselecting it out of twelve.
@@ -335,6 +346,9 @@ export function App() {
         void fetchScenarios(controller.signal)
           .then(setScenarioLog)
           .catch(() => setScenarioLog([]));
+        void fetchScores(controller.signal, horizonH)
+          .then(setScores)
+          .catch(() => setScores(new Map()));
 
         // Steps 2-4. The cursor closes the snapshot-to-subscribe gap: anything ingested between
         // the read transaction above and this line is replayed by B10a.
@@ -438,6 +452,8 @@ export function App() {
         .then((response) => setEntries(response.entries))
         .then(() => fetchScenarios(controller.signal))
         .then(setScenarioLog)
+        .then(() => fetchScores(controller.signal, horizonH))
+        .then(setScores)
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           console.warn('[totals] refresh failed', err);
@@ -815,7 +831,12 @@ export function App() {
 
         {/* B47 — the authoritative log, and the config on the left is its fold. */}
         <h2 className="section">Decision log — what produced this config</h2>
-        <DecisionLog decisions={decisions} generations={generations} selected={selected} />
+        <DecisionLog
+          decisions={decisions}
+          generations={generations}
+          scores={scores}
+          selected={selected}
+        />
 
         {/* **B50 / P17.** Below the decision loop and under its own heading, because a scenario is
             NOT a lever: it changes what the world does, never what the advertiser decided. Keeping

@@ -294,3 +294,14 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
  * same: a dashed border says "this is not a lever" before any label is read. A scenario changes
  * what the world does; a decision changes what the advertiser did. */
 .console--sim { border-style: dashed; background: var(--surface); }
+
+/* B50a's score cell. Direction is carried by a GLYPH (▲ / ▼) as well as by colour — D45's
+ * non-colour-channel rule — because the two directions mean opposite things per metric and a
+ * reader must not have to remember which. The contamination flag is a ⚠ and a named list, never
+ * a tint alone: it says which lever spoiled the comparison, so the reader can go and look. */
+.log__score { min-width: 18rem; }
+.log__hint { color: var(--ink-muted); font-size: .72rem; }
+.score { font-weight: 600; white-space: nowrap; }
+.score--better { color: var(--status-live); }
+.score--worse { color: var(--state-restated); }
+.log__contaminated { color: var(--status-paused); font-size: .74rem; white-space: nowrap; }

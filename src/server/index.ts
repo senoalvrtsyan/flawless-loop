@@ -21,6 +21,7 @@ import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 import { listComponents, type ComponentRow } from './components.ts';
 import { HORIZON_CHOICES_H, sweep, type SweepResult } from './sweep.ts';
 import { listScenarios, postScenario, type ScenarioResult, type ScenarioRow } from './sim-scenario.ts';
+import { scoreDecisions, type DecisionScore } from './scoring.ts';
 import { HORIZON_MS } from '../shared/config.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -140,6 +141,40 @@ const routes: readonly Route[] = [
     handler: (_req, res) => {
       // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
       const body: { components: ComponentRow[] } = { components: listComponents(db) };
+      sendJson(res, 200, body);
+    },
+  },
+  {
+    method: 'GET',
+    /**
+     * **B50a / P18 — decision scoring** (`SCOPE.md` §4 cut #1, taken back by D68; window by D70).
+     *
+     * `?horizon_h=` because the withholding rule is the horizon's: a score is withheld until both
+     * windows are past it (D19/D13), so **B49's control is what makes a score producible live** —
+     * shorten the horizon and the withholding releases. That pairing is D19's own recommendation
+     * and it is the reason these two endpoints take the same parameter.
+     *
+     * Read-only. There is no score column and there must not be: a score is a function of the log,
+     * the rollups, the horizon and the read clock, and three of those four move.
+     */
+    path: '/api/scores',
+    handler: (_req, res, url) => {
+      const raw = url.searchParams.get('horizon_h');
+      let horizonMs = HORIZON_MS;
+      if (raw !== null) {
+        const hours = Number(raw);
+        if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
+          sendJson(res, 400, { error: 'bad_request', message: `horizon_h: '${raw}' must be in (0, 168]` });
+          return;
+        }
+        horizonMs = hours * 3_600_000;
+      }
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const body: { horizon_h: number; window_h: number; scores: DecisionScore[] } = {
+        horizon_h: horizonMs / 3_600_000,
+        window_h: 6,
+        scores: scoreDecisions(db, new Date().toISOString(), horizonMs),
+      };
       sendJson(res, 200, body);
     },
   },

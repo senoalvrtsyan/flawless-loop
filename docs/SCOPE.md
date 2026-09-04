@@ -43,6 +43,7 @@ that earned them and visibly restate the numbers they land in, and two levers �
 | P15 | Read-only component screen: the reverse join over live data (D1's specified sketch) | — |
 | P16 | Demo-mode lateness horizon: shortening the horizon re-evaluates which buckets are settled | D13 |
 | P17 | Scenario control: `POST /api/sim/scenario` + the seven triggers, delivered over the simulator's existing world poll and persisted so they stay part of the replayable record | F3, D40 |
+| P18 | Decision scoring: a symmetric 6 h before/after window either side of each decision, one primary metric, **withheld until both windows are past the lateness horizon**, with any second lever inside either window flagged as contaminated on the entry | G42, D19, D68, D70 |
 
 **P17 is not optional either, and for the same reason as P16.** Every interesting property of an
 event pipeline is rare by construction — a fatigue collapse, a conversion cascade arriving four days
@@ -88,9 +89,17 @@ signals and levers are three distinct types in distinct stores.
 
 Ordered **cheapest to reinstate first**. If budget frees up, take from the top.
 
+**#1 has been taken back, and the numbering below is deliberately NOT closed up.** Decision scoring
+was #1 for the reason the list is ordered by — *"it reads rollups that already exist"* — and **D68**
+reinstated it as `B50a`, conditional on stage 5 landing without the build's stop clause firing. It
+did, so scoring is built and now sits in §2 as **P18**. The row stays, struck through, because these
+numbers are cited from the code (`SCOPE.md §4 cut #3` is in `fold.ts`, `cut #7` in `components.ts`)
+and renumbering would silently repoint every one of them at a different cut. **The next surplus
+buys #2**, the data-health panel, which is a genuinely more expensive thing than #1 was.
+
 | # | Cut | Why — one sentence |
 |---|---|---|
-| 1 | Decision scoring (before/after windows, withheld until settled) | It reads rollups that already exist, so it is the cheapest thing to add back and the least costly to defer. |
+| ~~1~~ | ~~Decision scoring (before/after windows, withheld until settled)~~ — **REINSTATED by D68; built as `B50a`; see §2 P18** | It read rollups that already existed, which is why it was the cheapest thing to add back — and why it was the one the surplus bought. |
 | 2 | Data-health panel as a designed surface | Its counters are still computed and rendered plainly; only the designed panel is cut, and it is what funds budget pacing. |
 | 3 | `archive` lever | One decision variant reaching a terminal state that nothing in the graded criteria exercises. |
 | 4 | `variant_group_id` + sibling comparison view | The field is free but the view is not, and with the Workbench sketched there is no surface for it to live on. |

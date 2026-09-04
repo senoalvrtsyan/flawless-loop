@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **Phase 5 · STAGE 5 IS CLOSED — THE LOOP CLOSES AND THE WORLD CAN BE PROVOKED · 56 / 68 chunks** (69 if `B50a` lands)
+**Last updated:** 2026-09-05 · **Phase 5 · STAGE 5 IS CLOSED, AND `B50a` LANDED · 57 / 69 chunks**
 
 ---
 
@@ -505,8 +505,33 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Sixty-one now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Sixty-seven now — the Phase 5 ones were
 found against the real store and are in no design document.
+
+**The newest (G15 — B50a):**
+
+- **The lateness bias runs in ONE direction, which is the worst shape a wrong number can have.** The
+  before-window has had longer to accumulate late conversions than the after-window, so an unguarded
+  before/after comparison makes **every** decision look worse than it was. Nothing errors and every
+  figure is plausible. This is what the withholding rule exists for, and removing it as a
+  "simplification" reintroduces it invisibly.
+- **The settled test must use the after-window's END, not `decision.ts`.** Testing the decision's own
+  timestamp calls a score ready **six hours early**, with the after-window still filling — so the
+  score is computed over half its own evidence and reads perfectly normally.
+- **`improved` is per metric: CPA improves when it FALLS, CTR when it rises.** Reading
+  `delta_pct > 0` as "improved" flips the verdict on every CPA-scored decision, and the row still
+  renders an ordinary sentence.
+- **A contamination flag that fires on everything is a flag nobody reads.** Including `create_ad` in
+  the contaminating set marked **24 of 24** seeded entries contaminated, because the seed creates
+  and launches each ad a minute apart. It is excluded — and that is not conservatism, it is
+  correctness: a `create_ad` leaves the ad in `draft` and §3 gives a draft ad λ = 0, so it *cannot*
+  have moved a count in anyone's window.
+- **"Structurally empty" and "too little evidence" are different statements.** A `launch`'s
+  before-window is empty because the ad was `draft`, not because it under-delivered; reporting the
+  first as the second invites a reader to diagnose a delivery problem that does not exist.
+- **A score must not be stored.** It is a function of (the decision log, the rollups, the horizon,
+  the read clock) and three of those four move — a `score` column would be a projection that changes
+  with no event, which is what `settlement.ts` refuses for the same reason (D7, D54).
 
 **The newest (G14 — B49, B50):**
 
@@ -859,6 +884,19 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
+- **D71 IS OWED AND UNASKED — the scoring window's demo problem.** `w` is fixed at 6 h (D70), so a
+  lever pulled on camera cannot be scored for six hours regardless of the horizon, and the seeded
+  week contains no mid-week levers to score instead. **This is exactly the situation F2 named for
+  the lateness horizon**, and F2's answer was that shortening it is a build item (P16), not a
+  toggle. The candidate options are: (A) leave `w` fixed and accept that P18 is demonstrated by its
+  withheld state and its limits rather than by a number; (B) make `w` a read parameter like
+  `?horizon_h=`, keeping 6 h as the ratified default and the documented figure; (C) seed two or
+  three mid-week levers on the next reseed, which costs 5m20s and 750 MB and is the only option that
+  produces a score on frame one. **Not taken — ask it.**
+- ~~**The scenario-consumption ASSUMPTION**~~ — **RATIFIED as D69** (2026-09-05), with the flip
+  condition recorded. The README's named-limits section owes one line: triggers are delivered at
+  most once, and a dropped poll response loses one — press the button again.
+
 - **D69 IS OWED AND IT BLOCKS `B50a`** — the D68 sub-question Seno has not answered: symmetric
   6-hour before/after window, or pinned to the decision's own generation boundaries? See the
   Next-action block and D68's entry. **Stage 5 landed clean, so `B50a` is due and this is the only
@@ -1057,6 +1095,60 @@ read the same file without complaint, but if a `.schema` or a query plan ever lo
 version gap is the first thing to check.
 
 ## Next action
+
+**D69 AND D70 ARE RATIFIED AND RECORDED (`9ecf8bd`), AND `B50a` IS BUILT.** The plan is 69 chunks.
+Stage 5 is closed; **stage 6 (B51–B55, the traceability spine) is next.**
+
+**D69** — scenario triggers are **serve-and-mark, at-most-once**, with Seno's flip condition
+recorded: the emitter's `scenario_id` idempotence makes an ack *purely additive*, so if a dropped
+poll ever loses a trigger on camera, the ack simply becomes the mark and nothing that consumes a
+trigger changes. **D70** — `w` is a **symmetric 6 h before/after window**, with any second lever
+inside it flagged as contaminated on the entry rather than normalised away.
+
+**`SCOPE.md` §4 cut #1 is struck through in place, NOT renumbered.** The remaining eight keep their
+numbers because those numbers are cited from code (`fold.ts` says `cut #3`, `components.ts` says
+`cut #7`) and closing the list up would silently repoint every citation at a different cut. Scoring
+now sits in §2 as **P18**. §2–§4 is README-verbatim, but the README does not exist yet, so the
+`SCOPE.md` edit discharges the whole obligation.
+
+### `B50a` is built and correct, and it has nothing to show on the seeded data
+
+**This is the finding that matters and it is the same shape as F2.** Seven tests pass over
+controlled fixtures, including both bias traps. Against the real store:
+
+| horizon | outcome |
+|---|---|
+| 72 h (D13) | 12 `no_before_window` · 6 `no_evidence` · **6 withheld, "scoring in 2 h"** · 12 of 24 contaminated |
+| swept to 2 h | 12 `no_before_window` · 12 `no_evidence` · **0 withheld** — the sweep released all six |
+
+**Zero decisions score, and the reason is structural**: the seeded week's 24 decisions are 12
+`create_ad` and 12 `launch`, and both have an empty before-window by definition — before `launch`
+the ad is `draft`, and §3 gives a draft ad λ = 0. On the scratch store carrying G13's three real
+levers, `pause a_12` reads **3,001 impressions before / 0 after** and correctly reports *too little
+evidence* rather than an infinite decline.
+
+**The horizon sweep releasing the six withheld entries is D19's pairing working** — *"pair with a
+shortened horizon in demo mode so a score can be produced live"* — and it is the one half of this
+that IS demonstrable today.
+
+**D71 IS OPEN AND UNASKED** (see "What is owed"): the 6 h window is fixed, so a lever pulled during
+a demo cannot be scored for six hours no matter what the horizon is. That is verbatim the situation
+F2 named for the horizon, and F2's answer was to make shortening it a build item (P16). **Do not
+take that decision — ask it.**
+
+**Two things I narrowed rather than took**, both flagged here so they are ratified or corrected
+rather than inherited:
+
+1. **`create_ad` is excluded from the contaminating set**, which is one action short of D70's
+   "any second lever". Justification: a draft ad delivers nothing, so it provably moved no counts —
+   and including it marked 24 of 24 seeded entries contaminated, which is a flag nobody reads.
+2. **The metric rule is D19's recommendation, not a ratification.** D19 asked *"which metric?"* and
+   that half was never answered. `B50a` implements CPA-where-both-windows-carry-conversions,
+   CTR-otherwise, and the entry says so.
+
+**163 tests.** `tsc` clean, `vite build` clean, tree clean. Verification ran on scratch copies;
+`data/loop.sqlite` is untouched and has not been reseeded.
+
 
 **STAGE 5 IS CLOSED — B49 and B50 landed together at Seno's instruction ("B49,B50 next. Close the
 stage 5"), both of which `BUILD_PLAN.md` §13 had marked single-gated.** Reported per chunk.

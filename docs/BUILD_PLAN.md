@@ -363,6 +363,7 @@ The deep surface, per D1. Read-only — no levers yet.
 | [x] | **B48** | Generation boundaries drawn on the chart from `config_generations` | `src/web/generations.ts`, `src/web/generations.test.ts`, `src/web/Chart.tsx`, `src/web/App.tsx`, `src/web/app.css` | Three boundaries drawn in the 1 h window after the three levers above, each explained by its own decision: `a_12` gen 3 *status live → paused*, `a_12` gen 4 *video v_04 → v_05*, `a_03` gen 3 *budget $350 → $700/day*. **The change is DERIVED by diffing adjacent generations and stored nowhere.** Generation 1 is not a boundary (it is the ad coming into existence); the window is half-open on `valid_from` so a boundary is drawn in exactly one view; the previous generation is found by `seq_in_ad - 1`, **not by array position**, or `a_02`'s first change is labelled with `a_01`'s config. Five tests. Third vertical rule on the canvas, told apart from the other two by dash pattern and a ▼ glyph before colour (D45) | D§4.2, §8 | **HR6** |
 | [x] | **B49** | **P16** — horizon control: shortening the horizon re-evaluates settlement across the affected range and restates what moves | `src/server/sweep.ts`, `src/server/sweep.test.ts`, `src/server/settlement.ts`, `src/server/snapshot.ts`, `src/server/maturity.ts`, `src/server/restatements.ts`, `src/shared/config.ts`, `src/web/Horizon.tsx`, `src/web/App.tsx`, `src/web/Chart.tsx`, `src/web/metrics.ts`, `src/web/app.css` | **Measured on a copy of the seeded week.** 72 h → 2 h: **40,881 buckets flip `live` → `settled` and 172 of them are restated under the new horizon**, in **83 ms**, reading **40,881 of 71,584 buckets** — the band `ix_rollup_time` covers, not the table. 72 h → 24 h flips 26,515 with 24 restated (58 ms); 72 h → 6 h flips 39,251 with 125 (82 ms); 72 h → 72 h reads **zero rows**. **The horizon is a READ parameter and that is forced, not chosen**: `restated_at` is stamped at ingest against the horizon in force then, so a persisted horizon would make `/api/verify` diverge on a correct store. **The sweep writes nothing.** The SSE flush tick still stamps at the account horizon — one read serves N subscribers — so the client re-derives state with the SAME `bucketState`, which is why `settlement.ts` is kept free of `node:sqlite` | D§5.7 (F2) | **HR4** |
 | [x] | **B50** | **P17** — scenario control: the seven triggers via `POST /api/sim/scenario`, persisted to `sim_scenarios`, delivered on the existing world poll | `src/server/sim-scenario.ts`, `src/server/sim-scenario.test.ts`, `src/server/sim-world.ts`, `src/server/index.ts`, `src/sim/scenarios.ts`, `src/sim/index.ts`, `src/sim/world.ts`, `src/web/Scenarios.tsx`, `src/web/App.tsx`, `src/web/app.css` | **All seven accepted and persisted; three fired end to end against a live emitter.** `late_cascade{a_01, n:12, min_age_h:96}` → **12 → 17 restated buckets**, timeline entries **7 days back** with real before-and-after (`conv 0 → 6`, ROAS `0.00 → 119.25`, 168.0 h late, all `explained`). `orphan_burst{n:6}` → orphans **8 → 14**, all parked at their own minute, then **all six promoted** back to 8 with `credited_minute` moving **19:59 → 19:57** — the two-bucket restatement, on demand. `stall{20}` → **ingest_seq unmoved for 12 s**, then emission resumed. Arguments are **refused, never clamped** (`multiplier: 1000` → 400). **`/api/verify` 200 with all four projections hash-matched, and `npm run agree` OK, after all of it.** Three seams and no fourth: a `LiveAd[]` transform (φ, realised spend), a λ multiplier (`traffic_burst` scales the Poisson MEAN, or the replay mints duplicate ids), and direct injection | S§17 | **HR4** |
+| [x] | **B50a** | **P18 — decision scoring** (`SCOPE.md` §4 cut #1, reinstated by **D68**; window by **D70**). A symmetric 6 h before/after window either side of each decision, ONE metric (CPA where both windows carry conversions, CTR otherwise — D19's recommendation, **not separately ratified**), **withheld until both windows are past the lateness horizon** (D19/D13), with any second lever inside either window **flagged as contaminated and named**, never corrected for. Writes nothing and stores nothing: a score is a function of the log, the rollups, the horizon and the read clock, and three of those four move | `src/server/scoring.ts`, `src/server/scoring.test.ts`, `src/server/index.ts`, `src/web/DecisionLog.tsx`, `src/web/metrics.ts`, `src/web/App.tsx`, `src/web/app.css`, `docs/SCOPE.md` | **Seven tests over controlled fixtures**, including the two traps: the settled test uses the WINDOW'S END, not `decision.ts` (testing `ts` calls a score ready 6 h early, with the after-window still filling), and `improved` is per metric (CPA improves when it FALLS). **Measured against the real store, and the honest result is that nothing scores**: the seeded week's 24 decisions are 12 `create_ad` + 12 `launch`, and both have a structurally empty before-window (before `launch` the ad is `draft`, and §3 gives a draft ad λ = 0) — so **12 `no_before_window`, 12 withheld**. Sweeping the horizon to 2 h **released all 6 that were `settling`**, which is D19's pairing working. On a store carrying three real levers, `pause a_12` reads **3,001 impressions before / 0 after** and correctly reports *too little evidence* rather than an infinite decline. **P18 is built and correct and has nothing on the seeded data to show — see D71** | D§7; brief L125, L147 | **HR6** |
 
 > ### ▶ Demo checkpoint 5 — *"the loop closes"*
 >
@@ -519,6 +520,31 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+**The newest (G15 — B50a):**
+
+- **The lateness bias runs in ONE direction, which is the worst shape a wrong number can have.** The
+  before-window has had longer to accumulate late conversions than the after-window, so an unguarded
+  before/after comparison makes **every** decision look worse than it was. Nothing errors and every
+  figure is plausible. This is what the withholding rule exists for, and removing it as a
+  "simplification" reintroduces it invisibly.
+- **The settled test must use the after-window's END, not `decision.ts`.** Testing the decision's own
+  timestamp calls a score ready **six hours early**, with the after-window still filling — so the
+  score is computed over half its own evidence and reads perfectly normally.
+- **`improved` is per metric: CPA improves when it FALLS, CTR when it rises.** Reading
+  `delta_pct > 0` as "improved" flips the verdict on every CPA-scored decision, and the row still
+  renders an ordinary sentence.
+- **A contamination flag that fires on everything is a flag nobody reads.** Including `create_ad` in
+  the contaminating set marked **24 of 24** seeded entries contaminated, because the seed creates
+  and launches each ad a minute apart. It is excluded — and that is not conservatism, it is
+  correctness: a `create_ad` leaves the ad in `draft` and §3 gives a draft ad λ = 0, so it *cannot*
+  have moved a count in anyone's window.
+- **"Structurally empty" and "too little evidence" are different statements.** A `launch`'s
+  before-window is empty because the ad was `draft`, not because it under-delivered; reporting the
+  first as the second invites a reader to diagnose a delivery problem that does not exist.
+- **A score must not be stored.** It is a function of (the decision log, the rollups, the horizon,
+  the read clock) and three of those four move — a `score` column would be a projection that changes
+  with no event, which is what `settlement.ts` refuses for the same reason (D7, D54).
 
 **The newest (G14 — B49, B50):**
 

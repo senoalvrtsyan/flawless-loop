@@ -16,6 +16,7 @@
 import type { MetricTotals, TotalsResponse } from '../server/snapshot.ts';
 import type { RestatementEntry } from '../server/restatements.ts';
 import type { SweepResult } from '../server/sweep.ts';
+import type { DecisionScore } from '../server/scoring.ts';
 import type { FatigueReport } from '../server/fatigue-flag.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
@@ -220,4 +221,22 @@ export async function fetchSweep(
   );
   if (!res.ok) throw new Error(`sweep: ${res.status} ${res.statusText}`);
   return (await res.json()) as SweepResult;
+}
+
+
+/**
+ * **B50a / P18 — decision scoring.** Keyed by `decision_id` for the log to look up.
+ *
+ * Takes the horizon because the WITHHOLDING rule is the horizon's (D19/D13): the same swept value
+ * the chart and the timeline are answered at, or the log would say "scoring in 68 h" beside a chart
+ * already drawn as settled.
+ */
+export async function fetchScores(
+  signal: AbortSignal,
+  horizonH?: number,
+): Promise<Map<string, DecisionScore>> {
+  const res = await fetch(`/api/scores${horizonH === undefined ? '' : `?horizon_h=${horizonH}`}`, { signal });
+  if (!res.ok) throw new Error(`scores: ${res.status} ${res.statusText}`);
+  const body = (await res.json()) as { scores: DecisionScore[] };
+  return new Map(body.scores.map((s) => [s.decision_id, s]));
 }
