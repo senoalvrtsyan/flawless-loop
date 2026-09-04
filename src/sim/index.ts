@@ -19,7 +19,12 @@
 import { derivedId } from './rng.ts';
 import { ADS, type AdFixture } from './fixtures.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
-import { arrivalProcess, localMidnightAtOrBefore, type DryRunOptions } from './dry-run.ts';
+import {
+  arrivalProcess,
+  fatigue,
+  localMidnightAtOrBefore,
+  type DryRunOptions,
+} from './dry-run.ts';
 import { BASE_IMPR_PER_DAY } from './params.ts';
 import type { IngestResult, Signal } from '../shared/types.ts';
 
@@ -194,6 +199,7 @@ function dryRunOptions(argv: readonly string[]): DryRunOptions | null {
 const dry = dryRunOptions(process.argv.slice(2));
 if (dry !== null) {
   const started = Date.now();
+  fatigue();
   arrivalProcess(dry);
   console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
   process.exit(0);

@@ -82,3 +82,51 @@ export const BASE_IMPR_PER_DAY: Readonly<Record<string, number>> = {
   a_11: 18_000,
   a_12: 20_000,
 };
+
+/**
+ * §6's `served_fraction` — the correction the arithmetic forced, **RATIFIED** 2026-09-03.
+ *
+ * Keyed by AUDIENCE, not by temperature, even though §21 prints it in the temperature table: that
+ * table carries two `cold` rows distinguished only by "(lookalike)", and §6's own definition is
+ * `pool(A) = est_size(A) × served_fraction(A)` — a function of the audience. Keying it by
+ * temperature would need a second key to tell the two cold rows apart, which is the audience again.
+ *
+ * It is the fraction of a targeted audience the platform ACTUALLY serves us at our bid, not the
+ * fraction the targeting allows. §6 keeps the story: modelling it as reachable-audience put `a_02`
+ * at φ 0.94 after seven days — a 6% CTR decline, which is not a fatigue curve. Delivery
+ * concentrates on the responsive slice, which is why frequency climbs faster than audience size
+ * suggests and why retargeting burns out first.
+ */
+export const SERVED_FRACTION: Readonly<Record<string, number>> = {
+  cold_us: 0.04,
+  cold_us_lookalike: 0.06,
+  warm_us: 0.25,
+  rt_us: 0.70,
+};
+
+/**
+ * §7's fatigue constants — **D35**, option C, with both parameters ratified 2026-09-03.
+ *
+ * `floor` is 0.25 and not 0: a burned-out creative still gets clicked occasionally, and a floor of
+ * zero would make a fatigued ad emit no clicks at all, so its CTR would be undefined rather than
+ * bad (§7.1).
+ *
+ * `headlineExponent` is 0.5 and not 0, in Seno's ratified words: *"Copy does wear out, just slower
+ * than video, and zeroing it would mean the headline swap lever changes nothing observable."*
+ *
+ * `recoveryHalfLifeMs` — see `rest()` in `fatigue.ts` for why this is a half-life rather than the
+ * time constant §7.1's formula reads as.
+ */
+export const FATIGUE = {
+  /** §7.1's `k` in `φ(f) = floor + span · exp(−k·f)`. */
+  k: 0.35,
+  floor: 0.25,
+  span: 0.75,
+  /** §7.1's slot composition: `φ_video^1.0 × φ_headline^0.5`. */
+  videoExponent: 1.0,
+  headlineExponent: 0.5,
+  /** §21's `τ_rec` — 5 days, idle only. */
+  recoveryHalfLifeMs: 5 * 86_400_000,
+  /** §7.3's `r`: `f_effective(new version) = f × (1 − r)`. A recut recovers a third of the pool. */
+  versionReset: 0.35,
+} as const;

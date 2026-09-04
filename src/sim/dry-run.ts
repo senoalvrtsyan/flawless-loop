@@ -12,12 +12,42 @@
 // (B27) appended below it.
 
 import { ACCOUNT_TZ } from '../shared/config.ts';
-import { ADS } from './fixtures.ts';
-import { BASE_IMPR_PER_DAY, DIURNAL, DOW_VOLUME } from './params.ts';
+import { ADS, COMPONENTS } from './fixtures.ts';
+import { BASE_IMPR_PER_DAY, DIURNAL, DOW_VOLUME, FATIGUE } from './params.ts';
+import {
+  adFatigue,
+  nominalAccrual,
+  pairKey,
+  phi,
+  pool,
+  readPairKey,
+  rest,
+  versionAdjusted,
+} from './fatigue.ts';
 import { diurnal, dowVolume, localHour, localMs, localWeekday, lambdaPerSecond, negBinomial } from './rate.ts';
 import type { Channel } from '../shared/decisions.ts';
 
 export type DryRunOptions = { seed: string; hours: number; fromMs: number };
+
+/** §7.2's table, quoted so the computed accrual can be diffed against it rather than described. */
+const SEVEN_TWO: Readonly<Record<string, { f: number; phi: number }>> = {
+  [pairKey('vl_04', 'rt_us')]: { f: 17.92, phi: 0.25 },
+  [pairKey('vl_03', 'rt_us')]: { f: 2.02, phi: 0.62 },
+  [pairKey('vl_01', 'cold_us')]: { f: 4.03, phi: 0.43 },
+  [pairKey('vl_01', 'warm_us')]: { f: 0.38, phi: 0.91 },
+  [pairKey('vl_02', 'warm_us')]: { f: 1.62, phi: 0.68 },
+  [pairKey('vl_05', 'warm_us')]: { f: 0.06, phi: 0.98 },
+};
+
+/** §18.3's per-ad φ column, quoted for the same reason — and because it does not agree. */
+const EIGHTEEN_THREE: Readonly<Record<string, number>> = {
+  a_08: 0.62,
+  a_01: 0.25,
+  a_02: 0.43,
+  a_03: 0.68,
+  a_07: 0.98,
+  a_09: 0.96,
+};
 
 const CHANNELS = Object.keys(DIURNAL) as Channel[];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -155,3 +185,101 @@ export function arrivalProcess(opts: DryRunOptions): void {
   );
 }
 
+
+/**
+ * §7's fatigue, as §7.2 writes it: per pair, then per ad.
+ *
+ * Both tables here are checks, not illustrations. §7.2's six rows are quoted beside the computed
+ * ones so the accrual arithmetic can be diffed digit by digit, and the per-ad table prints
+ * `φ_video` and `φ_ad` in separate columns because **§18's calibration quotes the first where the
+ * ratified model uses the second** — see the note this prints under it.
+ */
+export function fatigue(): void {
+  const accrual = nominalAccrual();
+
+  console.log(
+    `\n=== B26 · §7 creative fatigue ===\n` +
+      `F(lineage x audience) nominal at T0 = base_impr_per_day x live_days, summed over every ad\n` +
+      `using the pair. pool = est_size x served_fraction (§6). phi(f) = ${FATIGUE.floor} + ` +
+      `${FATIGUE.span}*exp(-${FATIGUE.k}*f), floored, never zero.\n`,
+  );
+
+  console.log(
+    `  ${'pair'.padEnd(30)} ${pad('pool', 8)} ${pad('cum impr', 10)} ${pad('f', 7)} ${pad('phi', 7)}  §7.2`,
+  );
+  const rows = [...accrual.entries()].sort(([a], [b]) => a.localeCompare(b));
+  for (const [key, F] of rows) {
+    const { lineage_id, audience_id } = readPairKey(key);
+    const denominator = pool(audience_id);
+    const f = F / denominator;
+    const quoted = SEVEN_TWO[key];
+    console.log(
+      `  ${`${lineage_id} x ${audience_id}`.padEnd(30)} ${pad(Math.round(denominator), 8)} ` +
+        `${pad(F, 10)} ${pad(f.toFixed(2), 7)} ${pad(phi(f).toFixed(4), 7)}  ` +
+        (quoted === undefined
+          ? ''
+          : `quoted ${quoted.f.toFixed(2)} / ${quoted.phi.toFixed(2)} -> ` +
+            `${Math.abs(f - quoted.f) < 0.01 && Math.abs(phi(f) - quoted.phi) < 0.005 ? 'MATCH' : 'DIFFERS'}`),
+    );
+  }
+
+  console.log(
+    `\n  §7.2's three claims, as arithmetic:\n` +
+      `    1. one video, two audiences, one instant — vl_01 x cold_us phi ` +
+      `${phi((accrual.get(pairKey('vl_01', 'cold_us')) ?? 0) / pool('cold_us')).toFixed(2)}` +
+      ` vs vl_01 x warm_us phi ` +
+      `${phi((accrual.get(pairKey('vl_01', 'warm_us')) ?? 0) / pool('warm_us')).toFixed(2)}\n` +
+      `    2. reuse accelerates burnout — a_02 alone would sit at phi ` +
+      `${phi((45_000 * 7) / pool('cold_us')).toFixed(2)}; sharing vl_01 x cold_us with a_04 puts it at ` +
+      `${phi((accrual.get(pairKey('vl_01', 'cold_us')) ?? 0) / pool('cold_us')).toFixed(2)}\n` +
+      `    3. a swap resets one slot only — the per-ad table below has two phi columns for that reason`,
+  );
+
+  console.log(
+    `\n  ${'ad'.padEnd(6)} ${'video pair'.padEnd(26)} ${pad('f_v', 6)} ${pad('phi_v', 7)}  ` +
+      `${'headline pair'.padEnd(26)} ${pad('f_h', 6)} ${pad('phi_h', 7)}  ${pad('phi_ad', 7)}  §18.3`,
+  );
+  for (const ad of ADS) {
+    const fat = adFatigue(ad.ad_id, accrual);
+    const video = COMPONENTS.find((c) => c.component_id === ad.video_id);
+    const headline = COMPONENTS.find((c) => c.component_id === ad.headline_id);
+    const quoted = EIGHTEEN_THREE[ad.ad_id];
+    console.log(
+      `  ${ad.ad_id.padEnd(6)} ` +
+        `${`${video?.lineage_id} v${video?.version} x ${ad.audience_id}`.padEnd(30)} ` +
+        `${pad(fat.f_video.toFixed(2), 6)} ${pad(fat.phi_video.toFixed(4), 7)}  ` +
+        `${`${headline?.lineage_id} v${headline?.version} x ${ad.audience_id}`.padEnd(30)} ` +
+        `${pad(fat.f_headline.toFixed(2), 6)} ${pad(fat.phi_headline.toFixed(4), 7)}  ` +
+        `${pad(fat.phi_ad.toFixed(4), 7)}  ` +
+        (quoted === undefined ? '' : `${quoted.toFixed(2)} = phi_v, NOT phi_ad`),
+    );
+  }
+
+  console.log(
+    `\n  FINDING. §18.2, §18.3 and §2.3 quote the VIDEO pair's phi as "the ad's phi". The ratified\n` +
+      `  model (§7.1, D35) makes an ad's CTR multiplier phi_v^1.0 x phi_h^0.5, which is lower for\n` +
+      `  every ad in the portfolio. §18.3's conv/h therefore overstate by phi_v/phi_ad. Not resolved\n` +
+      `  here: the model is implemented as ratified and the calibration is reported as a finding.`,
+  );
+
+  console.log(`\n  §7.1's idle recovery, on vl_04 x rt_us (f ${(577_000 / pool('rt_us')).toFixed(2)}):`);
+  const burned = accrual.get(pairKey('vl_04', 'rt_us')) ?? 0;
+  const idle = [0, 1, 2, 5, 10, 20];
+  console.log(
+    `    ${'days idle'.padEnd(12)}` + idle.map((d) => pad(d, 8)).join('') +
+      `\n    ${'f'.padEnd(12)}` +
+      idle.map((d) => pad((rest(burned, d * 86_400_000) / pool('rt_us')).toFixed(2), 8)).join('') +
+      `\n    ${'phi'.padEnd(12)}` +
+      idle.map((d) => pad(phi(rest(burned, d * 86_400_000) / pool('rt_us')).toFixed(3), 8)).join('') +
+      `\n    half-life ${FATIGUE.recoveryHalfLifeMs / 86_400_000} d — f halves at 5 d, as §21 states.` +
+      ` §7.1's formula reads as a 3.47 d half-life; see fatigue.ts.`,
+  );
+
+  const fVl04 = burned / pool('rt_us');
+  console.log(
+    `\n  §7.3's version reset, r = ${FATIGUE.versionReset}: a_01 runs vl_04 v1 at f ${fVl04.toFixed(2)} ` +
+      `phi ${phi(fVl04).toFixed(4)};\n    a_05 runs the recut v2 on the same pool at f ` +
+      `${versionAdjusted(fVl04, 2).toFixed(2)} phi ${phi(versionAdjusted(fVl04, 2)).toFixed(4)} — ` +
+      `pre-fatigued, which is §7.3's point.`,
+  );
+}
