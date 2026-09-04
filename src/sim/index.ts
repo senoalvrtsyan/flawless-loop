@@ -22,6 +22,7 @@ import { SPEND_TICK_S } from './params.ts';
 import {
   arrivalProcess,
   clickAndCostPath,
+  conversionLag,
   fatigue,
   localMidnightAtOrBefore,
   noveltySection,
@@ -298,6 +299,7 @@ if (dry !== null) {
   const started = Date.now();
   fatigue();
   noveltySection();
+  conversionLag(dry);
   clickAndCostPath(dry, arrivalProcess(dry));
   console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
   process.exit(0);

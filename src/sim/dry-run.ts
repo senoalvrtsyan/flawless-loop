@@ -11,7 +11,7 @@
 // Sections land per chunk: B25's arrival process here, fatigue (B26) and the click/cost/spend path
 // (B27) appended below it.
 
-import { ACCOUNT_TZ } from '../shared/config.ts';
+import { ACCOUNT_TZ, HORIZON_MS } from '../shared/config.ts';
 import { ADS, AUDIENCES, COMPONENTS } from './fixtures.ts';
 import {
   BASE_IMPR_PER_DAY,
@@ -21,8 +21,10 @@ import {
   DOW_ORDER_VALUE,
   DOW_VOLUME,
   FATIGUE,
+  LAG,
   NOISE,
   NOVELTY,
+  P_FAST,
   SPEND_TICK_S,
   TEMPERATURE,
 } from './params.ts';
@@ -41,6 +43,7 @@ import {
   versionAdjusted,
 } from './fatigue.ts';
 import { diurnal, dowVolume, localHour, localMs, localWeekday, lambdaPerSecond, negBinomial } from './rate.ts';
+import { purchaseLagMs, reportingLagMs } from './lag.ts';
 import {
   betaBinomial,
   clicksForTick,
@@ -63,6 +66,13 @@ const SEVEN_TWO: Readonly<Record<string, { f: number; phi: number }>> = {
   [pairKey('vl_01', 'warm_us')]: { f: 0.38, phi: 0.91 },
   [pairKey('vl_02', 'warm_us')]: { f: 1.62, phi: 0.68 },
   [pairKey('vl_05', 'warm_us')]: { f: 0.06, phi: 0.98 },
+};
+
+/** §11.2's table, quoted so the measured lag distribution can be diffed against it. */
+const ELEVEN_TWO: Readonly<Record<string, { median: string; p95: string; past72h: string }>> = {
+  retargeting: { median: '0.3h', p95: '1.87d', past72h: '2.3%' },
+  warm: { median: '3.3h', p95: '2.49d', past72h: '3.6%' },
+  cold: { median: '7.5h', p95: '2.85d', past72h: '4.6%' },
 };
 
 /** §18.3's per-ad φ column, quoted for the same reason — and because it does not agree. */
@@ -543,5 +553,76 @@ export function noveltySection(): void {
   console.log(
     `\n  §8's decay, for reference: ` +
       [0, 1, 6, 18, 24, 48, 96].map((h) => `${h}h ${novelty(h).toFixed(3)}`).join('  '),
+  );
+}
+
+/**
+ * §11's conversion lag, measured against §11.2's table.
+ *
+ * Drawn over SYNTHETIC click ids rather than over the window's real clicks, on purpose: the window
+ * yields only a few hundred clicks per temperature and a p95 from 300 samples is not a check of
+ * anything. These are the same functions the emitter will call, keyed the same way, on ids that do
+ * not exist — which is exactly what §15.3(b) says a handed-over pending click needs.
+ */
+export function conversionLag(opts: DryRunOptions, sampleSize = 20_000): void {
+  console.log(
+    `\n=== B29 · §11 the conversion lag ===\n` +
+      `purchase: p_fast -> Exponential(mean ${LAG.fastMeanMs / 60_000} min), else ` +
+      `LogNormal(median ${LAG.slowMedianMs / 3_600_000} h, σ ${LAG.slowSigma}), hard cutoff ` +
+      `${LAG.cutoffMs / 86_400_000} d\n` +
+      `reporting: LogNormal(median ${LAG.reportMedianMs / 1000} s, σ ${LAG.reportSigma}) + ` +
+      `${LAG.stragglerProbability * 100}% straggler Uniform(${LAG.stragglerMinMs / 3_600_000}h, ` +
+      `${LAG.stragglerMaxMs / 3_600_000}h)\n` +
+      `${sampleSize} synthetic clicks per temperature · horizon ${HORIZON_MS / 3_600_000} h (D13)\n`,
+  );
+
+  console.log(
+    `  ${'temperature'.padEnd(13)} ${pad('p_fast', 7)} ${pad('median', 9)} ${pad('§11.2', 7)} ` +
+      `${pad('p95', 9)} ${pad('§11.2', 7)} ${pad('past 72h', 9)} ${pad('§11.2', 7)} ${pad('dropped', 8)}`,
+  );
+
+  for (const [temperature, quoted] of Object.entries(ELEVEN_TWO)) {
+    const lags: number[] = [];
+    let dropped = 0;
+    for (let i = 0; i < sampleSize; i++) {
+      const lag = purchaseLagMs(opts.seed, `synthetic-${temperature}-${i}`, temperature);
+      if (lag === null) dropped++;
+      else lags.push(lag);
+    }
+    lags.sort((a, b) => a - b);
+    const at = (q: number): number => lags[Math.min(lags.length - 1, Math.floor(q * lags.length))] ?? 0;
+    // Share past the horizon is taken over ALL DRAWN conversions, including the dropped ones,
+    // because §11.2's own figures are the untruncated tail — 2.3% for retargeting is 0.35 x 6.83%,
+    // not the 2.0% a renormalised sample gives. Printed both ways would be kinder; printed the
+    // way the table was computed is checkable.
+    const past = lags.filter((l) => l > HORIZON_MS).length + dropped;
+    console.log(
+      `  ${temperature.padEnd(13)} ${pad((P_FAST[temperature] ?? 0).toFixed(2), 7)} ` +
+        `${pad((at(0.5) / 3_600_000).toFixed(2) + 'h', 9)} ${pad(quoted.median, 7)} ` +
+        `${pad((at(0.95) / 86_400_000).toFixed(2) + 'd', 9)} ${pad(quoted.p95, 7)} ` +
+        `${pad(((past / sampleSize) * 100).toFixed(2) + '%', 9)} ${pad(quoted.past72h, 7)} ` +
+        `${pad(((dropped / sampleSize) * 100).toFixed(2) + '%', 8)}`,
+    );
+  }
+
+  console.log(
+    `\n  p95 reads ~5% below §11.2 on every row, and the cutoff is why: draws past 7 days are\n` +
+      `  DROPPED (§11.1's "nothing is emitted beyond it"), so the sample's 95th percentile is the\n` +
+      `  untruncated distribution's ~94th. §11.2's figures are untruncated. The 'dropped' column is\n` +
+      `  that share, and it is why 'past 72h' counts the dropped draws too — otherwise the same\n` +
+      `  renormalisation would push retargeting to 2.0% against a quoted 2.3%.`,
+  );
+
+  const reports: number[] = [];
+  for (let i = 0; i < sampleSize; i++) reports.push(reportingLagMs(opts.seed, `synthetic-report-${i}`));
+  reports.sort((a, b) => a - b);
+  const rAt = (q: number): number => reports[Math.floor(q * reports.length)] ?? 0;
+  console.log(
+    `\n  Reporting lag — what \`received_at - ts\` actually measures (I18): ` +
+      `median ${(rAt(0.5) / 1000).toFixed(0)}s · p95 ${(rAt(0.95) / 60_000).toFixed(1)}min · ` +
+      `p99 ${(rAt(0.99) / 3_600_000).toFixed(2)}h · max ${(reports[reports.length - 1] ?? 0) / 3_600_000 < 1 ? '<1h' : ((reports[reports.length - 1] ?? 0) / 3_600_000).toFixed(1) + 'h'}\n` +
+      `  Small on purpose: it describes US, not the buyer. Purchase lag is what drives restatement.\n` +
+      `  p95 sits INSIDE the 72 h horizon so headline numbers mean something; the tail crosses it,\n` +
+      `  so P7's restatement path fires on real data rather than only on a scenario trigger (§11.2).`,
   );
 }

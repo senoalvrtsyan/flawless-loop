@@ -214,3 +214,36 @@ export const SPEND_TICK_S = 60;
  * D56 makes the same point structurally — ν never enters λ.
  */
 export const NOVELTY = { peak: 0.25, timeConstantHours: 18 } as const;
+
+/**
+ * §11's conversion lag — **D36**, a two-component mixture plus a separate reporting lag.
+ *
+ * The two lags are kept apart because collapsing them would corrupt our own telemetry (**I18**,
+ * ratified): `received_at − ts` has to describe US, not the buyer. Purchase lag is what drives
+ * restatement; reporting lag is what `received_at − ts` measures.
+ *
+ * `p_fast` is a property of audience temperature (§6, §11.1) rather than a fitted knob, so the
+ * mixture weight carries domain meaning: an intent-heavy cohort matures faster.
+ */
+export const P_FAST: Readonly<Record<string, number>> = {
+  cold: 0.30,
+  warm: 0.45,
+  retargeting: 0.65,
+};
+
+export const LAG = {
+  /** Fast component: `Exponential(mean 12 min)`. */
+  fastMeanMs: 12 * 60_000,
+  /** Slow component: `LogNormal(median 14 h, σ = 1.1)`. */
+  slowMedianMs: 14 * 3_600_000,
+  slowSigma: 1.1,
+  /** §11.1: truncated hard at 7 days — nothing is emitted beyond it. */
+  cutoffMs: 7 * 86_400_000,
+  /** Reporting lag: `LogNormal(median 90 s, σ = 0.9)`. */
+  reportMedianMs: 90_000,
+  reportSigma: 0.9,
+  /** Plus, with probability 0.02, a batch straggler `Uniform(2 h, 9 h)`. */
+  stragglerProbability: 0.02,
+  stragglerMinMs: 2 * 3_600_000,
+  stragglerMaxMs: 9 * 3_600_000,
+} as const;
