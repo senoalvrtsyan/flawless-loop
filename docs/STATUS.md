@@ -99,7 +99,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
 | `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. **And §H (new, B25/B26): contradictions in our OWN design docs** — H1 the recovery half-life, H2 `spend`'s missing fee parameter. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
-| `docs/DECISIONS.md` | Ratified only — **D1–D56, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
+| `docs/DECISIONS.md` | Ratified only — **D1–D63, T1, F1–F4, U8–U9** — nothing deferred: D44/D45 were answered at the B36 gate. **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
 | ~~`docs/CHEATSHEET.md`~~ | **DROPPED** by Seno at the B36 gate, 2026-09-04, and deleted. Not owed at any gate. `DECISIONS.md`'s index table is the one-line-each view now, and it cannot go stale. Recover with `git show e989336:docs/CHEATSHEET.md`. |
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
@@ -878,11 +878,17 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Next is stage 4 and its first chunk is B36 — the app shell. SINGLE-GATED**, and it owes the two
-DEFERRED decisions: **D44** and **D45** (`BUILD_PLAN.md` §7's B36 gate, now four items). Nothing may
-be built on either until they are ratified. **`docs/DEMO.md` is owed from the B36 group onward
-(D50)** — every stage-4/5 group appends its steps as it lands, rather than B61 writing the whole
-thing cold.
+**THE B36 GATE IS CLEARED** (2026-09-04). **D44** — uPlot `1.6.32`, pinned exact, imported in
+`src/web/Chart.tsx` and nowhere else, installed at **B37** and not before; a flip condition to
+hand-rolled SVG is fixed in the entry. **D45** — one plain stylesheet `src/web/app.css` with
+semantic custom properties, and two requirements: **settlement state carries a non-colour channel as
+well as colour** (B42 checks it on a greyscale screenshot) and **one theme only**. **D49 re-decided**
+— the cut line is held intact again, nothing cut, and the next asking moves to the stage-4 → 5 seam
+reframed as *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"* — that is `SCOPE.md`'s list,
+not `BUILD_PLAN.md` §12's, and they number differently. **`docs/DEMO.md` is created by the B36 group
+and appended to by every stage-4/5 group thereafter (D50).**
+
+**Next is B35a — the world poll's pending set (see "Next action")** — then B36.
 
 **Stage 3 is closed and `SIMULATOR.md` is fully implemented.** What that leaves owed is written
 under "What is owed" — none of it blocks B36.

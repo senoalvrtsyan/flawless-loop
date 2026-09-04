@@ -2461,9 +2461,10 @@ ship no automated tests at all (C) and lean entirely on `/api/verify` plus the P
 
 ### DECISION #44 — Chart rendering
 
-> **DEFERRED 2026-09-04 by F4** — *"Mark D44/D45 deferred, not open."* Deliberately not being asked
-> yet; raised again by the chunk before B36. Blocks B37 and nothing before it. See
-> `docs/DECISIONS.md` § F4.
+> **RATIFIED 2026-09-04 at the B36 gate — option A (uPlot 1.6.32).** Deferred by F4, re-presented
+> at the gate, answered there. The analysis below is what was put to Seno and is kept as the record;
+> the ratified entry, the §5 dependency sign-off and the corrected rationale are
+> `docs/DECISIONS.md` § DECISION #44.
 
 
 **Blocking:** B37, in stage 4. **Blocks nothing before that** — stages 0–3 need no chart.
@@ -2522,8 +2523,9 @@ dependency-free?
 
 ### DECISION #45 — Styling
 
-> **DEFERRED 2026-09-04 by F4** — raised again by the chunk before B36, which is the first chunk
-> that cannot start without it. See `docs/DECISIONS.md` § F4.
+> **RATIFIED 2026-09-04 at the B36 gate — option A**, plus two constraints Seno added: settlement
+> state carries a non-colour channel as well as colour, and there is one theme only. The analysis
+> below is kept as the record; the ratified entry is `docs/DECISIONS.md` § DECISION #45.
 
 
 **Blocking:** B36, in stage 4. **Blocks nothing before that.**

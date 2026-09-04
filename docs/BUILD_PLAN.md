@@ -308,20 +308,20 @@ realised distribution is what has to be measured rather than argued.
 
 The deep surface, per D1. Read-only — no levers yet.
 
-> ### ⛔ Gate before B36 — D44 and D45 come back here
+> ### ✅ Gate before B36 — CLEARED 2026-09-04
 >
-> **Deferred at B01 by F4, not answered.** B36 is the first chunk that cannot start without D45
-> (styling) and B37 the first that cannot start without D44 (chart rendering). **B35 does not hand
-> over to B36 until both are put to Seno and answered** — recommendations and full analysis are in
-> `docs/OPEN_QUESTIONS.md` § Wave 7 and need only be re-presented, not rewritten.
+> **D44 — ACCEPTED A: uPlot `1.6.32`**, pinned exact, imported in `src/web/Chart.tsx` and nowhere
+> else, with a flip condition to hand-rolled SVG fixed in the entry. Installed at **B37**, not B36.
+> **D45 — ACCEPTED A: one plain stylesheet** (`src/web/app.css`) with semantic custom properties,
+> plus two requirements — **settlement state carries a non-colour channel as well as colour** (B42
+> checks it against a greyscale screenshot) and **one theme only**, no `prefers-color-scheme`.
+> **(3) D49 re-decided — the cut line is HELD INTACT again**, nothing cut, and the next asking moves
+> to the stage-4 → 5 seam reframed as *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"* —
+> note that is `SCOPE.md`'s list, not §12's, and the two number their items differently.
+> **(4) The B36 group creates `docs/DEMO.md`** and every stage-4/5 group from here appends its
+> walkthrough steps to it and says so in its report (**D50**).
 >
-> **This gate now carries three items, not two** (D49/D50, 2026-09-04):
-> **(3) re-decide D49** — §12's cut line was held intact rather than spent, to be re-decided here
-> against measured velocity; and **(4) the B36 group creates `docs/DEMO.md`** and every stage-4/5
-> group from here on appends its walkthrough steps to it and says so in its report (**D50**).
->
-> Until then, nothing in B01–B35 installs a chart or styling library or hand-rolls anything that
-> pre-empts either choice; a chunk needing styling before B36 uses unstyled HTML and says so.
+> Full entries: `docs/DECISIONS.md` § THE B36 GATE PASS.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|

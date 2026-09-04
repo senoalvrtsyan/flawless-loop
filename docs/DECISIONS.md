@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D63 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D63 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -105,13 +105,15 @@ level — and not a severity.
 | D41 | Repo layout and build toolchain | **ACCEPTED — A** (single package, Vite for the client only) | 2026-09-04 |
 | D42 | HTTP server: `node:http` or a framework | **ACCEPTED — A** (`node:http` + a ~40-line router) | 2026-09-04 |
 | D43 | Test runner, and what gets a test at all | **ACCEPTED — A** (`node:test`, four pure functions) | 2026-09-04 |
+| D44 | Chart rendering | **ACCEPTED — A** (uPlot 1.6.32, pinned exact, behind one descriptor-bearing wrapper) | 2026-09-04 |
+| D45 | Styling | **ACCEPTED — A** (one plain stylesheet, semantic custom properties; one theme, non-colour channel on settlement) | 2026-09-04 |
 | D44, D45 | Chart rendering · styling | **DEFERRED to stage 4** (B36/B37) — see F4 | 2026-09-04 |
 | D46 | Where window aggregation lives — who computes a displayed total | **ACCEPTED — D**, Seno's own option (an amendment to the three offered) | 2026-09-04 |
 | D47 | The `resnapshot` threshold, and how the cursor reaches the server | **ACCEPTED — 2,000 rows**, plus Seno's `max(header, query)` amendment | 2026-09-04 |
 | F4 | D44/D45 are deferred, not open | **DECIDED** | 2026-09-04 |
 | U8, U9 | Store path `data/loop.sqlite` · `ExperimentalWarning` left visible | **ACCEPTED** — ratified at B02 | 2026-09-04 |
 | D48 | Approval granularity: chunk-gated or group-gated | **ACCEPTED — B** (group-gated, chunk-committed, five solo) — **amends `CLAUDE.md` §5** | 2026-09-04 |
-| D49 | Take §12's cut line now, or hold it | **ACCEPTED — C** (hold to the B36 gate; nothing cut) | 2026-09-04 |
+| D49 | Take §12's cut line now, or hold it | **ACCEPTED — C** (hold to the B36 gate; nothing cut) · **RE-DECIDED at the B36 gate: hold intact again**, and the next asking is reframed — see D49's amendment | 2026-09-04 |
 | D50 | Where the demo script sits in the order | **ACCEPTED — B** (B61 runs as `docs/DEMO.md` from B36) | 2026-09-04 |
 | D51 | `create_ad`'s `created_at` — client-supplied or derived from the decision's `ts` | **ACCEPTED — B** (derived) | 2026-09-04 |
 | D52 | `daily_budget_cents` for the twelve seeded ads | **ACCEPTED — B** (hand-set, grounded in the expected-spend arithmetic; two ads near their cap) | 2026-09-04 |
@@ -3482,3 +3484,246 @@ Pausing an ad stops you buying more impressions; it does not un-buy the ones peo
 and a platform that reported otherwise would be lying about revenue. The model follows the money
 rather than the switch, and the one cost — that the pause demo needs a sentence of narration — buys
 the ability to demonstrate the lever and late attribution on the same ad.
+
+---
+
+# THE B36 GATE PASS — D44, D45, D49 re-decided
+
+The gate `BUILD_PLAN.md` §7 set at B01 and F4 deferred to. Both deferred decisions came back with
+their analysis intact (`OPEN_QUESTIONS.md` § Wave 7) and were re-presented, not rewritten.
+
+**Wording of record — Seno's words, split by decision because each carries its own instructions:**
+
+> D44 — A (uPlot), with the §5 dependency sign-off: exact pinned version, single import site in the
+> descriptor-bearing wrapper, and D8's flip condition written into the entry. Lead the rationale
+> with the 4 Hz setData cost and B53's cursor callback, not the point count — 7 days × 12 series is
+> ~2,016 points at the descriptor's hour granularity, and the volume argument only bites in the
+> single-ad minute-granularity case where B's downsampling collides with D30.
+
+> D45 — A (one plain stylesheet, semantic custom properties). Two constraints in the entry:
+> settlement state carries a non-colour channel as well as colour, and there is one theme only.
+
+> D49 — hold intact, re-decide at the stage-4 → 5 seam, and frame that seam as "do we reinstate cut
+> #1 (decision scoring)" rather than hold/spend.
+
+---
+
+## DECISION #44 — Chart rendering
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B37 (and B42/B43/B48/B53 build
+on it) · **Deferred at B01 by F4; answered here**
+**Relates to:** `DESIGN.md` §11 · D20 · D30 · D31 · D34 · D46 · `CLAUDE.md` §5 (new dependency), §7
+
+### Question
+
+What draws the chart, given that **D34** requires every performance number to render through a
+component holding a signed, server-issued `TraceDescriptor`, **D31** requires clicking a point to
+open its drill-down, and **D20**'s ladder means a series' granularity is chosen at render time and
+the chart must sometimes refuse to draw a ratio and show counts instead.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **uPlot** — canvas, typed column arrays, documented cursor hook | **CHOSEN** |
+| B | Recharts or any React-declarative library — annotations as child elements | Rejected — see the rationale; SVG per point forces client downsampling in the one case that matters, and that collides with D30 |
+| C | Hand-rolled SVG — no dependency, total control | Rejected — axes, ticks, hit testing and the live path are several chunks with no domain content, on the surface `CLAUDE.md` §7 says not to spend on |
+
+### Rationale, in Seno's words
+
+> D44 — A (uPlot), with the §5 dependency sign-off: exact pinned version, single import site in the
+> descriptor-bearing wrapper, and D8's flip condition written into the entry. Lead the rationale
+> with the 4 Hz setData cost and B53's cursor callback, not the point count — 7 days × 12 series is
+> ~2,016 points at the descriptor's hour granularity, and the volume argument only bites in the
+> single-ad minute-granularity case where B's downsampling collides with D30.
+
+**Reasoning of record, in the order Seno fixed — and the recommendation as originally presented led
+with the wrong argument, which is corrected here rather than quietly restated.**
+
+**1. The 4 Hz `setData` cost is what decides it.** `stream.ts` flushes on a **250 ms** tick, so a
+live chart re-renders up to **four times a second**, indefinitely, while the reviewer watches. That
+is a per-frame cost paid continuously, not a one-off mount cost. uPlot's typed column arrays are the
+shape `rollup_minute` rows already arrive in, so a frame is an array swap; a declarative SVG library
+re-reconciles a node per point per frame. The steady-state redraw, not the initial draw, is the
+budget.
+
+**2. B53's drill-down needs a cursor callback, and D34 needs it to carry the descriptor.** uPlot's
+cursor hook hands back the series and the data index, which is exactly the pair a `TraceDescriptor`
+is minted from. Option B's library wants to own the tooltip — which is precisely where the
+descriptor has to live — so the one thing D34 makes non-negotiable would have to be fought for.
+
+**3. The point count is NOT the argument, and the earlier recommendation was wrong to lead with
+it.** At the descriptor's **hour** granularity a 7-day window over 12 series is ~**2,016** points
+(168 × 12), which any library draws without complaint. The volume argument only bites in the
+**single-ad, minute-granularity** case — and that is the case where option B would have to
+downsample on the client, which is the client-side aggregation **D30** was ratified to prevent. So
+volume is a *narrow* argument against B, not the broad one it was presented as.
+
+### The `CLAUDE.md` §5 dependency sign-off
+
+The first runtime dependency in the project, and the last one this plan calls for.
+
+1. **Exact pinned version: `uplot@1.6.32`**, pinned exact in `package.json` (no `^`, no `~`), so the
+   dependency cannot move under the build between now and the demo.
+2. **One import site.** `import uPlot from 'uplot'` appears in **`src/web/Chart.tsx`** and nowhere
+   else — the descriptor-bearing wrapper is the only module that knows the library exists. Every
+   other component takes props. A second import site is a review finding, not a style preference:
+   it is what would let a chart render a number without a descriptor.
+3. **Flip condition, fixed now so it is not a later judgement call** — the same shape D8 set for
+   `node:sqlite` (*"if a `node:sqlite` sharp edge costs more than half a chunk, swap to
+   `better-sqlite3`"*): **if uPlot's imperative lifecycle costs more than half a chunk to reconcile
+   with React's — remount thrash, a stale closure in the cursor hook, or a resize path that will not
+   settle — drop to option C (hand-rolled SVG) for the one chart, keeping the wrapper's props
+   interface unchanged.** The wrapper is the seam that makes that port mechanical, which is the
+   second reason the single import site is a rule rather than a preference.
+
+### Consequences
+
+1. **`package.json` gains one runtime dependency at B37**, not before. B36 installs nothing.
+2. **`Chart.tsx` is the wrapper** and owns the imperative lifecycle; D20's refuse-to-draw branch
+   lives above it, in the component that decides what to pass.
+3. **B42's settlement treatment, B43's restatement entries and B48's generation markers are drawn
+   by us**, on uPlot's canvas, rather than composed as library children — the cost option B's
+   declarative annotations would have saved, accepted knowingly.
+4. **The README's dependency section names two runtime dependencies and their reasons** — this and
+   nothing else on the client, with `node:sqlite` on the server per D8.
+
+### What it forecloses
+
+Declarative annotation composition (B's one real advantage): generation boundaries and restatement
+markers cannot be written as JSX children and must be drawn. Reinstating that means changing the
+library, which the flip condition already prices — but towards C, not towards B, because B's
+downsampling problem does not go away.
+
+### How I'd defend this in review
+
+The choice was made on the cost that recurs — a four-times-a-second redraw for as long as the demo
+is open — and on the one API the design cannot do without, which is a cursor callback that can carry
+a signed descriptor. The point count, which is the argument that looks most obvious, is ~2,016 at
+the granularity the chart actually asks for and was the wrong reason to reach for canvas.
+
+---
+
+## DECISION #45 — Styling
+
+**Status:** ACCEPTED — option A · **Date:** 2026-09-04 · **Blocks:** B36, the first chunk that
+cannot start without it · **Deferred at B01 by F4; answered here**
+**Relates to:** `DESIGN.md` §5.4, §11 · `CLAUDE.md` §7 · D42 (no framework) · B42 · B44
+
+### Question
+
+`CLAUDE.md` §7 quotes the brief: visual polish is explicitly not what is graded. But two things on
+this surface are about **legibility, not taste** — `DESIGN.md` §5.4's three settlement states
+(`live` / `settled` / `restated`) must be visually distinct and **persistent**, and §11's stream
+telemetry must render in a treatment that can never be mistaken for a performance metric.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | **One plain CSS file, custom properties for the ~8 semantic colours** | **CHOSEN** |
+| B | CSS Modules — scoping for free, no runtime dependency | Rejected for now — it is A plus scoping, and the semantic colours still want a shared file. A reasonable upgrade past ~20 components |
+| C | Tailwind | Rejected — a dependency and a build step, and the two things that actually matter become long utility strings rather than named semantics |
+
+### Rationale, in Seno's words
+
+> D45 — A (one plain stylesheet, semantic custom properties). Two constraints in the entry:
+> settlement state carries a non-colour channel as well as colour, and there is one theme only.
+
+Reasoning of record: the only styling decisions that carry meaning are the settlement states and the
+telemetry quarantine, and both read better as **named custom properties** than as utility strings or
+scoped modules — `--state-restated` says what it is at the point of use, which is the property that
+matters when a reviewer asks why a bucket looks different.
+
+### The two constraints, which are requirements and not preferences
+
+1. **Settlement state carries a NON-COLOUR channel as well as colour.** `live` / `settled` /
+   `restated` must be distinguishable without colour vision — a hatch, a border treatment, a marker
+   shape or a label, chosen per surface but always present. Colour alone is an accessibility failure
+   and, more to the point here, it fails on a projector and in a greyscale screenshot, which is how
+   a reviewer is most likely to meet it. **B42 is where this is checked**, and the check is: read
+   the three states from a greyscale screenshot.
+2. **One theme only.** No light/dark switch, no `prefers-color-scheme` branch. Two themes means
+   every semantic colour is decided twice and the non-colour channel above gets verified once and
+   assumed in the other — for a surface where visual polish is explicitly not graded, that is budget
+   spent on a second way to be wrong.
+
+### Consequences
+
+1. **`src/web/app.css` is the one stylesheet**, created by B36, with the semantic custom properties
+   declared at `:root` in one block that names each one's job.
+2. **No CSS dependency and no build step beyond Vite's default** — consistent with D42's "no
+   framework" on the server side.
+3. **B42 and B44 inherit named checks rather than taste calls**: the greyscale test above, and the
+   telemetry treatment being visibly not-a-metric.
+4. **Scoping stays a manual discipline.** At ~15 components that is fine; past ~20 the upgrade is B
+   and it is mechanical.
+
+### What it forecloses
+
+Nothing structurally. Moving to CSS Modules later is per-component and mechanical; the semantic
+custom properties survive either way, which is the point of putting the meaning in the variables
+rather than in the class names.
+
+### How I'd defend this in review
+
+Two things on this surface carry meaning and the rest is legibility. Both are named custom
+properties, so the meaning is visible at the point of use; the settlement states survive greyscale,
+which is the one accessibility property that is also a demo property; and no budget went to a theme
+switch on a surface the brief says is not graded on looks.
+
+---
+
+## D49 — AMENDMENT: re-decided at the B36 gate, and the next asking is reframed
+
+**Status:** RE-DECIDED — hold intact, again · **Date:** 2026-09-04 · **Amends:** D49
+**Relates to:** `BUILD_PLAN.md` §12 · `SCOPE.md` §4 · D1
+
+### What was re-decided
+
+D49 held `BUILD_PLAN.md` §12's eleven-item cut line **intact** rather than spending it, to be
+re-decided at this gate against **measured velocity**. Measured: **39 of 66 chunks are done, and all
+of stages 0–3 landed on 2026-09-04** (75 commits that day; design was 09-03). **27 remain** — stage
+4 · 10, stage 5 · 5, stage 6 · 6, stage 7 · 6. The cut line is **held intact again**; nothing is
+cut, and it is not re-asked before the stage-4 → 5 seam.
+
+### The reframing, which is the substantive half
+
+> D49 — hold intact, re-decide at the stage-4 → 5 seam, and frame that seam as "do we reinstate cut
+> #1 (decision scoring)" rather than hold/spend.
+
+**The seam's question is no longer "what do we cut". It is "do we reinstate `SCOPE.md` §4 cut #1 —
+decision scoring (before/after windows, withheld until settled)".** That is a question about
+spending *surplus*, and it is the right one to ask if the velocity above holds: `SCOPE.md` §4 orders
+its cuts **cheapest to reinstate first**, and #1's own reason is *"it reads rollups that already
+exist, so it is the cheapest thing to add back."*
+
+**Two different lists, and they must not be conflated — this is the sentence a cold reader needs:**
+
+| List | What it holds | Direction |
+|---|---|---|
+| `BUILD_PLAN.md` §12 | Eleven items that are **in scope and built**, ordered by what we would give up first | Spending it **narrows** the deliverable |
+| `SCOPE.md` §4 | Nine things that are **already out of scope**, ordered cheapest-to-reinstate | Spending it **widens** the deliverable |
+
+Cut **#1** differs between them: §12's #1 is *generation boundary markers on the chart* (B48);
+`SCOPE.md` §4's #1 is *decision scoring*. **The seam's question means `SCOPE.md` §4 #1.**
+
+### Consequences
+
+1. **Nothing is cut, for the second time.** Every chunk B36–B62 stays in the plan.
+2. **The stage-4 → 5 seam gets a named question**, recorded here so it is asked rather than
+   remembered: *reinstate `SCOPE.md` §4 cut #1, decision scoring?* It reopens `SCOPE.md` §2–§4,
+   which is copied verbatim into the README, so a yes is a README change (`CLAUDE.md` §10).
+3. **§12's cut line stays available** as insurance and is not re-asked before that seam.
+
+### What it forecloses
+
+Nothing yet — but reinstating decision scoring later means widening a scope statement that has been
+stable since Phase 1, and `SCOPE.md` §2–§4 is README-verbatim, so it is a documentation change as
+much as a build one. That is the cost the seam has to weigh.
+
+### How I'd defend this in review
+
+The cut line was held twice, against a measured rate rather than a feeling, and the question at the
+next gate was deliberately turned around: with stages 0–3 done in a day, the interesting question
+stopped being what to drop and became whether the cheapest deferred thing is worth adding back.
