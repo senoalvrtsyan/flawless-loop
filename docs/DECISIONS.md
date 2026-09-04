@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D67 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D68 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -132,6 +132,7 @@ level — and not a severity.
 | D65 | Does the live viewport advance its leading edge | **ACCEPTED — C** (the client rolls the window and the stream fills it; the server's window stays on screen as "anchored at") | 2026-09-04 |
 | D66 | Where the headline window totals come from, and how they stay current | **ACCEPTED — C** (server-computed, re-asked over `?include=totals`, carrying `as_of_ingest_seq` and the resolved window) | 2026-09-04 |
 | D67 | How D20's bar is tested, and how the ladder resolves across a selection | **ACCEPTED — B at >50% of non-empty points, with (i)** (per-point suppression; coarsest rung the selection needs; dropped ads named) | 2026-09-04 |
+| D68 | Do we reinstate `SCOPE.md` §4 cut #1, decision scoring | **ACCEPTED — B** (one chunk `B50a` at the end of stage 5, conditional on stage 5 landing without the stop clause firing; the `w` sub-question is open and blocks it) | 2026-09-04 |
 
 ---
 
@@ -1133,7 +1134,7 @@ don't present it as a live feature"*
 | **D15** | ACCEPTED — C | First-write-wins for aggregates; **every delivery persisted**; conflicts surfaced | Feeds the DDL and the misbehaviour table. |
 | **D16** | ACCEPTED — C, restated under D27 | Provisional counting, visible re-attribution, orphan health counter | **Restated by D27-B**: provisional placement is the conversion's own minute, and resolution *moves* it to the click's minute — a two-bucket restatement. |
 | **D18** | ACCEPTED — A | SSE with `Last-Event-ID` = `ingest_seq` | D30 builds the payload contract on it. |
-| **D19** | ACCEPTED — cut | Decision scoring cut by D26 | Cut #1, stated. |
+| **D19** | ACCEPTED — cut, **conditionally reinstated by D68** | Decision scoring cut by D26; D68 reinstates it as `B50a` **if** stage 5 lands without `CLAUDE.md` §5's stop clause firing | Cut #1, stated. D68 also names the sub-question D19 left open — symmetric `w` vs generation-pinned — which blocks `B50a`. |
 | **D21** | ACCEPTED — A | Two stores, shared envelope `{id, ts, received_at, ingest_seq}`, merged at read | This is the answer to `DESIGN.md` §1 — configs, signals and levers distinct in storage. |
 | **D23** | ACCEPTED — B | Two slots kept; `image` / `body_copy` are library-only | Follows D1. Gets a `BRIEF_GAPS` entry. |
 | **D25** | ACCEPTED — A, B specified | Retractions out of scope; `conversion_void` specified in the README | D27's orphan consequence already forces the generic restatement path, so B's "nearly free" claim is now demonstrated rather than asserted. |
@@ -4054,3 +4055,113 @@ tested per point; the majority test is what turns that into a rung the whole ser
 and the gated-point count on the surface is what keeps the gaps from being mistaken for missing
 data — every part of it reproduces the rung table `SIMULATOR.md` §18.3 predicted, measured against
 realised counts rather than the expectations that table was computed from.
+
+---
+
+## DECISION #68 — Do we reinstate `SCOPE.md` §4 cut #1, decision scoring?
+
+**Status:** ACCEPTED — **option B** (one chunk `B50a` at the end of stage 5, conditional) ·
+**Date:** 2026-09-04 · **Blocks:** `B50a` and nothing else · **Relates to:** D19, D26, D49, D13 ·
+`SCOPE.md` §4 · `OPEN_QUESTIONS.md` § DECISION #19
+
+### A note on this entry's provenance, because it matters for how much it is worth
+
+**The options below are reconstructed at record time**, not transcribed from the presenting turn:
+D68 was put to Seno in a conversation that was cleared before it reached this file, and nothing in
+the repo captured it. What is verbatim is the answer (§ "Wording of record"); what is
+reconstructed is the option set, from Seno's own restatement of option B and from D49's framing of
+the seam. **The full substantive analysis of the scoring heuristic itself is not reconstructed and
+does not need to be** — it is `OPEN_QUESTIONS.md` § DECISION #19, written in Phase 0 and unchanged,
+which is where `CLAUDE.md` §3's compression clause points. This paragraph is here rather than
+silently absent because an entry that looks transcribed and is not is worse than one that says so.
+
+### Question
+
+D49 was held intact twice and reframed: the stage-4 → stage-5 seam asks not *"what do we cut"* but
+*"do we reinstate `SCOPE.md` §4 cut #1 — decision scoring (before/after windows, withheld until
+settled)"*. §4 orders its cuts cheapest-to-reinstate-first and #1's own stated reason is *"it reads
+rollups that already exist, so it is the cheapest thing to add back."* Stage 4 closed on schedule
+with 51 of 68 chunks done, so the surplus D49 anticipated is real. The question is whether to spend
+it here, and if so, when — before stage 5's chunks or after them.
+
+### Options
+
+**A) Hold the cut.** Scoring stays out; `SCOPE.md` §2–§4 is untouched and so is the README block
+copied from it. The decision log records what was tried and why, never whether it worked.
+- Forecloses: the one place the loop could be shown *compounding* rather than merely closing.
+- Reversal cost: none — this is the status quo, re-askable at the stage-5 → 6 seam.
+
+**B) Reinstate as ONE chunk `B50a`, at the END of stage 5, conditional on stage 5 landing without
+the §5 stop clause firing.** The plan becomes 69 chunks. Scoring reads `rollup_minute` over a
+before-window and an after-window either side of a decision's `ts`, withheld until both are past
+the D13 horizon, rendered beside the decision-log entry B47 builds.
+- Pros: the condition is a real gate, not a formality — the stop clause has fired seven times in
+  this build and each time it was right, so "stage 5 landed clean" is evidence and not optimism.
+  It also lands *after* B47 exists, so scoring has a surface to attach to rather than needing one.
+- Cons: last-in means first-squeezed if stage 5 overruns.
+- Forecloses: nothing; a `B50a` that does not land leaves option A exactly.
+- Reversal cost: one chunk, plus the `SCOPE.md` §2–§4 / README edit that any reinstatement owes.
+
+**C) Reinstate now, ahead of B46, as a first-class part of the decision loop.** Scoring is designed
+into the console and the log from the start rather than appended to them.
+- Pros: the tightest product story — signal, lever, and *did it work* on one surface.
+- Cons: it re-opens the scope statement before the surface that would host it exists, and it spends
+  the surplus before stage 5 has demonstrated there is one.
+- Forecloses: the conditionality — once B46/B47 are built around scoring, dropping it is a rewrite.
+- Reversal cost: high, and rising with every chunk built on top of it.
+
+### Wording of record
+
+> recommended one
+
+Seno's answer, verbatim and complete. The recommendation put to them was **option B**; Seno restated
+it in the same pass as *"reinstate `SCOPE.md` §4 cut #1, decision scoring, as ONE chunk B50a at the
+end of stage 5, conditional on stage 5 landing without the stop clause firing"*, which is the text
+this entry is built to.
+
+### The sub-question Seno did NOT answer — and it blocks `B50a`
+
+**Is `w` a symmetric 6-hour before/after window, or is it pinned to the decision's own generation
+boundaries?** `OPEN_QUESTIONS.md` § DECISION #19 proposed symmetric windows (option B there) and
+asked "which metric, and what window size?"; that half was never answered, and it is a real fork:
+
+- **Symmetric `w`** (e.g. 6 h either side of `decision.ts`) is simple, comparable across decisions,
+  and wrong at the edges — a second lever pulled 90 minutes later contaminates the after-window,
+  and the before-window can straddle a generation the decision did not cause.
+- **Generation-pinned `w`** uses `config_generations.[valid_from, valid_to)` — the before-window is
+  the previous generation's life, the after-window is this one's. Never contaminated by design,
+  because a contaminating lever *is* the boundary. But the two windows are then different lengths,
+  often very different, so the comparison needs normalising and the "withheld until settled" rule
+  has to be evaluated against a moving `valid_to`.
+
+**This blocks `B50a` and nothing else.** It is not asked now because `B50a` is itself conditional;
+it is asked at the top of `B50a`'s announcement if stage 5 lands clean, and it is written down here
+so it is asked rather than assumed.
+
+### Consequences
+
+1. **The plan becomes 69 chunks if `B50a` lands** — `BUILD_PLAN.md` §8 gains one row after B50,
+   marked conditional. It is *not* ticked into the schedule as certain.
+2. **The condition is checkable and must be checked**: `B50a` is built only if B46–B50 land without
+   `CLAUDE.md` §5's stop clause firing (a decision needed, the design found wrong, or a new
+   dependency wanted). If it fires, the answer reverts to option A and this entry says why.
+3. **A yes is a README change.** `SCOPE.md` §2–§4 is README-verbatim (`CLAUDE.md` §10), so
+   reinstating #1 moves it out of §4's cut table and into §2/§3, and the README block moves with it.
+   That edit is part of `B50a`, not a follow-up.
+4. **D19 flips from "ACCEPTED — cut" to conditionally reinstated** in the index table, with the
+   condition named rather than the row silently rewritten.
+5. **The sub-question above is answered before a line of `B50a` is written**, per §3.
+
+### What it forecloses
+
+Nothing while unbuilt — that is the point of the conditionality. Once `B50a` lands it forecloses the
+cut line's cheapest remaining insurance: `SCOPE.md` §4 #1 is the top of the reinstate-first list, so
+spending it means the next surplus has to buy something more expensive (#2, the data-health panel).
+
+### How I'd defend this in review
+
+The surplus was real and measured rather than felt, and it was spent on the *cheapest deferred
+thing* — the one whose own scope entry said it reads rollups that already exist — rather than on
+polish. Making it conditional on stage 5 landing clean means the build never traded a hard
+requirement for a nice-to-have, and the one open sub-question (symmetric vs generation-pinned
+windows) is recorded as blocking that chunk rather than resolved quietly by whoever wrote it.
