@@ -208,9 +208,9 @@ throughout; the stage-1 number keeps moving.
 | [x] | **B25** | Rate equation core: per-channel diurnal shape, day-of-week, `NegBinomial(λ, α=8)` draw | `src/sim/rate.ts`, `src/sim/params.ts` | `npm run sim -- --dry-run --hours 24` prints hourly totals; the two peaks and the per-channel shapes match S§21's constants | S§3, §4 | **HR7** |
 | [x] | **B26** | Fatigue: `F(lineage, audience)` accrual, `φ(f) = 0.25 + 0.75·exp(−0.35f)`, `video^1.0 × headline^0.5`, 5-day idle recovery, version partial reset `r = 0.35` | `src/sim/fatigue.ts` | Dry-run prints φ per pair after the seeded volumes; **reproduce S§7.2's table** — `vl_01 × cold_us` at 0.43 and `vl_01 × warm_us` at 0.91 at the same instant | S§7 | **HR7** |
 | [x] | **B27** | Channel and temperature matrices → clicks (`BetaBinomial`), CPC, order value; `spend` emitted as a 60 s delta per live ad | `src/sim/emit.ts`, `src/sim/params.ts` | Dry-run CTR and CVR per ad match S§21's matrices within noise; spend ticks arrive one per minute per live ad | S§5, §6, §10 | **HR7** |
-| [ ] | **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, applied to CTR only, on the pair's first exposure | `src/sim/fatigue.ts` | Dry-run: `a_07` at ν ≈ 1.06, `a_01` at 1.00 — the two ends of a creative's life at one moment | S§8 | **HR7** |
-| [ ] | **B29** | Conversion lag: fast/slow mixture by `p_fast`, separate reporting lag, 7-day hard cutoff, schedule re-derived from the keyed RNG rather than stored | `src/sim/lag.ts` | Dry-run prints median / p95 / past-72 h share per temperature and **matches S§11.2**: rt 0.3 h / 1.87 d / 2.3%, cold 7.5 h / 2.85 d / 4.6% | S§11 | **HR4 HR7** |
-| [ ] | **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to channel demand | `src/sim/noise.ts` | Dry-run: variance/mean grows with λ; the channel factor moves every ad on that channel together; autocorrelation at the stated τ | S§12 | **HR7** |
+| [x] | **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, applied to CTR only, on the pair's first exposure | `src/sim/fatigue.ts` | Dry-run: `a_07` at ν ≈ 1.06, `a_01` at 1.00 — the two ends of a creative's life at one moment | S§8 | **HR7** |
+| [x] | **B29** | Conversion lag: fast/slow mixture by `p_fast`, separate reporting lag, 7-day hard cutoff, schedule re-derived from the keyed RNG rather than stored | `src/sim/lag.ts` | Dry-run prints median / p95 / past-72 h share per temperature and **matches S§11.2**: rt 0.3 h / 1.87 d / 2.3%, cold 7.5 h / 2.85 d / 4.6% | S§11 | **HR4 HR7** |
+| [x] | **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to channel demand | `src/sim/noise.ts` | Dry-run: variance/mean grows with λ; the channel factor moves every ad on that channel together; autocorrelation at the stated τ | S§12 | **HR7** |
 | [ ] | **B31** | `GET /api/sim/world` + the emitter's 1 Hz poll: ads and status, `last_decision_seq`, `F` per pair **recomputed from the signal log**, `spend_so_far_today`, pending backfilled clicks, pending scenarios | `src/server/sim-world.ts`, `src/sim/world.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; the endpoint's `F` matches B26's internal state because both come from the log | D§11; S§16 | **HR3** |
 | [ ] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
 | [ ] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
@@ -535,6 +535,25 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   typechecks, reads as good practice, and passes every other test. **Guarded:**
   `verify.test.ts` greps every `.ts` under `src/` and fails the build; confirmed to trip on one
   injected occurrence. `verify.ts` is the sole exemption, by name.
+- **A stateful AR(1) would break re-emission, and nothing would say so** (B30). §12 defines
+  `m_channel` and `m_ad` recursively — `log m(t) = ρ · log m(t−Δ) + ε` — so the obvious
+  implementation keeps a running value. But `m` multiplies λ, λ decides a tick's impression count,
+  and an impression's `event_id` is derived from its tick and index: a stateful `m` re-derives
+  differently after a restart, so the same `event_id` comes back attached to a different tick
+  population. Every re-emitted second becomes `duplicate_conflicting` — a *platform correction* —
+  instead of the `duplicate_identical` §14 promises, and B11's whole catch-up design rests on the
+  latter. **`m` must stay a pure function of `t`**, which is why `noise.ts` unrolls the recursion
+  into its innovation sum. The failure is silent: the numbers stay plausible and only the
+  disposition counts move.
+- **The sample autocorrelation understates badly here, and a correct process reads as broken**
+  (B30). Estimating the ACF of `log m` by subtracting a SAMPLE mean gave 0.287 at lag τ against a
+  true 0.368 — 20% low, four standard errors out — because at `τ/Δ` of 20–45 a few-hundred-step
+  window holds only ~12–25 effective observations, so the sample mean is noisy enough to drag every
+  lag down. `log m` has a true mean of **exactly 0** by construction, so the estimator must not
+  subtract one. Recorded because the first measurement looked like a model defect and was not:
+  whoever verifies §12 next will reach for the naive estimator too. The dry run also prints the
+  **closed-form** ACF of the truncated sum as the primary check (`ρ^h · Σ_{k<K−h} ρ^{2k} /
+  Σ_{k<K} ρ^{2k}`, exact arithmetic) so sampling noise can never be mistaken for a defect again.
 - **A derived `spend` delta must cover an interval the emitter EMITTED, not merely one it can
   re-derive** (B27, found twice by reading the store rather than the code). The 60 s CPM delta is a
   pure function of its interval's ticks — deliberately, so a re-emission after a restart is
@@ -547,14 +566,20 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   no process ever emitted is skipped. Alignment is what makes the guard lossless. Nothing errors in
   either failure mode — HR5's "every number walks back to its events" simply stops being true for
   one minute of every run, in the money column.
-- **`BetaBinomial`'s κ does nothing at a 1-second tick, and that is invisible** (B27). §10 draws
-  `clicks ~ BetaBinomial(N, p_ctr, κ = 200)` per tick, but the urn's overdispersion enters through
-  `(N − 1)/(κ + 1)`, which is **exactly zero at N = 1** and 0.5% at N = 2. Per-tick `N` across the
-  seeded portfolio is 0–3, so §12's *"the rate is uncertain, not just the count"* is not delivered
-  at this granularity — the drawn rate would have to persist across a window. §10 is implemented as
-  written and κ is transcribed correctly; the parameter simply has no effect. **B30 owns this** —
-  its verify is *"variance/mean grows with λ"*, which is the check that would catch it — so the
-  risk is that B30 reads κ as already done and never tests the dispersion it was meant to create.
+- **`BetaBinomial`'s κ did nothing at a 1-second tick — FIXED for clicks at D57, still true for
+  conversions** (found B27, resolved B30). The urn's overdispersion enters through `(N − 1)/(κ + 1)`,
+  **exactly zero at N = 1**, and per-tick counts are 0–3. So §10's `κ = 200` had no effect at all
+  and §12's *"the rate is uncertain, not just the count"* was true of the document and not of the
+  data. Nothing errored; the parameter was simply inert.
+  **Clicks:** the rate is now drawn once per minute — `p ~ Beta(p_ctr·κ, (1−p_ctr)·κ)` — and held
+  across the minute's ticks, so a minute's clicks are exactly `BetaBinomial(N_minute, p_ctr, κ)` at
+  the granularity D28 buckets and D20 gates on. Verified by A/B on identical impressions and
+  uniforms: the variance ratio against a fixed `p_ctr` tracks `1 + (N̄−1)/(κ+1)` (`a_08` 1.32
+  measured vs 1.23 predicted, `a_07` 0.99 vs 1.01).
+  **Conversions keep `κ = 60` and it remains inert.** A conversion draw is over one tick's CLICKS,
+  which is 0–1, and stays 0–1 over a minute — so lifting it to the same grid would change nothing
+  measurable. It would take an hour-wide window to give it any effect, which is a further decision
+  about where cohort-rate uncertainty lives rather than a fix. **Stated limit, for the README.**
 - **The shadow set is ALL-OR-NOTHING** (D55, B22). Shadow three projections and the fourth is
   rebuilt straight into the live store, silently repairing what it was asked to check. `SHADOWED`
   also carries `decisions` — `applyDecision()` writes the log row in the same transaction (B13) —
