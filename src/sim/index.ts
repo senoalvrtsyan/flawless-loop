@@ -2,14 +2,25 @@
 // `POST /api/ingest` — it never opens the database, and it never assigns `received_at` or
 // `ingest_seq` (D12). DESIGN §11's top box, minus everything stage 3 adds.
 //
-// B11's scope is stage 1's event source and nothing wider: ONE hard-coded ad, impressions only, a
-// CONSTANT rate, a 1 s tick at 1× wall clock (§15.1), one batched POST per tick. Everything that
-// makes the rate interesting is deliberately absent and named on its own plan item — SIMULATOR §3's
-// six factors and the NegBinomial draw (B25-B27), clicks/conversions/spend (B28-B31), the
-// `GET /api/sim/world` poll and levers (B29), scenarios (B32), the injected misbehaviours (B33),
-// the 7-day backfill and the T0 seam (B34).
+// Still ONE hard-coded ad, impressions only, a 1 s tick at 1× wall clock (§15.1), one batched POST
+// per tick: the emitter cannot learn the portfolio or any ad's status until `GET /api/sim/world`
+// (B31), so `a_12` is the whole world here.
+//
+// What is real as of B25 is the RATE. §3's λ now carries §4's per-channel shape of the day and its
+// day-of-week weight, and the count is `NegBinomial(λ, α = 8)` rather than a constant. The factors
+// that are still absent are passed as 1.0 by name rather than left out, each on its own plan item:
+// fatigue (B26), novelty (B28), pacing (B32), the two AR(1) demand factors (B30). Clicks, cost and
+// spend are B27; the conversion schedule B29; the injected misbehaviours B33; the 7-day backfill
+// and the T0 seam B34 and B35.
+//
+// **ASSUMPTION (unratified), pending B26 and B27:** §3's λ as `SIMULATOR.md` writes it also lists
+// `φ_fatigue` and `ν_novelty`. Neither is applied here, because neither is built yet.
 
-import { draw, derivedId } from './rng.ts';
+import { derivedId } from './rng.ts';
+import { ADS, type AdFixture } from './fixtures.ts';
+import { lambdaPerSecond, negBinomial } from './rate.ts';
+import { arrivalProcess, localMidnightAtOrBefore, type DryRunOptions } from './dry-run.ts';
+import { BASE_IMPR_PER_DAY } from './params.ts';
 import type { IngestResult, Signal } from '../shared/types.ts';
 
 /**
@@ -22,17 +33,14 @@ import type { IngestResult, Signal } from '../shared/types.ts';
  */
 const SEED = process.env.SIM_SEED ?? 'flawless-loop';
 
-/** `a_12`, `meta_feed`, 20,000 impressions/day — SIMULATOR §2.3. The brief's own pause target. */
+/** `a_12` — SIMULATOR §2.3, and the brief's own pause target. Its channel comes from the fixture
+ * and its `base_impr_per_day` from §21, so neither is restated here. */
 const AD_ID = 'a_12';
-const IMPR_PER_DAY = 20_000;
-
-/**
- * The constant rate: §3's λ with all six factors held at 1.0 and no stochastic draw. 0.2315/s, so
- * ~13.9 impressions a minute — the number on screen climbs a few times a minute, which is the
- * "climbs at the expected rate" the plan item asks to be able to eyeball. B25 replaces this
- * line, not the loop around it.
- */
-const RATE_PER_S = IMPR_PER_DAY / 86_400;
+const AD = ((id: string): AdFixture => {
+  const found = ADS.find((a) => a.ad_id === id);
+  if (found === undefined) throw new Error(`${id} is not in the seeded portfolio — SIMULATOR §2.3`);
+  return found;
+})(AD_ID);
 
 /** §15.1: 1 s, one batched POST per tick, 1× wall clock. */
 const TICK_MS = 1_000;
@@ -65,9 +73,11 @@ const MAX_PENDING = 10_000;
  * `duplicate_conflicting` — a platform correction (§5.1 step 4) — rather than a duplicate.
  */
 function eventsForTick(tick: number): Signal[] {
-  const whole = Math.floor(RATE_PER_S);
-  const fraction = RATE_PER_S - whole;
-  const count = whole + (draw(SEED, 'impr', AD_ID, tick) < fraction ? 1 : 0);
+  // §3's λ at this second, then §12's draw. Every other factor defaults to 1.0 inside
+  // `lambdaPerSecond` and is named on its own plan item; passing nothing is the honest statement
+  // that they are absent, not that they are one.
+  const lambda = lambdaPerSecond(AD_ID, AD.channel, tick * 1_000);
+  const count = negBinomial(SEED, AD_ID, tick, lambda);
 
   const events: Signal[] = [];
   for (let i = 0; i < count; i++) {
@@ -159,9 +169,40 @@ async function tick(): Promise<void> {
   }
 }
 
+/**
+ * `--dry-run` prints the model's own numbers and emits nothing — the verification surface every
+ * stage-3 plan item's "verify by hand" column names. It exits before the live loop starts.
+ *
+ * `--hours N` sets the window (default 24) and `--from <iso>` its start, which otherwise is the
+ * most recent account-local midnight so that the hour rows line up with §4.1's hourly table.
+ */
+function dryRunOptions(argv: readonly string[]): DryRunOptions | null {
+  if (!argv.includes('--dry-run')) return null;
+  const value = (flag: string): string | undefined => {
+    const i = argv.indexOf(flag);
+    return i === -1 ? undefined : argv[i + 1];
+  };
+  const hoursArg = value('--hours');
+  const hours = hoursArg === undefined ? 24 : Number(hoursArg);
+  if (!Number.isFinite(hours) || hours <= 0) throw new Error(`--hours ${hoursArg}: not a positive number`);
+  const fromArg = value('--from');
+  const fromMs = fromArg === undefined ? localMidnightAtOrBefore(Date.now()) : Date.parse(fromArg);
+  if (!Number.isFinite(fromMs)) throw new Error(`--from ${fromArg}: not a parseable instant`);
+  return { seed: SEED, hours, fromMs };
+}
+
+const dry = dryRunOptions(process.argv.slice(2));
+if (dry !== null) {
+  const started = Date.now();
+  arrivalProcess(dry);
+  console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
+  process.exit(0);
+}
+
 console.log(
-  `[sim] ${AD_ID} at ${RATE_PER_S.toFixed(4)} impr/s (${IMPR_PER_DAY}/day) → ${INGEST_URL}` +
-    ` · seed '${SEED}' · replaying the last ${CATCHUP_S}s`,
+  `[sim] ${AD_ID} on ${AD.channel} at ${BASE_IMPR_PER_DAY[AD_ID]}/day nominal → ${INGEST_URL}` +
+    ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week, NegBinomial(λ, α=8)` +
+    ` · replaying the last ${CATCHUP_S}s`,
 );
 
 const timer = setInterval(() => void tick(), TICK_MS);
