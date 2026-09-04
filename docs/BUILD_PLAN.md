@@ -23,8 +23,11 @@ orphaned.
 `feat(signal): SSE transport — B09, closes P9`. (`CLAUDE.md`'s illustrative `P5.3` predates this
 document; `B##` is the plan item id, `P##` the scope item it advances.)
 
-**Per chunk, per `CLAUDE.md` §5:** announce, build, report, wait. On "ok": commit, tick the box
-here, stop. No chunk proceeds without approval.
+**Per GROUP, per `CLAUDE.md` §5 as amended by D48** (2026-09-04): announce the group, build it,
+report once with a **per-chunk** verification block, wait. On "ok": commit **per chunk**, tick each
+box here, stop. A group is **3–5 related chunks and never crosses a stage boundary**. **B20, B24,
+B34, B35, B36 and B37 stay single-gated** (§13 named them). No group proceeds without approval, and
+a group stops mid-build for a decision, a wrong design or a new dependency.
 
 **Flags column.** `HR1`–`HR8` are the hard requirements in `CLAUDE.md` §6, in that order:
 
@@ -135,6 +138,17 @@ appears in B15 from the decision log, and never before.
 
 The whole server-side model, verified by `curl` and `sqlite3`. No new UI in this stage — the
 skeleton from stage 1 keeps working throughout and the numbers get richer.
+
+**The five gates for this stage** (D48). Fourteen chunks, five approvals:
+
+| Gate | Chunks | The one concern |
+|---|---|---|
+| **G1** | B12 + B13 + B14 | Config becomes real: the fold, the compare-and-swap, the endpoint |
+| **G2** | B15 + B16 + B17 | The portfolio exists, and click + spend + attribution land |
+| **G3** | B18 + B19 | Conversions: cohort placement and orphans |
+| **G4** | **B20 alone** | Restatement — §13's hardest chunk, and single-gated for that reason |
+| **G5** | B20a + B21 + B22 + B23 | The timestamp module, settlement on the read side, verify, replay |
+| **G6** | **B24 alone** | The P14 agreement sweep — the gate that guards everything after it |
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
@@ -273,6 +287,11 @@ The deep surface, per D1. Read-only — no levers yet.
 > over to B36 until both are put to Seno and answered** — recommendations and full analysis are in
 > `docs/OPEN_QUESTIONS.md` § Wave 7 and need only be re-presented, not rewritten.
 >
+> **This gate now carries three items, not two** (D49/D50, 2026-09-04):
+> **(3) re-decide D49** — §12's cut line was held intact rather than spent, to be re-decided here
+> against measured velocity; and **(4) the B36 group creates `docs/DEMO.md`** and every stage-4/5
+> group from here on appends its walkthrough steps to it and says so in its report (**D50**).
+>
 > Until then, nothing in B01–B35 installs a chart or styling library or hand-rolls anything that
 > pre-empts either choice; a chunk needing styling before B36 uses unstyled HTML and says so.
 
@@ -352,7 +371,7 @@ surfaces on top of it, plus D1's one read-only Workbench screen.
 | [ ] | **B58** | README part 1 — design notes: the three-way split, the persistence boundary and what is recomputable, the aggregation strategy, plus `SCOPE.md` §2–§4 **verbatim** | `README.md` | The `SCOPE.md` block matches byte for byte between the `README-VERBATIM` markers | D§1, §3, §4; Sc§2–4 | **HR8** |
 | [ ] | **B59** | README part 2 — the misbehaviour table verbatim, the named limits (retractions, emitter loss, gap detection, USD-only, audience overlap, **`payload_json` is a re-serialisation, not the received bytes** — B05), and the extensions register E1–E15 / I1–I19 assembled from `BRIEF_GAPS.md` | `README.md` | Every row in D§6 present; every extension has a justification row; retractions named as **breaking**, not hidden | D§6, §12 | **HR4** |
 | [ ] | **B60** | README part 3 — the **life of one event** with real ids captured from a real run, the component-performance query run against real data with its output, and the copy-on-write defence with its honest scope note | `README.md` | Every id in the trace resolves in the running app; the SQL runs and returns the printed rows | D§9, §10.4, §8 | **HR5** |
-| [ ] | **B61** | Demo script: the ordered walkthrough, including the **refresh test and the restart test** as written steps a stranger can follow | `docs/DEMO.md` | Follow it cold, start to finish, on a clean clone, and time it | — | **HR1** |
+| [ ] | **B61** | Demo script: the **final ordered pass** over `docs/DEMO.md`, including the **refresh test and the restart test** as written steps a stranger can follow. **D50: the document is written incrementally from the B36 group onward** — every stage-4/5 group appends its steps as it lands and says so in its report — so this chunk is a tidy-up, not a write-from-nothing | `docs/DEMO.md` | Follow it cold, start to finish, on a clean clone, and time it | — | **HR1** |
 | [ ] | **B62** | AI process artifact: export sessions 04–06 to `docs/ai-sessions/`; final `STATUS.md` and `CHEATSHEET.md` refresh | `docs/ai-sessions/`, `docs/STATUS.md`, `docs/CHEATSHEET.md` | Six captures, one per phase; the cheatsheet still fits on one screen | `CLAUDE.md` §9 | — |
 
 > ### ▶ Demo checkpoint 7 — *"shippable"*
@@ -430,6 +449,12 @@ arithmetic, not an oversight. Cutting either means reopening a decision, not tak
 the order of 6,000 lines of diff. The distribution is deliberately uneven: stage 0 is three chunks
 because it has no checkpoint to earn, and stage 2 is thirteen because it is where the model either is
 or is not correct.
+
+**What was actually done, 2026-09-04 (D48/D49).** The rate was measured — 12 chunks in one day,
+52 left — and the response was **not** to cut: the round-trip, not the building, was the serial
+cost, so the gate moved from the chunk to the group (**D48**) and the cut line below was held
+**intact** as insurance to be re-decided at the B36 gate (**D49**). The list below therefore
+remains unspent, and step 4 is unchanged.
 
 **If the rate is lower than assumed**, the order of response is:
 
@@ -594,6 +619,12 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   next tick, never swallowed** (DESIGN §11 backpressure point 1) — a batch dropped on the floor is
   indistinguishable from the 0.2% emitter-side loss §13 injects on purpose, which is the one
   failure the app has no way to see (§6).
+
+- **The gate is the GROUP, not the chunk** (**D48**, at the B11 close). 3–5 related chunks per
+  gate, never crossing a stage boundary; one report with a **per-chunk** verification block; one
+  "ok"; still **one commit and one tick per chunk**. **Single-gated regardless: B20, B24, B34,
+  B35, B36, B37** — §13 named them. A group stops mid-build for a decision, a wrong design or a
+  new dependency. Verification is **not** batched: that is what keeps the trade to latency only.
 
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.

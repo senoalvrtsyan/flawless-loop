@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D47 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D50 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -110,6 +110,9 @@ level — and not a severity.
 | D47 | The `resnapshot` threshold, and how the cursor reaches the server | **ACCEPTED — 2,000 rows**, plus Seno's `max(header, query)` amendment | 2026-09-04 |
 | F4 | D44/D45 are deferred, not open | **DECIDED** | 2026-09-04 |
 | U8, U9 | Store path `data/loop.sqlite` · `ExperimentalWarning` left visible | **ACCEPTED** — ratified at B02 | 2026-09-04 |
+| D48 | Approval granularity: chunk-gated or group-gated | **ACCEPTED — B** (group-gated, chunk-committed, five solo) — **amends `CLAUDE.md` §5** | 2026-09-04 |
+| D49 | Take §12's cut line now, or hold it | **ACCEPTED — C** (hold to the B36 gate; nothing cut) | 2026-09-04 |
+| D50 | Where the demo script sits in the order | **ACCEPTED — B** (B61 runs as `docs/DEMO.md` from B36) | 2026-09-04 |
 
 ---
 
@@ -2329,3 +2332,187 @@ The threshold is on the quantity that actually costs — rows, not elapsed seque
 chooses between: above roughly one portfolio-hour of rows, replaying transfers more than
 re-snapshotting would. And the cursor is taken as the max of two independently-true lower bounds,
 because the browser's `EventSource` cannot send a header on the connect that matters most.
+
+---
+
+# Wave 9 — Phase 5 process (D48–D50)
+
+Three **process** decisions, raised at the B11 close and ratified the same day. They are here rather
+than only in a chat message because **D48 amends `CLAUDE.md` §5**, and a change to the standing
+contract that lives nowhere is the drift §3 exists to prevent.
+
+Full option analysis: `OPEN_QUESTIONS.md` § Wave 9, per §3's compression allowance.
+
+### Wording of record
+
+**One sentence ratified all three.** Recorded as a mapping rather than restated in each entry's
+prose, per `CLAUDE.md` §3.
+
+| Decision | Chosen | Seno's words |
+|---|---|---|
+| **D48** | **B** — group-gated, chunk-committed, five solo exclusions | *"move with your recommendtions"* |
+| **D49** | **C** — hold the cut line until the B36 gate | *(same sentence)* |
+| **D50** | **B** — B61 becomes a running document from B36 | *(same sentence)* |
+
+The sentence ratified the recommendation of each decision as written above it, and nothing wider.
+Where a later chunk needs a rationale in Seno's words, this is the whole of it — the reasoning below
+is mine, presented and accepted, not quoted.
+
+---
+
+## DECISION #48 — Approval granularity: chunk-gated or group-gated
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Tag:** [LOAD-BEARING] ·
+**Amends:** `CLAUDE.md` §5
+
+### Question
+
+`CLAUDE.md` §5 gates every chunk on an explicit "ok". Twelve chunks landed on 2026-09-04 and **52
+remain** against a 2026-09-08 demo. Does the gate stay per chunk?
+
+### The measurement it rests on
+
+The building is not the cost. Each chunk costs announce → build → report → Seno reads and
+independently re-runs → "ok" → commit → tick. The code is minutes; the **round-trip is the serial
+bottleneck**. Chunk *size* is what makes a diff reviewable; chunk *gating* is what makes it slow.
+Only the first is load-bearing, so only the second was changed.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Keep chunk-gated — 52 more gates | Does not fit the runway; forces cuts later under pressure |
+| **B** | **Group-gated, chunk-committed** — 3–5 chunks per gate, one commit per chunk | **CHOSEN** |
+| C | Group-gated *and* group-committed | Rejected — destroys the per-chunk traceability that is itself a deliverable (L153) |
+| D | Widen chunks to ~20 larger ones | Rejected — trades review *quality* for speed, where B trades only *latency* |
+
+### What was chosen
+
+**Group-gated, chunk-committed**, with a written exclusion list — the grouping is safe only because
+of what stays solo, so the two halves are one decision.
+
+1. **A group is 3–5 related chunks and never crosses a stage boundary.** Announce the group, build
+   it, report once with a **per-chunk** verification block, one "ok" covers the group.
+2. **Commits stay per chunk** — own message referencing the plan item, own `BUILD_PLAN.md` tick.
+3. **Five chunks stay single-gated**, being the ones §13 already named as invisible-when-wrong or
+   decision-owing: **B20** (restatement — the hardest chunk, bugs invisible until B24), **B24** (the
+   P14 agreement sweep — the gate that guards everything after it), **B34** and **B35** (backfill
+   and the `T0` seam — a wrong seam makes `as_of` silently meaningless rather than broken), and
+   **B36**/**B37** (they need the deferred D45 and D44 answers, so they are gates already owed).
+4. **A group stops early, mid-build, if** a chunk needs a decision (§3), reveals the design is wrong
+   (§5), or wants a new dependency. The remainder of the group is re-announced after the answer.
+5. **Everything else in §5 and §10 is unchanged** — the ~150-line ceiling per chunk, one concern per
+   chunk, no drive-by refactors, every chunk leaving the app runnable, D7, the traps discipline.
+
+### Consequences
+
+1. Gates fall from 52 to roughly 13. Stage 2's fourteen chunks become **five**: `B12+B13+B14` ·
+   `B15+B16+B17` · `B18+B19` · **`B20` solo** · `B20a+B21+B22+B23` then **`B24` solo**.
+2. **Detection moves later, and that is the whole of what was traded.** Seno's re-runs caught real
+   silent bugs at B07 and B10a. The mitigation is that verification is *not* batched: every group
+   report carries each chunk's own verification commands, so one pass re-runs all of them. Stage 2
+   is `curl` + `sqlite3` only, so a group's verification is one copy-pasteable block.
+3. `BUILD_PLAN.md` §14 and `STATUS.md`'s "the convention" paragraph both restate the chunk gate and
+   are amended with it.
+4. The AI process artifact is unaffected: per-chunk commits, per-chunk plan items, one report per
+   group instead of per chunk.
+
+### What it forecloses
+
+**Nothing, and that is the argument for it.** It is per-group and reversible mid-stage — "solo from
+here" restores option A with no cost. Option C would have foreclosed per-chunk history permanently,
+which is why it was rejected despite being marginally faster.
+
+### How I'd defend this in review
+
+The bottleneck was measured before it was changed, and the change was aimed at the part of the loop
+that had no defensible value — waiting — while the parts that catch invisible failures were left
+intact: chunk size, per-chunk commits, per-chunk verification steps, and single gates on precisely
+the five chunks the plan had already flagged as the ones whose bugs do not announce themselves.
+
+---
+
+## DECISION #49 — Take the cut line now, or hold it in reserve
+
+**Status:** ACCEPTED — option C · **Date:** 2026-09-04
+
+### Question
+
+`BUILD_PLAN.md` §13 says the response to a low rate is to take §12's cut line top-down. With 52
+chunks left, is it taken now?
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Cut rows 1–4 now (B48 markers, B40 smoothing, B45 fatigue flag, most of B44 telemetry) | Rejected — row 3 is HR7's read-side interpretation, which §12 itself calls a real loss |
+| B | Cut rows 9–11 now (one AR(1), 5-day backfill, 6 ads) | Rejected — row 11 costs three demo moments; cheap in time, expensive in evidence |
+| **C** | **Cut nothing yet; decide at the stage 3 → 4 seam** | **CHOSEN** |
+
+### What was chosen
+
+**Hold the whole cut line until the B36 gate.** Nothing is cut; `STATUS.md`'s "cut line status"
+stays **nothing cut**.
+
+### Consequences
+
+1. D48 is the acceleration; the cut line stays **insurance**, spendable in one minute at B36 when
+   the real rate is known rather than guessed.
+2. **The B36 gate now carries three obligations, not one**: re-raise D44 and D45 (already required
+   by F4 and `BUILD_PLAN.md` §7), and re-decide D49 against measured velocity.
+3. Rows 1–4 remain the first to go, in that order, and each still owes a README line per §8.
+
+### What it forecloses
+
+Nothing. Every row stays exactly as droppable as it was; the decision is only *when* to look.
+
+### How I'd defend this in review
+
+Cutting scope is irreversible in evidence and reversible in nothing; cutting latency is reversible
+in both directions. We took the reversible saving first and kept ~6 chunks of insurance intact for
+the moment we would actually know whether it was needed.
+
+---
+
+## DECISION #50 — Where the demo script sits in the order
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04
+
+### Question
+
+**B61** is the ordered walkthrough *"a stranger can follow"* and is second-to-last in the plan. Seno
+also has to learn the app before the demo. Does B61 stay where it is?
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | Leave B61 last | Rejected — learning time becomes whatever survives on the final day |
+| **B** | **B61 becomes a running document from the B36 gate onward** | **CHOSEN** |
+| C | Move B61 to immediately after B50 | Rejected — B51–B55 are the most demo-worthy part and would not be in it yet |
+
+### What was chosen
+
+From **B36** on, every stage-4 and stage-5 group **appends its walkthrough steps to `docs/DEMO.md`
+as it lands**. B61 becomes a tidy-up and a final ordering pass rather than a write-from-nothing
+chunk.
+
+### Consequences
+
+1. **Each group report from B36 onward owes one line** saying what it appended to `docs/DEMO.md`.
+   Without that line the document silently stops being maintained, which is the failure mode of
+   every running document.
+2. The refresh and restart tests (HR1) are written into it the moment the surface exists, not
+   reconstructed at the end from memory.
+3. B62's final refresh gets smaller — the last thing worth having to write on demo eve.
+4. `docs/DEMO.md` is created by the **B36 group**, not now: there is no walkthrough to write until a
+   surface exists.
+
+### What it forecloses
+
+Nothing. B61 still exists as a chunk and still owns the final ordered pass.
+
+### How I'd defend this in review
+
+The deliverable that teaches someone the app is worth more written while the app is being built than
+recalled afterwards — and it is the one artifact whose accuracy decays if it is written last.

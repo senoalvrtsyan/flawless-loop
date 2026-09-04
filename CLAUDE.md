@@ -128,9 +128,22 @@ fine and encouraged; files on disk outside `docs/` are not.
 - **Announce, build, report, wait.** Before each chunk: one line on what it
   covers and which `BUILD_PLAN` item it closes. After: what changed, how to
   verify it by hand, what you deliberately left out.
-- **Do not proceed to the next chunk without "ok" / "approved".**
-- On approval: commit with a message referencing the plan item
-  (`feat(signal): SSE transport — closes P5.3`), then tick the item in
+- **The gate is the GROUP, not the chunk** (**D48**, 2026-09-04, amending this
+  section). A group is **3–5 related chunks and never crosses a stage
+  boundary**: announce the group, build it, report **once** with a **per-chunk**
+  verification block, and one "ok" covers the group. Chunk size, per-chunk
+  commits and per-chunk verification are unchanged — only the waiting is
+  removed. Do not proceed past a **group** without "ok" / "approved".
+  - **These stay single-gated**, being the chunks `BUILD_PLAN.md` §13 already
+    named as invisible-when-wrong or decision-owing: **B20** (restatement),
+    **B24** (the P14 agreement sweep), **B34** and **B35** (backfill and the
+    `T0` seam), **B36** and **B37** (they owe the deferred D45 / D44 answers).
+  - **A group stops early, mid-build**, if a chunk needs a decision (§3),
+    reveals the design is wrong, or wants a new dependency. Re-announce the
+    remainder after the answer.
+  - Reversible at any point: "solo from here" restores the per-chunk gate.
+- On approval: commit **per chunk**, with a message referencing the plan item
+  (`feat(signal): SSE transport — closes P5.3`), then tick each item in
   `docs/BUILD_PLAN.md`, then stop and take the next instruction.
 - **No drive-by refactors.** No renaming, reformatting, or "while I was in
   there" changes. Propose them as separate chunks.

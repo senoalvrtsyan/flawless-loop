@@ -2688,3 +2688,123 @@ X" — the query cursor because the snapshot returned it, the header because the
 id it actually dispatched — so the max is the **tightest true lower bound**. `min` would be
 correct-but-redundant on every reconnect, and on a long-lived session the extra rows since the
 original snapshot could trip the 2,000 threshold and force a resnapshot for no reason.
+
+---
+
+## Wave 9 — Phase 5 process (D48–D50)
+
+**Raised at the B11 close, 2026-09-04, and ratified the same day** — `docs/DECISIONS.md` § Wave 9.
+Kept here because `CLAUDE.md` §3's compression allowance requires the full option analysis to
+survive somewhere; the entries there point at this section.
+
+These three are **process** decisions, not design decisions. They are in this file anyway because
+D48 amends `CLAUDE.md` §5 — the standing contract — and a change to the contract that lives only in
+a chat message is exactly the drift §3 exists to prevent.
+
+### The measurement that prompted them
+
+Twelve chunks landed on 2026-09-04 (every Phase-5 commit carries that date). **52 remain.** At that
+rate the build alone consumes the entire runway to a 2026-09-08 demo, with no slack, no time for
+Seno to learn the app, and no room for `BUILD_PLAN.md` §13's own warning that **B20 should be
+expected to want a follow-up chunk**.
+
+The diagnosis that matters: **the building is not the cost.** Each chunk costs announce → build →
+report → Seno reads and independently re-runs → "ok" → commit → tick. The code is minutes; the
+**round-trip is the serial bottleneck**, and there were 52 left. Chunk *size* is what makes a diff
+reviewable. Chunk *gating* is what makes it slow. They are separable, and only the first is
+load-bearing.
+
+### D48 — Approval granularity: chunk-gated or group-gated
+
+**Blocked:** every remaining chunk, and it is an amendment to `CLAUDE.md` §5's *"do not proceed to
+the next chunk without ok"*.
+
+**Context.** §5's chunk gate has earned its keep: Seno's independent re-runs found the B10a cursor
+coercion (`Number('1e3')` → 1000, and a present-but-empty cursor read as absent) and the three B07
+window-bound failures. All were silent. What the gate costs is 52 more serial round-trips.
+
+**A) Keep chunk-gated.** 52 more gates.
+*Pros:* earliest possible detection; the artifact stays exactly as designed.
+*Cons:* does not fit the runway. Forces cuts later, under deadline pressure, which is the worst
+moment to choose them.
+*Forecloses:* the learning day.
+*Reversal cost:* none — status quo.
+
+**B) Group-gated, chunk-committed.** Build 3–5 related chunks in one pass; report once with a
+per-chunk verification block; one "ok" covers the group; still one commit per chunk, with its own
+message and its own `BUILD_PLAN.md` tick.
+*Pros:* gates fall from 52 to ~13. Commits, diffs, plan items and the AI process artifact are all
+unchanged — only the waiting is removed. Each chunk keeps the ~150-line ceiling, so nothing becomes
+an unreviewable blob.
+*Cons:* a design flaw found at chunk 3 of 5 means two chunks are already built on it. Seno's
+independent re-run happens later, so a silent bug lives longer.
+*Forecloses:* nothing permanently; it is per-group and reversible mid-stage.
+*Reversal cost:* zero — "solo from here" restores option A.
+
+**C) Group-gated and group-committed** (one commit per group).
+*Pros:* marginally faster than B.
+*Cons:* destroys per-chunk traceability, which is itself a deliverable (the brief's AI process
+artifact, L153). Buys minutes, costs evidence.
+*Reversal cost:* high — history cannot be un-squashed.
+
+**D) Widen the chunks instead** — fold 52 into ~20 larger ones.
+*Pros:* fewer gates too.
+*Cons:* breaks §5's line ceiling and its "one reviewable concern". Trades review *quality* for
+speed, where B trades only review *latency*.
+*Reversal cost:* medium — an oversized chunk has to be split after the fact.
+
+**Recommendation: B, with a written exclusion list**, because the grouping is only safe by virtue of
+what stays solo. Groups never cross a stage boundary, and five chunks stay single-gated — the same
+five `BUILD_PLAN.md` §13 already names as the places where wrongness is invisible or a decision is
+owed: **B20** (restatement, the hardest chunk, bugs invisible until B24), **B24** (the agreement
+sweep, the gate guarding everything after it), **B34/B35** (backfill and the `T0` seam — a wrong
+seam makes `as_of` silently meaningless rather than broken), and **B36/B37** (they need the D45 and
+D44 answers anyway, so they are gates we already owe rather than gates we are adding).
+
+### D49 — Take §12's cut line now, or hold it in reserve
+
+**Blocked:** nothing yet; blocks stage-4 planning.
+
+**Context.** `BUILD_PLAN.md` §13 prescribes the response to a low rate: take §12's cut line
+top-down. Rows 1–4 cost presentation only; rows 9–11 are fallbacks D37 and `SIMULATOR.md` §15.2
+pre-ratified.
+
+**A) Cut rows 1–4 now** — B48 generation markers, B40 EWMA smoothing, B45 the fatigue flag, most of
+B44's telemetry. ~3 chunks and change.
+*Cons:* row 3 is the read-side interpretation of HR7 — §12 calls it "a real loss to the
+domain-modelling story".
+
+**B) Cut rows 9–11 now instead** — one AR(1) process, 5-day backfill, 6 ads.
+*Cons:* row 11 costs three demo moments (cross-ad transfer, copy-on-write, "burned here, fresh
+there"). Cheap in time, expensive in evidence.
+
+**C) Cut nothing yet.** Hold the line as the buffer B48/B40/B45 was always meant to be, and decide
+at the stage 3 → 4 seam on real velocity.
+
+**Recommendation: C.** D48 buys back more time than the entire top of the cut line does, and unlike
+a cut it costs no evidence. The cut line is worth more held than spent: ~6 chunks of insurance
+spendable in one minute at the B36 gate, when the real rate is known instead of guessed. Cut now and
+the insurance is gone with 49 chunks still to go.
+
+### D50 — Where the demo script sits in the order
+
+**Blocked:** nothing. Changes the plan order.
+
+**Context.** Seno needs to learn the app for the demo. **B61** is *"the ordered walkthrough,
+including the refresh test and the restart test, as written steps a stranger can follow"* — and it
+is currently second-to-last, so the artifact he would learn from arrives after everything else.
+
+**A) Leave B61 last.** *Cons:* learning time is whatever survives on the final day.
+
+**B) B61 becomes a running document from the B36 gate onward** — each stage-4/5 group appends its
+walkthrough steps as it lands; B61 becomes a tidy-up rather than a write-from-nothing chunk.
+*Cons:* touches one document across several chunks instead of once, so each group's report owes a
+line saying what it appended.
+
+**C) Move B61 to immediately after B50**, before stage 6. *Cons:* the trace surfaces (B51–B55) are
+the most demo-worthy part and would not be in it yet, so the script needs a revisit regardless.
+
+**Recommendation: B.** It costs no extra chunk, and the walkthrough then exists in draft from the
+first day the UI is real — so learning the app is reading a document that grows under you, not
+waiting on a chunk that has to complete first. It also shrinks B62's final refresh, which is the
+last thing anyone wants to be writing on demo eve.

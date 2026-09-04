@@ -41,13 +41,13 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
 | `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I19**) — the assembly source for the README's extensions section. |
-| `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**7** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
-| `docs/DECISIONS.md` | Ratified only — **D1–D43, T1, F1–F4, U8–U9**. **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
+| `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
+| `docs/DECISIONS.md` | Ratified only — **D1–D50, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
 | `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale as of D41–D43/F4/U8–U9**, see "What is owed". |
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · §7 the D44/D45 gate before B36 · §11 scope coverage · §12 cut line · §13 schedule risk · **§14 the traps**. |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps**. |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
 | **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
@@ -161,6 +161,12 @@ one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind
   Last-Event-ID)`**, replay is a store query with `LIMIT 2001`, and `resnapshot` fires past **2,000
   rows**, above the log's high-water mark, or on a non-numeric cursor. The threshold is on rows
   because seq distance mispredicts the cost by orders of magnitude in both directions.
+- **D48–D50 (2026-09-04, at the B11 close — PROCESS, not design)** — the gate is the **group**, not
+  the chunk: 3–5 related chunks per approval, never crossing a stage boundary, one report with a
+  **per-chunk** verification block, still **one commit and one tick per chunk**; **B20, B24, B34,
+  B35, B36, B37 stay single-gated**. §12's cut line is **held intact**, to be re-decided at the B36
+  gate. **B61 becomes a running `docs/DEMO.md`** from the B36 group onward. **D48 amends
+  `CLAUDE.md` §5** — read §5 as it now stands, not as remembered.
 - **U1–U7**, and **U8–U9** (2026-09-04) — store path `data/loop.sqlite`; `ExperimentalWarning` left
   visible.
 - **8 cheap defaults** — ratified as a block.
@@ -212,7 +218,8 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 |---|---|
 | **Current stage** | **Stage 2 — the full write path (B12–B24)**, not started. Stage 1 closed at B11. |
 | **Last completed chunk** | **B11** — the simulator as a separate process: keyed RNG (`splitmix64`, named streams), `a_12` at a constant 20,000/day, 1 s tick, batched POST, held-and-retried on failure. Commit `b63a16f`. |
-| **Next chunk** | **B12** — `DecisionBody` types and `fold()`: one pure function, exhaustive over the six actions, including the unreachable `archived` branch written to explain itself. Files `src/shared/decisions.ts`, `src/server/fold.ts`. **The first chunk that owes automated tests (D43), and it has three named targets, not one** — see "What is owed". |
+| **Next gate** | **G1 = B12 + B13 + B14** (D48 — the gate is now the group). Config becomes real: `fold()`, `applyDecision()`'s compare-and-swap, then `POST`/`GET /api/decisions`. **B12 is also the first chunk that owes automated tests (D43), with three named targets, not one** — see "What is owed". |
+| **Stage 2's six gates** | **G1** B12–B14 · **G2** B15–B17 · **G3** B18+B19 · **G4** **B20 alone** · **G5** B20a+B21–B23 · **G6** **B24 alone**. `BUILD_PLAN.md` §5 carries the table. |
 | **In flight** | nothing |
 | **Chunks ticked** | **12 / 64** (B01–B09, B10a, B10b, B11) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
@@ -220,10 +227,18 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
 | **Plan edits, cont.** | **B20a added** (2026-09-04, Seno's call, after B07): `src/shared/time.ts` — one implementation of the timestamp invariant (`isCanonicalIso` / `toCanonicalIso` / `floorMinute`), inserted immediately **before B21** because B21's horizon sweep would otherwise be the *fourth* copy of that rule (ingest's round-trip B05, `apply()`'s regex B06, snapshot's inline snap B07). Lettered, not renumbered: `B21`–`B62` are cited by id across four documents. |
 
-**The convention.** A chunk is done when: it is announced, built, reported, and Seno says ok. Then
-commit referencing it, tick the box in `docs/BUILD_PLAN.md`, update this table, and **stop and take
-the next instruction**. Never chain two chunks on one approval. Seno independently re-runs the
-verification on every chunk — expect that and make the steps reproducible.
+**The convention, as amended by D48.** A **group** is done when: it is announced, built, reported
+**once with a per-chunk verification block**, and Seno says ok. Then commit **per chunk**, tick each
+box in `docs/BUILD_PLAN.md`, update this table, and **stop and take the next instruction**. Never
+chain two **groups** on one approval, and never widen a group past 5 chunks or across a stage
+boundary. **B20, B24, B34, B35, B36, B37 are single-gated.** A group **stops mid-build** if a chunk
+needs a decision (§3), reveals the design is wrong, or wants a new dependency.
+
+**What did NOT change, and it is the reason the trade is only latency:** chunk size (~150 lines, one
+concern), per-chunk commits, and **per-chunk verification**. Seno independently re-runs the
+verification — that is what caught the B07 window bounds and the B10a cursor coercion, both silent —
+so a group report must make every chunk's steps separately reproducible, ideally as one
+copy-pasteable block. Reversible at any time: **"solo from here"** restores the per-chunk gate.
 
 ## Traps that will not fail loudly
 
@@ -326,9 +341,15 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
-- **`docs/CHEATSHEET.md` is one pass behind.** It does not yet carry D41–D43, F4 or U8–U9. §9 scopes
-  its refresh to **phase** closes, and stage 0 is not a phase — so this is correct, not neglected.
-  It gets refreshed at the Phase 5 close, or sooner if Seno wants to revise from it.
+- **`docs/CHEATSHEET.md` is one pass behind.** It does not yet carry D41–D43, F4, U8–U9, D46, D47
+  or **D48–D50**. §9 scopes its refresh to **phase** closes, and a stage is not a phase — so this is
+  correct, not neglected. It gets refreshed at the Phase 5 close, or sooner if Seno wants to revise
+  from it. **D48–D50 are process, not design**, so they belong in table 1 only if a decision's
+  defence is wanted for them; the demo is defended from the design decisions.
+- **`docs/DEMO.md` does not exist yet and is owed from the B36 group onward** (D50). Every stage-4
+  and stage-5 group appends its walkthrough steps as it lands **and says so in its report** — a
+  running document nobody reports on is a running document that quietly stops. B61 is then the final
+  ordered pass, not a write-from-nothing chunk.
 - **`SCOPE.md` §2–§4 is README-verbatim.** If scope moves, that block moves with it, and that is a
   README change.
 - **`BRIEF_GAPS.md` § Extensions is the README's assembly source.** Any new extension in Phase 5
@@ -419,39 +440,48 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B12, build it, report, wait.** Nothing needs deciding first.
+**Announce G1, build it, report once, wait.** Nothing needs deciding first. **The gate is now the
+group** (D48) — read `CLAUDE.md` §5 as it stands, not as remembered.
 
-**B12 opens stage 2** — the full write path, verified by `curl` and `sqlite3` only, no UI beyond
-stage 1's single number until B36. Read **`DESIGN.md` §7 and §2.3** before writing it. Scope from
-the plan row and no wider: `DecisionBody` types and **`fold()` — one pure function, exhaustive over
-the six actions**, including the **unreachable `archived` branch written to explain itself** (F1).
-Files `src/shared/decisions.ts`, `src/server/fold.ts`.
+**G1 = B12 + B13 + B14**, and the one concern is *config becomes real*. It opens stage 2 — the full
+write path, verified by `curl` and `sqlite3` only, no UI beyond stage 1's single number until B36.
+Read **`DESIGN.md` §7, §2.3 and §2.4** before writing it.
 
-Three things that are already true and constrain it:
+| Chunk | Scope, from the plan row and no wider | Files |
+|---|---|---|
+| **B12** | `DecisionBody` types and **`fold()`** — one pure function, exhaustive over the six actions, including the **unreachable `archived` branch written to explain itself** (F1) | `src/shared/decisions.ts`, `src/server/fold.ts` |
+| **B13** | **`applyDecision()`** — compare-and-swap preconditions on `from_cents`/`from_id`, write `ads`, close generation *n* and open *n+1*, one transaction | `src/server/apply.ts` |
+| **B14** | **`POST /api/decisions`** (returns the new state in the same txn) and **`GET /api/decisions`** | `src/server/index.ts` |
+
+Four things that are already true and constrain the group:
 
 - **B12 is the first chunk that owes automated tests, and it owes three targets, not one** (D43,
-  and the criterion is *"tests only where a wrong answer is invisible"*): `isCanonicalIso` (owed
-  from B05 — loosened, the event is accepted, `ts_effective` silently takes the later instant, and
-  **B24's sweep re-derives from that same column and agrees with itself**), `readCursor` (owed from
-  B10a, exported for this reason), and the fold itself. `npm test` is `node --test` with no test
-  files yet, so this chunk creates that surface.
-- **`fold()` must stay pure and must not write anything.** D7: `ads` and `config_generations` are
-  projections and `apply()` is their only writer. The fold decides *what* the config becomes; B13
-  is what persists it.
-- **Widening `SUPPORTED` is not part of this chunk.** `ingest()` still accepts `impression` only;
-  click + spend land at **B16**, conversion at **B18** (the B16 split — see "Plan edits" above).
+  criterion: *"tests only where a wrong answer is invisible"*): **`isCanonicalIso`** (owed from B05 —
+  loosened, the event is accepted, `ts_effective` silently takes the later instant, and **B24's
+  sweep re-derives from that same column and agrees with itself**), **`readCursor`** (owed from
+  B10a, exported for this reason — `Number('1e3')` is 1000, and a present-but-empty cursor read as
+  absent), and the fold itself. `npm test` is `node --test` with no test files yet, so this group
+  creates that surface.
+- **`fold()` stays pure and writes nothing** (D7). `ads` and `config_generations` are projections and
+  `apply()` is their only writer: the fold decides *what* the config becomes, B13 persists it.
+- **Widening `SUPPORTED` is not in this group.** `ingest()` still takes `impression` only — click and
+  spend land at **B16**, conversion at **B18** (the B16 split; see "Plan edits" above).
+- **`src/server/apply.ts` already exists** (B06, the rollup writer). B13 adds to it; check what is
+  there before writing, and do not reshape what B06 built — that would be a drive-by refactor.
 
-Verify: `node --test` on a fixture sequence folding to the expected config, and the `archived`
-branch present, unreachable and commented.
+**Stop mid-group** if a chunk needs a decision, reveals the design is wrong, or wants a dependency.
 
-**Two things to know about the ground B12 stands on.** The simulator now emits continuously, so a
-store is never quiet while you work — `npm run sim`'s log is the fastest read on whether ingest is
-healthy. And **nothing yet stops emitting on a pause**: `GET /api/sim/world` is B29, so HR3's
+**After G1**: G2 = B15 + B16 + B17. Stage 2's remaining gates are in the "Build progress" table.
+
+**Two things to know about the ground stage 2 stands on.** The simulator now emits continuously, so
+the store is never quiet while you work — `npm run sim`'s log is the fastest read on whether ingest
+is healthy. And **nothing yet stops emitting on a pause**: `GET /api/sim/world` is B29, so HR3's
 *"pausing `a_12` stops its events"* is demonstrated end to end only from that chunk on.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 
-1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5. **In progress, 12/64** — stages 0 and 1 closed.
+1. **Phase 5 — implementation**, chunk by chunk under `CLAUDE.md` §5 as amended by D48.
+   **In progress, 12/64** — stages 0 and 1 closed.
 2. **Phase 6 — packaging:** README, demo script, the "life of one event" trace, the AI artifact.
    These are `BUILD_PLAN.md` stage 7 (B57–B62) rather than a separate effort.
 
@@ -459,7 +489,9 @@ For reference, the remaining gates in `CLAUDE.md` §4 order:
 
 Rules live in `CLAUDE.md`; these are the ones that bite hardest right now.
 
-- **Announce, build, report, wait.** Never chain two chunks on one approval. Commit only on "ok".
+- **Announce, build, report, wait — per GROUP** (D48). Never chain two groups on one approval;
+  never widen a group past 5 chunks or across a stage boundary. Commit only on "ok", and commit
+  **per chunk**. **B20, B24, B34, B35, B36, B37 are single-gated.**
 - **Small chunks, one concern, ≤ ~150 lines.** If a chunk is growing, stop and split it. Every chunk
   leaves the app runnable.
 - **No drive-by refactors, no new dependencies without a decision.**
