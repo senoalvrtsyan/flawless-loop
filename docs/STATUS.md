@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · STAGE 2 CLOSED · stage 3 next · 26 / 64 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · G7 CLOSED · 29 / 64 chunks**
 
 ---
 
@@ -103,14 +103,14 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | File | What it is |
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
-| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. |
+| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. **And §H (new, B25/B26): contradictions in our OWN design docs** — H1 the recovery half-life, H2 `spend`'s missing fee parameter. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
-| `docs/DECISIONS.md` | Ratified only — **D1–D55, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
-| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale as of D41–D43/F4/U8–U9/D54/D55**, see "What is owed". |
+| `docs/DECISIONS.md` | Ratified only — **D1–D56, T1, F1–F4, U8–U9** (D44/D45 deferred). **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
+| `docs/CHEATSHEET.md` | **One-page revise-from sheet.** Three tables. Refreshed at every **phase** close — **stale: its header still says "11 / 64 chunks", and D41–D43, F4, U8–U9 and D48–D56 are all missing.** Nine decisions behind, and its one-page hard limit will bind when they are added. See "What is owed". |
 | `docs/SCOPE.md` | Phase 1 output. What's real (**P1–P17**), what's sketched, what's cut. §2–§4 is README-verbatim. |
 | `docs/DESIGN.md` | **Phase 2 output.** The three-way split · DDL · persistence boundary · aggregation · late conversions end to end · the misbehaviour table · the fold · the reverse join · versioning · traceability · the flow diagram · extensions. |
 | `docs/SIMULATOR.md` | **Phase 3 output.** The seeded world · the rate equation · diurnal, channel, temperature · fatigue · novelty · pacing · the lag mixture · noise · injected misbehaviours · determinism · backfill and the seed path · state sync · scenario control · calibration, measured · the parameter appendix. |
-| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (22). |
+| `docs/BUILD_PLAN.md` | **Phase 4 output and the Phase 5 tracker.** 64 chunks — `B01`–`B62` **plus `B20a`**, with **B10 split into `B10a`/`B10b`**; per chunk: goal, files, manual verification, spec citation, hard-requirement flags, checkbox. §2 decisions · **§5 stage 2's six D48 gates** · §7 the B36 gate (now **four** items) · §11 scope coverage · §12 cut line (**held intact**, D49) · §13 schedule risk · **§14 the traps** (24) · **"The gate-margin check B34 owes"**. |
 | `docs/ai-sessions/` | The **AI process artifact** the brief asks for (L153): one terminal capture per phase, `00`–`04`, exported by Seno. Plus `PHASE_PROMPTS.md`. **All five are committed; nothing owed here.** |
 | **`package.json`, `tsconfig.json`, `.nvmrc`, `.gitignore`** | B01. Single package, three entry points, strict TS, Node 24 floor. |
 | **`src/server/db.ts`** | B02/B07. `openDb()` (four pragmas, throws if not WAL), `tx()` (BEGIN IMMEDIATE), **`readTx()`** (BEGIN DEFERRED — B07: a read must not take the write lock, and under WAL it needs no lock to get a stable snapshot), `DB_PATH`. |
@@ -143,7 +143,12 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/server/replay.ts`** | B23. `replay(descriptor)` — pure over a log prefix, **raw `signals` only, never `rollup_minute`** (§10.2: the display path and the check path must differ, or the walk-back compares the code to itself). The prefix bounds attribution as well as counting. Returns the counts **and** `contributing_event_ids`, which is the evidence half. No HTTP — the drill-down is B52/B53. |
 | **`src/server/*.test.ts`** | B12/B13/B17–B23. `npm test` = `node --test`, **76 tests**: `fold.test.ts` (12), `ingest.test.ts` (`isCanonicalIso`, 4), `stream.test.ts` (`readCursor`, 7), `apply-decision.test.ts` (8), `attribute.test.ts` (8), `conversion.test.ts` (11 — B18/B19, ingest→apply end to end), `restate.test.ts` (8 — B20, promotion and the D38 clock), `settlement.test.ts` (5 — B21), **`verify.test.ts` (7 — B22, including D55's build-failing tripwire)**, **`replay.test.ts` (6 — B23, including its own no-projection guard)**. D43's criterion governs what goes here, not a list. |
 | **`src/sim/index.ts`** | B11. The emitter: `a_12` only, impressions only, a **constant** 20,000/day (§2.3), 1 s tick at 1× wall clock, one batched POST per tick, `ts` = the second that has **closed** so I10 never clamps. The tick index is the **absolute unix second** — that, not the id alone, is what makes a restart's re-emission `duplicate_identical`. A failed POST is held and coalesced into the next tick. Env: `SIM_SEED`, `SIM_INGEST_URL`. Never opens the store (D32). |
-| **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. |
+| **`src/sim/rng.ts`** | B11. `SIMULATOR.md` §14's formula: `splitmix64(fnv1a64(seed ∥ stream ∥ parts))`, key parts NUL-joined so two entities cannot share one stream. `draw()` → `u ∈ [0,1)`; `derivedId()` → the same 64 bits as 16 hex chars. Keyed, not sequential, so a lever cannot reshuffle another ad's draws. **~2 µs a draw** — see the note in "Next action". |
+| **`src/sim/params.ts`** | B25/B26/B27. **§21's parameter appendix, transcribed** — diurnal weights and `Z`, `w_dow`, `α = 8`, `base_impr_per_day`, `served_fraction`, the `FATIGUE` constants, §5's channel matrix, §6's temperature matrix, the `NOISE` concentrations, `SPEND_TICK_S`. Nothing here is a choice and each number names its section. `p_fast` is the one §6 column still absent — B29 reads it. |
+| **`src/sim/rate.ts`** | B25. `d_c(h)` (account-local hour via `Intl`, offset cached per UTC hour), `w_dow`, `lambdaPerSecond()` and `negBinomial()` as a Gamma–Poisson mixture. `RateFactors` carries `phi` **declared and never passed** (D56), plus `nu`/`rho`/`demand` for B28/B32/B30. |
+| **`src/sim/fatigue.ts`** | B26. `pool()`, `phi()`, `phiAd()`, `rest()` (2^(−Δt/5 d)), `versionAdjusted()` (`r = 0.35`), `nominalAccrual()` and `adFatigue()`. Accrual is keyed by **(lineage × audience)**, both slots of every ad. `nominalAccrual()` is the projection §7.2 was calibrated with, **not** the measurement — B31 recomputes `F` from the signal log. |
+| **`src/sim/emit.ts`** | B27. `betaBinomial()` (Pólya urn), `logNormal()`, `pCtr()` (**where φ and ν enter — D56**), `pCvr()`, `orderValueCents()`, `clicksForTick()`, `cpmAccrualCents()`, `spendCents()`, `isSpendBoundary()`. |
+| **`src/sim/dry-run.ts`** | B25/B26/B27. **Stage 3's whole verification surface**, three sections from ONE simulation pass. Emits nothing. `arrivalProcess()` returns the per-ad tallies `clickAndCostPath()` prints; `fatigue()` diffs itself against §7.2 and prints **MATCH/DIFFERS** per row. |
 
 ## How to run what exists
 
@@ -153,6 +158,9 @@ npm run db:migrate    # creates data/loop.sqlite, applies both migrations
 npm run seed          # B15: the 12-ad world, as 24 backdated decisions. ONCE, on an empty store
 npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
 npm run sim           # the simulator alone, against an already-running server
+npm run sim -- --dry-run --hours 24     # B25-B27: emits NOTHING, prints the model vs SIMULATOR.md
+npm run sim -- --dry-run --hours 1      # ~1 s; everything but the hour-by-hour diurnal shape
+                                        # --from <iso> anchors the window; default is local midnight
 npm run typecheck     # tsc --noEmit, must be clean
 npm test              # node --test — 76 tests (D43's targets plus the write path)
 
@@ -398,12 +406,13 @@ now. Neither is a `DECISIONS.md` entry yet, and neither should be settled by dri
 
 | | |
 |---|---|
-| **Current stage** | **Stage 2 is CLOSED** — all six gates, B12–B24. **Stage 3 · the simulator (B25–B35)** is next and has not started. |
-| **Last completed chunk** | **B24** — the agreement sweep, commit `85059f9`. **Stage 2 closed with it.** G5's were `5bf1373`/`ec3808a`/`91d1c65`/`eafa9bf`; G4's `412a3b8`; G3's `beff2dc`/`061bb00`/`7a8d956`; G2's `dfca97a`/`955a74a`/`271496b`/`58d863b`; G1's `66afb5b`/`515a8cf`/`822cdaa`. |
-| **Next gate** | **B25 — the rate equation core**, first chunk of stage 3. `BUILD_PLAN.md` §5's gate table covered stage 2 only; **stage 3 has no gate table**, so group it under D48's own rule (3–5 related chunks, never across a stage boundary) and say which chunks the group is. **B34 and B35 stay single-gated.** |
+| **Current stage** | **Stage 3 · the simulator (B25–B35) is RUNNING.** Stage 2 closed with B24. |
+| **Last completed chunk** | **B27** — clicks, cost and the 60 s spend delta, commit `1ce29a7`. G7's others: B26 `ee9adb1`, B25 `52d7b29`, and **D56 plus the four doc corrections in `ea3557e`**, committed first because B27 was built on the answer. |
+| **Next gate** | **B28 + B29 + B30** is the natural next group (novelty, the conversion lag, the two AR(1) demand factors) — B28 attaches to `fatigue.ts`, B29 adds `lag.ts`, B30 adds `noise.ts` and **owns the `κ` gap §14 now records**. `BUILD_PLAN.md` §5's gate table covered stage 2 only; **stage 3 has no gate table**, so group under D48's own rule and say which chunks the group is. **B34 and B35 stay single-gated.** |
+| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ — *"the rate equation becomes real"*, **closed**. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it has fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **26 / 64** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B24) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **29 / 64** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B27) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B10 split into B10a/B10b** (2026-09-04, Seno's call, after B09): B10a is the **server-side** resume (`Last-Event-ID`, store replay, `resnapshot`), B10b the **client** (subscribe, merge, reconnect). B09 ran ~230 diff lines against the ~150 target and B10 whole would have been worse. |
@@ -425,8 +434,21 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Twenty-two now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Twenty-four now — the Phase 5 ones were
 found against the real store and are in no design document.
+
+**The two newest (B27), both found by reading the store rather than the code:**
+
+- **A derived `spend` delta must cover an interval the emitter EMITTED, not merely one it can
+  re-derive.** Needs BOTH boot alignment to a 60 s boundary AND the `tick − 60 >= FIRST_TICK`
+  guard; with only the first, the first tick generated is itself a boundary and closes the interval
+  entirely before boot — a bucket with a `spend` row and **zero** `impression` rows. Nothing errors;
+  HR5 just stops being true for one minute of every run, in the money column.
+- **`BetaBinomial`'s κ = 200 does nothing at a 1-second tick.** Overdispersion enters through
+  `(N − 1)/(κ + 1)`, exactly zero at `N = 1`, and per-tick `N` is 0–3. §10 is implemented as
+  written and κ is transcribed correctly — the parameter simply has no effect, so §12's *"the rate
+  is uncertain, not just the count"* is undelivered. **B30 owns it**; the risk is that B30 reads κ
+  as done and never tests the dispersion.
 
 - **Nothing writes a projection except `apply()`** (D7). `ads`, `config_generations`,
   `conversion_attribution`, `rollup_minute`. A chunk that writes one directly breaks the single
@@ -714,23 +736,49 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Stage 2 is closed. Stage 3 — the simulator (B25–B35) — has not started.**
+**G7 is closed and committed. Announce the next group, build it, report once with a per-chunk
+block, wait.** Nothing needs deciding first.
+
+**What G7 established, so a cold resume does not re-derive it:**
+
+- **λ has FOUR factors, not six — D56.** `base/86400 × d_c × w_dow × ρ_pacing × m_channel × m_ad`.
+  **φ and ν are CTR multipliers only** and enter `p_ctr` in `src/sim/emit.ts`. `SIMULATOR.md` §3
+  once listed both on λ; that contradicted §7.1, §10 and §18.3's own arithmetic, and keeping both
+  would have charged fatigue twice as `φ²` on clicks. §3 is corrected in place with the reason.
+- **§18.2, §18.3 and §2.3 were quoting the VIDEO pair's φ as "the ad's φ".** Corrected to `φ_ad`;
+  every conv/h moved, **no rung assignment did**. `a_08`'s peak went 15.3 → 12.0 against a bar of
+  10, and **B34 owes the margin check** — `BUILD_PLAN.md` "The gate-margin check B34 owes".
+- **Four doc corrections landed**: §3's λ, §7.1's recovery as `2^(−Δt/5 d)` (the formula read as a
+  3.47-day half-life against four statements of five days), and §4.1's two printed-table nits
+  (trough at 00:00 not 02:00; TikTok's swing 4.50× not 4.8×). `BRIEF_GAPS.md` **§H** is a new
+  section for contradictions in our OWN design docs — **H1** the half-life, **H2** `spend` carrying
+  no fee parameter (§10 says "CPM accrual plus fees", §21 has no fee, D52's baseline has no fee
+  term, so **CPM only** and the omission is a stated limit).
+- **`--dry-run` is stage 3's verification surface** and all three sections print from ONE simulation
+  pass: `npm run sim -- --dry-run --hours 24` (~27 s) or `--hours 1` (~1 s) for everything but the
+  hour-by-hour shape. §7.2's six pair rows print **MATCH/DIFFERS** against the spec — that is the
+  comparison D43 asks for, and **Seno declined a `node:test` copy of it** (2026-09-04): *"a
+  node:test copy would test the same arithmetic twice and cost budget four days out."* **Do not add
+  simulator-math tests.**
+- **The live emitter now emits impressions, clicks and a 60 s CPM `spend` delta for `a_12`**, still
+  one ad and still regardless of status until B31. `PHI_AD` is frozen at the nominal `T0` accrual —
+  an `ASSUMPTION (unratified)` in `index.ts`, replaced by B31's polled `F`.
+
+**Stage 3's remaining chunks are B28–B35.**
 
 **Announce a group, build it, report once with a per-chunk block, wait.** Nothing needs deciding
 first. **`BUILD_PLAN.md` §5's gate table covered stage 2 only — stage 3 has no gate table**, so
 group under D48's own rule: **3–5 related chunks, never across a stage boundary**, and say in the
 announcement which chunks the group is. **B34 and B35 are single-gated** and must not be grouped.
 
-**A natural first group is B25 + B26 + B27** — the rate equation core, fatigue, and the
-click/CPC/spend emission that turns a rate into events. B28 (novelty) attaches to B26's file and
-could join it; that is a judgement to make in the announcement, not now.
+**A natural next group is B28 + B29 + B30** — novelty, the conversion lag, and the noise that makes
+the counts overdispersed. B28 attaches to `fatigue.ts` and is small; B30 inherits §14's κ gap.
 
 | Chunk | Scope, from the plan row and no wider | Files |
 |---|---|---|
-| **B25** | Rate equation core: per-channel diurnal shape, day-of-week, `NegBinomial(λ, α=8)` | `src/sim/rate.ts`, `src/sim/params.ts` |
-| **B26** | Fatigue: `F(lineage, audience)`, `φ(f) = 0.25 + 0.75·exp(−0.35f)`, `video^1.0 × headline^0.5`, 5-day idle recovery, version partial reset `r = 0.35` | `src/sim/fatigue.ts` |
-| **B27** | Channel × temperature matrices → clicks (`BetaBinomial`), CPC, order value; `spend` as a 60 s delta per live ad | `src/sim/emit.ts`, `src/sim/params.ts` |
-| **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, CTR only, on the pair's first exposure | `src/sim/fatigue.ts` |
+| **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, CTR only, on the pair's first exposure. Passed as `emit.ts`'s `nu` parameter, which already exists and defaults to 1.0 | `src/sim/fatigue.ts` |
+| **B29** | Conversion lag: fast/slow mixture by `p_fast` (**the only §6 column `params.ts` has not transcribed yet**), separate reporting lag, 7-day cutoff, schedule re-derived from the keyed RNG. B27's dry run already keys the `cvr` stream by `(ad, tick)` — re-derive from that same key | `src/sim/lag.ts` |
+| **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to `m_channel^0.6` (`NOISE.cpcDemandExponent` is already there, unused). **Owns §14's κ gap** | `src/sim/noise.ts` |
 
 What is already true and constrains the whole stage:
 
@@ -751,6 +799,9 @@ What is already true and constrains the whole stage:
   reshuffle another ad's draws. B29's conversion schedule is **re-derived** from it rather than
   queued anywhere.
 - **B33's fault split now has its precondition** — `SUPPORTED` covers all four kinds since B18.
+- **The keyed-draw budget is real**: `draw()` costs ~2 µs (BigInt + `TextEncoder`), and a 24-hour
+  12-ad dry run makes ~10 M of them, hence ~27 s. Fine live (12 ticks/s ≈ 0.3 ms) and fine for a
+  dry run; **do not "optimise" `rng.ts`**, which is B11's file and whose formula is §14's.
 - **B34 owes the D39 seed-budget revisit** (see "What is owed"): ~28 s and ~716 MB through the real
   write path, not §18.4's ~12 s / ~315 MB, with five costed levers in `BUILD_PLAN.md`'s
   "The seed budget, re-measured at B06".

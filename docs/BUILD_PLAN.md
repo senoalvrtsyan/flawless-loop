@@ -205,9 +205,9 @@ throughout; the stage-1 number keeps moving.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
-| [ ] | **B25** | Rate equation core: per-channel diurnal shape, day-of-week, `NegBinomial(λ, α=8)` draw | `src/sim/rate.ts`, `src/sim/params.ts` | `npm run sim -- --dry-run --hours 24` prints hourly totals; the two peaks and the per-channel shapes match S§21's constants | S§3, §4 | **HR7** |
-| [ ] | **B26** | Fatigue: `F(lineage, audience)` accrual, `φ(f) = 0.25 + 0.75·exp(−0.35f)`, `video^1.0 × headline^0.5`, 5-day idle recovery, version partial reset `r = 0.35` | `src/sim/fatigue.ts` | Dry-run prints φ per pair after the seeded volumes; **reproduce S§7.2's table** — `vl_01 × cold_us` at 0.43 and `vl_01 × warm_us` at 0.91 at the same instant | S§7 | **HR7** |
-| [ ] | **B27** | Channel and temperature matrices → clicks (`BetaBinomial`), CPC, order value; `spend` emitted as a 60 s delta per live ad | `src/sim/emit.ts`, `src/sim/params.ts` | Dry-run CTR and CVR per ad match S§21's matrices within noise; spend ticks arrive one per minute per live ad | S§5, §6, §10 | **HR7** |
+| [x] | **B25** | Rate equation core: per-channel diurnal shape, day-of-week, `NegBinomial(λ, α=8)` draw | `src/sim/rate.ts`, `src/sim/params.ts` | `npm run sim -- --dry-run --hours 24` prints hourly totals; the two peaks and the per-channel shapes match S§21's constants | S§3, §4 | **HR7** |
+| [x] | **B26** | Fatigue: `F(lineage, audience)` accrual, `φ(f) = 0.25 + 0.75·exp(−0.35f)`, `video^1.0 × headline^0.5`, 5-day idle recovery, version partial reset `r = 0.35` | `src/sim/fatigue.ts` | Dry-run prints φ per pair after the seeded volumes; **reproduce S§7.2's table** — `vl_01 × cold_us` at 0.43 and `vl_01 × warm_us` at 0.91 at the same instant | S§7 | **HR7** |
+| [x] | **B27** | Channel and temperature matrices → clicks (`BetaBinomial`), CPC, order value; `spend` emitted as a 60 s delta per live ad | `src/sim/emit.ts`, `src/sim/params.ts` | Dry-run CTR and CVR per ad match S§21's matrices within noise; spend ticks arrive one per minute per live ad | S§5, §6, §10 | **HR7** |
 | [ ] | **B28** | Novelty `ν(age) = 1 + 0.25·exp(−age/18)`, applied to CTR only, on the pair's first exposure | `src/sim/fatigue.ts` | Dry-run: `a_07` at ν ≈ 1.06, `a_01` at 1.00 — the two ends of a creative's life at one moment | S§8 | **HR7** |
 | [ ] | **B29** | Conversion lag: fast/slow mixture by `p_fast`, separate reporting lag, 7-day hard cutoff, schedule re-derived from the keyed RNG rather than stored | `src/sim/lag.ts` | Dry-run prints median / p95 / past-72 h share per temperature and **matches S§11.2**: rt 0.3 h / 1.87 d / 2.3%, cold 7.5 h / 2.85 d / 4.6% | S§11 | **HR4 HR7** |
 | [ ] | **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to channel demand | `src/sim/noise.ts` | Dry-run: variance/mean grows with λ; the channel factor moves every ad on that channel together; autocorrelation at the stated τ | S§12 | **HR7** |
@@ -261,6 +261,21 @@ detail — the first four are free of evidence loss, the fifth is not:
    disposition and hash. **Costs B55's `trace` a body on seeded events, which is an HR5 cost and a
    real one** — the walk-back would show the delivery row and its disposition but not the payload,
    on exactly the six days of history a reviewer is most likely to click into.
+
+### The gate-margin check B34 owes — carried from D56
+
+**Not a fix, a check at calibration** (Seno's condition at D56). `a_08` is the ad that makes D20's
+*hourly* CPA/ROAS branch fire on camera, and D56's correction moved its peak from **15.3 to 12.0
+conversions/hour against a bar of 10** — a 20% margin where the earlier figure gave 53%. The rung
+assignment itself did not move (checked at peak and trough for all six of §18.3's ads), but the
+headroom did.
+
+**What to confirm at B34:** whether the ladder picks a rung from the **realised** hour's conversion
+count or from its **expectation**. If realised, `α = 8`'s overdispersion will put some hours under
+the bar and *"hourly CPA is drawable for `a_08`"* becomes a coin flip on the demo — silently, since
+a suppressed ratio is exactly what D20 is supposed to do and looks identical to working correctly.
+The figures in §18.3 are expectations, and ν is omitted from them (B28 revisits that), so the
+realised distribution is what has to be measured rather than argued.
 
 > ### ▶ Demo checkpoint 3 — *"the data is a design artifact"*
 >
@@ -520,6 +535,26 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   typechecks, reads as good practice, and passes every other test. **Guarded:**
   `verify.test.ts` greps every `.ts` under `src/` and fails the build; confirmed to trip on one
   injected occurrence. `verify.ts` is the sole exemption, by name.
+- **A derived `spend` delta must cover an interval the emitter EMITTED, not merely one it can
+  re-derive** (B27, found twice by reading the store rather than the code). The 60 s CPM delta is a
+  pure function of its interval's ticks — deliberately, so a re-emission after a restart is
+  byte-identical instead of `duplicate_conflicting` — but the emitter only *sends* ticks from boot
+  onward. Unaligned boot billed a full minute against a partial one (`spend 2` behind 3
+  impressions); aligning boot down to a 60 s boundary then made the FIRST tick a boundary, which
+  closed the interval entirely before boot (`spend 2` behind **zero** impressions, in a bucket with
+  no `impression` rows at all). **Both fixes are needed together**: alignment, so every later
+  interval starts on a generated tick, and the `tick − 60 >= FIRST_TICK` guard, so the one interval
+  no process ever emitted is skipped. Alignment is what makes the guard lossless. Nothing errors in
+  either failure mode — HR5's "every number walks back to its events" simply stops being true for
+  one minute of every run, in the money column.
+- **`BetaBinomial`'s κ does nothing at a 1-second tick, and that is invisible** (B27). §10 draws
+  `clicks ~ BetaBinomial(N, p_ctr, κ = 200)` per tick, but the urn's overdispersion enters through
+  `(N − 1)/(κ + 1)`, which is **exactly zero at N = 1** and 0.5% at N = 2. Per-tick `N` across the
+  seeded portfolio is 0–3, so §12's *"the rate is uncertain, not just the count"* is not delivered
+  at this granularity — the drawn rate would have to persist across a window. §10 is implemented as
+  written and κ is transcribed correctly; the parameter simply has no effect. **B30 owns this** —
+  its verify is *"variance/mean grows with λ"*, which is the check that would catch it — so the
+  risk is that B30 reads κ as already done and never tests the dispersion it was meant to create.
 - **The shadow set is ALL-OR-NOTHING** (D55, B22). Shadow three projections and the fourth is
   rebuilt straight into the live store, silently repairing what it was asked to check. `SHADOWED`
   also carries `decisions` — `applyDecision()` writes the log row in the same transaction (B13) —
