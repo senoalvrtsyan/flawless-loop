@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · B31a CLOSED · 33 / 65 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 3 running · B31b CLOSED — HR3 IS REAL · 34 / 65 chunks**
 
 ---
 
@@ -149,6 +149,8 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/sim/fatigue.ts`** | B26/B28. `pool()`, `phi()`, `phiAd()`, `rest()` (2^(−Δt/5 d)), `versionAdjusted()` (`r = 0.35`), `nominalAccrual()`, `adFatigue()` — plus §8's novelty: `novelty()`, `noveltyKey()` (**keyed `(lineage, VERSION, audience)`**), `noveltyAgesAtT0()`, `adNovelty()` (**the video slot only** — `BRIEF_GAPS` §H3). Accrual is keyed by **(lineage × audience)**, both slots of every ad. `nominalAccrual()` is the projection §7.2 was calibrated with, **not** the measurement — B31 recomputes `F` from the signal log. |
 | **`src/sim/emit.ts`** | B27/B30. `betaBinomial()` (Pólya urn), `logNormal()`, `pCtr()` (**where φ and ν enter — D56**), `pCvr()`, `orderValueCents()`, `clicksForTick()` (takes a `ClickFactors` object: `phiAd`, `nu`, `mChannel`), `cpmAccrualCents()`, `spendCents()`, `isSpendBoundary()`. |
 | **`src/sim/lag.ts`** | B29. `purchaseLagMs()` (fast/slow mixture by `p_fast`, `null` past the 7-day cutoff — the truncation IS a dropped conversion), `reportingLagMs()` (the straggler is additive), `scheduleFor()`. **Keyed by `click_id` and nothing else**, per §15.3(b), which is what lets B31 hand over a bare list of pending click ids. **Emits nothing** — see "What is owed". |
+| **`src/server/sim-world.ts`** | B31a. `GET /api/sim/world` in one read transaction: `ads` from the fold, `last_decision_seq`, **deliveries per `(lineage, version, audience)`** from §8's temporal reverse join, `spend_so_far_today` on the account-local day, pending backfill clicks, pending scenarios. READ-ONLY; unqualified table names per D55. |
+| **`src/sim/world.ts`** | B31b. The emitter's half: `pollWorld()` (1 Hz, holds the last good world — a failure stalls, it does not stop), `liveAds()` (**status is the gate**, φ from the log's `F`, ν from the pair's first exposure). One implementation of the φ rule via `fatigue.ts`'s `slotFrequency`, two sources of input. |
 | **`src/sim/noise.ts`** | B30. `demand()`, `demandFactor()`, `demandConstants()`, `stepIndex()`. §12's two log-AR(1) factors as a **truncated innovation sum, never an accumulator** — see the traps. Innovation sd rescaled so the stationary variance is exact at any truncation; Box–Muller pairs shared across adjacent steps so `K` innovations cost `K` draws. |
 | **`src/sim/dry-run.ts`** | B25/B26/B27. **Stage 3's whole verification surface**, three sections from ONE simulation pass. Emits nothing. `arrivalProcess()` returns the per-ad tallies `clickAndCostPath()` prints; `fatigue()` diffs itself against §7.2 and prints **MATCH/DIFFERS** per row. |
 
@@ -159,7 +161,10 @@ npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
 npm run seed          # B15: the 12-ad world, as 24 backdated decisions. ONCE, on an empty store
 npm run dev           # THREE processes: server :8787, Vite client :5173, simulator (B11, real)
-npm run sim           # the simulator alone, against an already-running server
+npm run sim           # the simulator alone, against an already-running server.
+                      # SINCE B31b IT NEEDS ONE: no world poll -> no emission at all, by design.
+                      # It says so on the first failed poll and keeps `nextTick` where it is, so
+                      # the seconds are delivered once the server appears rather than lost.
 npm run sim -- --dry-run --hours 24     # B25-B30: emits NOTHING, prints the model vs SIMULATOR.md
                                         # ~50 s. ONE simulation pass feeds all six sections
 npm run sim -- --dry-run --hours 1      # ~12 s; everything but the hour-by-hour diurnal shape.
@@ -420,14 +425,13 @@ to 20% of hourly-CPA headroom.
 | | |
 |---|---|
 | **Current stage** | **Stage 3 · the simulator (B25–B35) is RUNNING.** Stage 2 closed with B24. |
-| **Last completed chunk** | **B31a** — the shared account-local clock and `GET /api/sim/world`. Before it, **B30** `f7390d6` — §12's two log-AR(1) demand factors, the `E[m] = 1` drift and the per-minute click rate. G8's others: B29 `76d9e3e`, B28 `47e0d41`, with **D57 first** (`fdd2e1e`) because B30 was built on the answer. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
-| **Next gate** | **B31b — the emitter's 1 Hz poll and emission gating.** **HR3 IS NOT SATISFIED UNTIL THIS LANDS** — B31a's endpoint changes no emission. Mandatory for the demo, in Seno's words: *"without the world poll a paused ad keeps emitting and HR3's 'the world responds' fails on camera."* It also ends the frozen-φ/ν assumption. |
-| **Gate after that** | **B32 + B33** (budget pacing, injected misbehaviours). **B34 and B35 stay single-gated.** |
-| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ — *"the remaining stochastic structure"*. Both closed. |
+| **Last completed chunk** | **B31b** — the emitter's 1 Hz world poll and emission gating. **HR3 is satisfied**: a `pause` stops that ad's events within one tick, verified live on a seeded store. Before it **B31a** `42ee197` (the endpoint), **B30** `f7390d6`, **B29** `76d9e3e`, **B28** `47e0d41`, behind **D57** `fdd2e1e`. G7 was B25–B27 (`52d7b29`, `ee9adb1`, `1ce29a7`) behind **D56** (`ea3557e`). |
+| **Next gate** | **B32 + B33** — budget pacing (`ρ_catchup × ρ_terminal`, the account-local day boundary, +5% tolerance) and the injected misbehaviours. A natural pair: B32 makes `set_budget` visible in the rate within a second, and B33's precondition has held since B18 (`SUPPORTED` covers all four kinds, every handler built in stage 2). **B34 and B35 stay single-gated** and carry a growing owed list — see "What is owed". |
+| **Stage 3's gates so far** | ~~**G7** B25+B26+B27~~ · ~~**G8** B28+B29+B30~~ · ~~**B31a**~~ · ~~**B31b**~~ — all closed. **B32–B35 remain.** |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
 | **In flight** | nothing |
-| **Chunks ticked** | **33 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
+| **Chunks ticked** | **34 / 65** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b) — 64 because **B20a** was added and **B10 was split into B10a/B10b**, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits, cont.** | **B31 split into B31a/B31b** (2026-09-04, Seno's call): B31 was ~240 diff lines across four files, and B09 at ~230 is what prompted the B10 split. Its verify column already named two separable checks. B31a is the shared account-local clock + `GET /api/sim/world`; B31b is the poll and emission gating. **65 chunks now.** |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
@@ -450,10 +454,16 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Twenty-six now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Twenty-eight now — the Phase 5 ones were
 found against the real store and are in no design document.
 
-**The two newest (B30), both about §12's AR(1) factors:**
+**The two newest (B31b):** grouping `F` by lineage alone loses the version and silently contradicts
+§8's fresh novelty window — `a_05`'s recut would inherit `a_01`'s first exposure, which is the claim
+B28 exists to demonstrate, failing with no error. And making φ/ν live puts a **bounded** limit on
+re-emission identity (~1e-4 of one click per catch-up; a click's BODY cannot diverge, and impressions
+are exactly identical because D56 kept φ out of λ) — know the bound before "fixing" it.
+
+**Before those (B30), both about §12's AR(1) factors:**
 
 - **A stateful AR(1) would break re-emission and nothing would say so.** `m` multiplies λ, λ decides
   a tick's impression count, and `event_id` is derived from tick and index — so a running `m`
@@ -766,9 +776,25 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Next is B31 — `GET /api/sim/world` and the emitter's 1 Hz poll.** Announce it, build it, report,
-wait. Nothing needs deciding first. **It is mandatory for the demo**, in Seno's words: *"without the
-world poll a paused ad keeps emitting and HR3's 'the world responds' fails on camera."*
+**Next is B32 + B33.** Announce the group, build it, report once with a per-chunk block, wait.
+Nothing needs deciding first.
+
+**What B31a/B31b established, so a cold resume does not re-derive it:**
+
+- **HR3 is real and measured.** `pause a_12` → its events stop within one tick while eleven ads keep
+  emitting; `resume` brings it back inside ~6 s. Pause latency is a stated number — ≤ 1 tick, ≤ 1 s —
+  because the poll runs BEFORE the tick generates its seconds.
+- **The emitter emits for every ad the fold says is `live`**, twelve not one, using the fold's
+  config and never `fixtures.ts` — a `swap_component` changes `ads` and leaves the fixture stale.
+  `emit.ts` therefore takes `AdConfig` (five fields; `WorldAd` and `AdFixture` both satisfy it).
+- **φ and ν are no longer frozen.** φ from `F` recomputed off the log, ν aged from the pair's first
+  exposure. On a store with no seeded history φ ≈ 1.0 and ν near peak, which is correct — nothing has
+  been burned. **B34's seven days make §7.2's table the check.**
+- **`GET /api/sim/world` groups deliveries per `(lineage, VERSION, audience)`** and the emitter does
+  both aggregations: sum across versions for §7.1's `F`, one row's `first_impression_at` for §8's ν.
+  Grouped by lineage alone, `a_05`'s recut inherits `a_01`'s window and contradicts B28 — §14.
+- **The emitter now REQUIRES the server.** No successful poll → no emission, by design, and
+  `nextTick` does not advance so nothing is lost. `npm run sim` alone is silent.
 
 **What G8 established, so a cold resume does not re-derive it:**
 
@@ -867,6 +893,13 @@ What is already true and constrains the whole stage:
   reshuffle another ad's draws. B29's conversion schedule is **re-derived** from it rather than
   queued anywhere.
 - **B33's fault split now has its precondition** — `SUPPORTED` covers all four kinds since B18.
+- **B34 owes the `converted?` key** (found at B31a, in `sim-world.ts`'s `PENDING_CLICKS_SQL`
+  docstring). §15.3(b) makes a pending click's *lag* re-derivable from a bare `click_id`, but
+  **whether** it converts is §10's draw over the tick's clicks, which needs the tick and the index —
+  neither of which a handed-over `click_id` carries. The handover contract is one function short.
+- **`pending_backfill_clicks` returns `[]` until B34 seeds**, and that is the real query rather than
+  a stub: `source = 'backfill'`, inside `CONVERSION_LAG_CUTOFF_MS`, with no conversion in the LOG
+  carrying that `click_id`.
 - **The keyed-draw budget is real**: `draw()` costs ~2 µs (BigInt + `TextEncoder`), and a 24-hour
   12-ad dry run makes ~10 M of them, hence ~27 s. Fine live (12 ticks/s ≈ 0.3 ms) and fine for a
   dry run; **do not "optimise" `rng.ts`**, which is B11's file and whose formula is §14's.

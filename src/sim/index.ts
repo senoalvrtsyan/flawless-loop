@@ -2,9 +2,15 @@
 // `POST /api/ingest` — it never opens the database, and it never assigns `received_at` or
 // `ingest_seq` (D12). DESIGN §11's top box, minus everything stage 3 adds.
 //
-// Still ONE hard-coded ad, impressions only, a 1 s tick at 1× wall clock (§15.1), one batched POST
-// per tick: the emitter cannot learn the portfolio or any ad's status until `GET /api/sim/world`
-// (B31), so `a_12` is the whole world here.
+// **As of B31b the emitter learns the world instead of assuming it.** It polls
+// `GET /api/sim/world` once per tick (§16) and emits for every ad the FOLD says is `live`, with
+// that ad's current config, φ recomputed from the signal log and ν aged from the pair's first
+// exposure. A pause stops emission within one tick — HR3's *"the world responds"* — so pause
+// latency is a number we state (≤ 1 tick, ≤ 1 s) rather than a behaviour we hope for.
+//
+// It holds no durable state of its own (D40-A, DESIGN §3.3). A cold start with no successful poll
+// emits NOTHING, because an emitter that has not seen the world does not know which ads are live;
+// falling back to `fixtures.ts` would deliver a config the fold may have changed.
 //
 // What is real as of B25 is the RATE. §3's λ now carries §4's per-channel shape of the day and its
 // day-of-week weight, and the count is `NegBinomial(λ, α = 8)` rather than a constant. The factors
@@ -14,10 +20,10 @@
 // and the T0 seam B34 and B35.
 
 import { derivedId } from './rng.ts';
-import { ADS, type AdFixture } from './fixtures.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
-import { adFatigue, adNovelty, nominalAccrual, noveltyAgesAtT0 } from './fatigue.ts';
 import { demand, demandFactor } from './noise.ts';
+import { WORLD_URL, currentWorld, liveAds, pollWorld, type LiveAd } from './world.ts';
+import type { AdConfig } from '../shared/types.ts';
 import { clicksForTick, cpmAccrualCents, isSpendBoundary, spendCents } from './emit.ts';
 import { SPEND_TICK_S } from './params.ts';
 import {
@@ -30,7 +36,6 @@ import {
   noveltySection,
   type DryRunOptions,
 } from './dry-run.ts';
-import { BASE_IMPR_PER_DAY } from './params.ts';
 import type { IngestResult, Signal } from '../shared/types.ts';
 
 /**
@@ -42,36 +47,6 @@ import type { IngestResult, Signal } from '../shared/types.ts';
  * needs sign-off at B34, where the seed path makes it load-bearing for reproducibility.
  */
 const SEED = process.env.SIM_SEED ?? 'flawless-loop';
-
-/** `a_12` — SIMULATOR §2.3, and the brief's own pause target. Its channel comes from the fixture
- * and its `base_impr_per_day` from §21, so neither is restated here. */
-const AD_ID = 'a_12';
-const AD = ((id: string): AdFixture => {
-  const found = ADS.find((a) => a.ad_id === id);
-  if (found === undefined) throw new Error(`${id} is not in the seeded portfolio — SIMULATOR §2.3`);
-  return found;
-})(AD_ID);
-
-/**
- * §7's `φ_ad` for `a_12`, held constant for the life of the process — and per **D56** it enters
- * `p_ctr` only, never λ.
- *
- * ASSUMPTION (unratified): the accrual is the NOMINAL one at `T0` (`fatigue.ts`), because the
- * emitter has no `F` of its own until `GET /api/sim/world` recomputes it from the signal log (B31)
- * and no `T0` until the seeder exists (B34). It blocks nothing and it costs little: `a_12` accrues
- * 20,000/day into a 96,000 pool, so φ drifts about 1.5% per day and a demo lasts minutes. B31
- * replaces this constant with a polled figure; until then a live run's fatigue is frozen, not wrong.
- */
-const PHI_AD = adFatigue(AD_ID, nominalAccrual()).phi_ad;
-
-/**
- * §8's ν for `a_12`, frozen at `T0` — and here the freeze is FORCED, not chosen. ν feeds `p_ctr`,
- * `p_ctr` decides the tick's click count, and a click's `event_id` is derived: a ν that moved with
- * wall-clock time would re-derive the same `event_id` with a different click population after a
- * restart, which is `duplicate_conflicting` rather than `duplicate_identical`. The cost is 0.0023
- * of ν over ten minutes at §8's 18 h constant, and `a_12` is seven days old so it is ~1.00 anyway.
- */
-const NU = adNovelty(AD_ID, noveltyAgesAtT0());
 
 /** §15.1: 1 s, one batched POST per tick, 1× wall clock. */
 const TICK_MS = 1_000;
@@ -103,7 +78,7 @@ const MAX_PENDING = 10_000;
  * re-derive the same `event_id` with a different `ts` on restart, which is
  * `duplicate_conflicting` — a platform correction (§5.1 step 4) — rather than a duplicate.
  */
-function impressionsForTick(tick: number): number {
+function impressionsForTick(ad: AdConfig, tick: number): number {
   // §3's λ at this second, then §12's draw. Every remaining factor defaults to 1.0 inside
   // `lambdaPerSecond` and is named on its own plan item; passing nothing is the honest statement
   // that they are absent, not that they are one. **φ and ν are not among them and never will be**
@@ -117,10 +92,10 @@ function impressionsForTick(tick: number): number {
   // re-derive an interval's impressions instead of accumulating them.
   return negBinomial(
     SEED,
-    AD_ID,
+    ad.ad_id,
     tick,
-    lambdaPerSecond(AD_ID, AD.channel, tick * 1_000, {
-      demand: demandFactor(AD.channel, AD_ID, tick * 1_000),
+    lambdaPerSecond(ad.ad_id, ad.channel, tick * 1_000, {
+      demand: demandFactor(ad.channel, ad.ad_id, tick * 1_000),
     }),
   );
 }
@@ -131,34 +106,42 @@ function impressionsForTick(tick: number): number {
 const spreadMs = (tick: number, i: number, of: number): number =>
   tick * 1_000 + Math.floor(((i + 0.5) * 1_000) / Math.max(of, 1));
 
-function eventsForTick(tick: number): Signal[] {
-  const count = impressionsForTick(tick);
+function eventsForAd(live: LiveAd, tick: number): Signal[] {
+  const ad = live.config;
+  const count = impressionsForTick(ad, tick);
   const events: Signal[] = [];
 
   for (let i = 0; i < count; i++) {
     events.push({
-      event_id: derivedId(SEED, 'eid', AD_ID, tick, i),
+      event_id: derivedId(SEED, 'eid', ad.ad_id, tick, i),
       // Always the second that has ALREADY closed, so `ts` is in the past and I10's skew clamp
       // never fires. A simulator running its clock ahead would have every event clamped to
       // `received_at` and collapsed into the current minute.
       ts: new Date(spreadMs(tick, i, count)).toISOString(),
-      ad_id: AD_ID,
+      ad_id: ad.ad_id,
       event: 'impression',
     });
   }
 
-  // §10's clicks. The `event_id` carries a `'c'` part so a click and an impression at the same
-  // (tick, index) cannot collide — parts are NUL-joined, so no other part sequence can produce it.
-  const clicks = clicksForTick(SEED, AD, tick, count, {
-    phiAd: PHI_AD,
-    nu: NU,
-    mChannel: demand('channel', AD.channel, tick * 1_000),
+  // §10's clicks. `phi_ad` and `nu` come from the POLL now, not from a constant frozen at `T0`.
+  //
+  // Those two are the only inputs here a restart can see differently, and the divergence is
+  // bounded rather than hoped about: over a ≤2 minute catch-up, `F` moves by that window's own
+  // impressions against a pool of tens of thousands, so φ shifts ~0.003% and the per-minute Beta
+  // rate with it. A replayed click flips only if its uniform lies inside that band — about 3e-7 per
+  // impression, so ~1e-4 across a whole catch-up. A click's BODY is unaffected either way, because
+  // `cost_cents` and the CPC/CPM share are keyed by `(ad, tick, i)` and not by φ: the failure mode
+  // is one extra or one missing click, never a `duplicate_conflicting`.
+  const clicks = clicksForTick(SEED, ad, tick, count, {
+    phiAd: live.phi_ad,
+    nu: live.nu,
+    mChannel: demand('channel', ad.channel, tick * 1_000),
   });
   for (const click of clicks) {
     events.push({
-      event_id: derivedId(SEED, 'eid', AD_ID, tick, 'c', click.index),
+      event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 'c', click.index),
       ts: new Date(spreadMs(tick, click.index, clicks.length)).toISOString(),
-      ad_id: AD_ID,
+      ad_id: ad.ad_id,
       event: 'click',
       click_id: click.click_id,
       cost_cents: click.cost_cents,
@@ -169,9 +152,10 @@ function eventsForTick(tick: number): Signal[] {
   // that has just closed. Unix seconds divisible by 60 are minute boundaries and D28 buckets by
   // the UTC minute, so `[tick − 60, tick)` is exactly one bucket and the delta lands in it.
   //
-  // The interval's impressions are RE-DERIVED here rather than accumulated as the ticks went by.
-  // That costs 60 keyed draws a minute and buys the restart property: a re-emitted spend event is
-  // byte-identical, so it lands as `duplicate_identical` rather than as a correction.
+  // The interval's impressions are RE-DERIVED rather than accumulated as the ticks went by. That
+  // costs 60 keyed draws a minute and buys the restart property: a re-emitted spend event is
+  // byte-identical, so it lands as `duplicate_identical` rather than as a correction. It stays
+  // exact under B31b because λ carries no φ (D56) — the one place that decision pays off twice.
   //
   // The interval must be one this process actually EMITTED, not merely one it can re-derive. Boot
   // aligns `FIRST_TICK` down to a boundary, so the first tick generated is itself a boundary — and
@@ -182,19 +166,34 @@ function eventsForTick(tick: number): Signal[] {
   // generated, so a restart re-emits the boundary byte-identically instead of dropping it.
   if (isSpendBoundary(tick) && tick - SPEND_TICK_S >= FIRST_TICK) {
     let accrued = 0;
-    for (let t = tick - SPEND_TICK_S; t < tick; t++) accrued += cpmAccrualCents(AD, impressionsForTick(t));
+    for (let t = tick - SPEND_TICK_S; t < tick; t++) {
+      accrued += cpmAccrualCents(ad, impressionsForTick(ad, t));
+    }
     const cents = spendCents(accrued);
     if (cents > 0) {
       events.push({
-        event_id: derivedId(SEED, 'eid', AD_ID, tick, 's'),
+        event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 's'),
         ts: new Date((tick - 1) * 1_000).toISOString(),
-        ad_id: AD_ID,
+        ad_id: ad.ad_id,
         event: 'spend',
         amount_cents: cents,
       });
     }
   }
 
+  return events;
+}
+
+/**
+ * One tick's events across the whole portfolio.
+ *
+ * Every ad is generated against the SAME world snapshot, taken once per tick, so a lever landing
+ * mid-tick takes effect on the next one rather than partway through this one. `live` is empty until
+ * the first successful poll, and then nothing is emitted at all — see `world.ts`.
+ */
+function eventsForTick(tick: number, live: readonly LiveAd[]): Signal[] {
+  const events: Signal[] = [];
+  for (const ad of live) events.push(...eventsForAd(ad, tick));
   return events;
 }
 
@@ -264,8 +263,20 @@ async function tick(): Promise<void> {
   if (busy) return; // a slow POST must not overlap the next one, or ingest sees them out of order
   busy = true;
   try {
+    // §16: polled once per tick. The poll comes FIRST so a lever pulled a moment ago is honoured
+    // by the seconds this tick is about to generate — that ordering is what makes pause latency
+    // "≤ 1 tick" rather than "≤ 2 ticks".
+    await pollWorld();
+    const world = currentWorld();
     const now = Math.floor(Date.now() / 1_000);
-    for (; nextTick < now; nextTick++) pending.push(...eventsForTick(nextTick));
+
+    // An emitter that has never seen the world emits nothing, and it must not silently swallow the
+    // ticks either: `nextTick` stays where it is, so once the world arrives the catch-up delivers
+    // the seconds that were missed instead of losing them.
+    if (world === null) return;
+
+    const live = liveAds(world, Date.now());
+    for (; nextTick < now; nextTick++) pending.push(...eventsForTick(nextTick, live));
     if (pending.length === 0) return;
 
     const batch = pending;
@@ -323,11 +334,11 @@ if (dry !== null) {
 }
 
 console.log(
-  `[sim] ${AD_ID} on ${AD.channel} at ${BASE_IMPR_PER_DAY[AD_ID]}/day nominal → ${INGEST_URL}` +
-    ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week, NegBinomial(λ, α=8)` +
-    ` · §10 clicks at p_ctr with φ_ad ${PHI_AD.toFixed(4)} · ν ${NU.toFixed(4)} (D56),` +
-    ` §12 demand on λ and CPC, CPM spend every ${SPEND_TICK_S}s` +
-    ` · replaying the last ${CATCHUP_S}s`,
+  `[sim] polling ${WORLD_URL} at ${1_000 / TICK_MS} Hz → posting to ${INGEST_URL}` +
+    ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week and §12 demand, NegBinomial(λ, α=8)` +
+    ` · §10 clicks at p_ctr with φ and ν FROM THE LOG (D56/D57), CPM spend every ${SPEND_TICK_S}s` +
+    ` · replaying from ${new Date(FIRST_TICK * 1_000).toISOString()}` +
+    `\n[sim] emitting for every ad the fold says is live — a pause takes effect within one tick`,
 );
 
 const timer = setInterval(() => void tick(), TICK_MS);

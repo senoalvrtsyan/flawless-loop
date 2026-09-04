@@ -28,7 +28,11 @@ import {
   TEMPERATURE,
 } from './params.ts';
 import { localWeekday } from '../shared/time.ts';
-import type { AdFixture } from './fixtures.ts';
+// `AdConfig` rather than `AdFixture`: the five config fields every function here needs, so the dry
+// run can pass a fixture while the live emitter passes the config the FOLD currently holds. A
+// `swap_component` changes the fold and leaves the fixture stale, so the live path must never read
+// the fixture's slots.
+import type { AdConfig } from '../shared/types.ts';
 
 const TEMPERATURE_OF = new Map(AUDIENCES.map((a) => [a.audience_id, a.temperature]));
 
@@ -143,7 +147,7 @@ export function logNormal(
 }
 
 /** §10's `p_ctr`. `phiAd` is §7's, `nu` is §8's and defaults to 1.0 until B28 supplies it. */
-export function pCtr(ad: AdFixture, phiAd: number, nu = 1): number {
+export function pCtr(ad: AdConfig, phiAd: number, nu = 1): number {
   const channel = CHANNEL[ad.channel];
   return temperatureOf(ad.audience_id).ctr * channel.ctrMult * phiAd * nu;
 }
@@ -152,7 +156,7 @@ export function pCtr(ad: AdFixture, phiAd: number, nu = 1): number {
  * §10's `p_cvr`. **No φ and no ν** — §10 is explicit that fatigue and novelty touch CTR only.
  * `dow_cvr` is §4.2's second curve: weekends are browsier, so fewer people convert.
  */
-export function pCvr(ad: AdFixture, atMs: number): number {
+export function pCvr(ad: AdConfig, atMs: number): number {
   const channel = CHANNEL[ad.channel];
   return (
     temperatureOf(ad.audience_id).cvr * channel.cvrMult * (DOW_CVR[localWeekday(atMs)] ?? 1)
@@ -162,7 +166,7 @@ export function pCvr(ad: AdFixture, atMs: number): number {
 /** §10's order value: `LogNormal(median = order_value(temperature) × dow_aov, σ = 0.6)`, in cents. */
 export function orderValueCents(
   seed: string,
-  ad: AdFixture,
+  ad: AdConfig,
   atMs: number,
   parts: readonly (string | number)[],
 ): number {
@@ -197,7 +201,7 @@ export type ClickFactors = {
 
 export function clicksForTick(
   seed: string,
-  ad: AdFixture,
+  ad: AdConfig,
   tick: number,
   impressions: number,
   factors: ClickFactors,
@@ -270,7 +274,7 @@ export function clicksForTick(
  * ~60 sub-cent values to zero and lose most of the charge with nothing to show it happened. The
  * caller carries the remainder — see `spendDelta`.
  */
-export function cpmAccrualCents(ad: AdFixture, impressions: number): number {
+export function cpmAccrualCents(ad: AdConfig, impressions: number): number {
   const channel = CHANNEL[ad.channel];
   return (impressions * (1 - channel.cpcShare) * channel.cpmBaseCents) / 1000;
 }

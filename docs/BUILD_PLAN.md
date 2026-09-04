@@ -212,7 +212,7 @@ throughout; the stage-1 number keeps moving.
 | [x] | **B29** | Conversion lag: fast/slow mixture by `p_fast`, separate reporting lag, 7-day hard cutoff, schedule re-derived from the keyed RNG rather than stored | `src/sim/lag.ts` | Dry-run prints median / p95 / past-72 h share per temperature and **matches S§11.2**: rt 0.3 h / 1.87 d / 2.3%, cold 7.5 h / 2.85 d / 4.6% | S§11 | **HR4 HR7** |
 | [x] | **B30** | Noise: two log-AR(1) demand factors (channel τ45m, ad τ20m), `BetaBinomial` rates, CPC coupled to channel demand | `src/sim/noise.ts` | Dry-run: variance/mean grows with λ; the channel factor moves every ad on that channel together; autocorrelation at the stated τ | S§12 | **HR7** |
 | [x] | **B31a** | **The account-local clock moved to `src/shared/time.ts`** (forced: `spend_so_far_today` needs the `America/New_York` day boundary on the SERVER, and the only `Intl` offset logic was the simulator's — B20a's argument, one file later) **+ `GET /api/sim/world`**: ads and status, `last_decision_seq`, `F` per pair **recomputed from the log**, `spend_so_far_today`, pending backfilled clicks, pending scenarios | `src/shared/time.ts`, `src/shared/config.ts`, `src/server/sim-world.ts` | `curl` it against a seeded store: 12 ads from the fold, `spend_so_far_today` equals `sum(click_cost_cents + spend_cents)`, `F` per pair equals the rollup, and **a mid-run `swap_component` splits the video pair while leaving the headline pair whole** — 126 + 18 = 144, the temporal join and §7.2's third claim in one check | D§8, §11; S§16 | **HR3** |
-| [ ] | **B31b** | The emitter's **1 Hz poll** and emission gating: status decides whether an ad emits at all, `F` from the poll replaces the frozen nominal accrual, ν and `spend_so_far_today` likewise | `src/sim/world.ts`, `src/sim/index.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; φ and ν stop being frozen at `T0` | D§11; S§16 | **HR3** |
+| [x] | **B31b** | The emitter's **1 Hz poll** and emission gating: status decides whether an ad emits at all, `F` from the poll replaces the frozen nominal accrual, ν and `spend_so_far_today` likewise | `src/sim/world.ts`, `src/sim/index.ts` | `curl` a `pause` decision → **emission for that ad stops within one second**; φ and ν stop being frozen at `T0` | D§11; S§16 | **HR3** |
 | [ ] | **B32** | Budget pacing: `ρ_catchup × ρ_terminal`, day boundary at `America/New_York`, +5% overspend tolerance | `src/sim/pacing.ts` | `curl` a `set_budget` doubling → **event rate visibly rises inside a second**; drive `a` to 0.95 and watch the taper rather than a cliff; no discontinuity at the local midnight rollover | S§9 | **HR3 HR7** |
 | [ ] | **B33** | Injected misbehaviours: duplicate identical and conflicting, short and long reorder, orphan withheld and orphan never, malformed, clock skew, dual click-id, 0.2% silent emitter loss | `src/sim/faults.ts` | Run 5 minutes, then count `signal_deliveries` by disposition and compare against S§13's rates; every injected fault has a handler already built in stage 2. **Malformed (0.1%) and dual click-id (0.05%) both land as `rejected_invalid`** and no reason is stored (B05, deliberate): split them by re-running `validate()` over the retained `payload_json` — which is only correct once `SUPPORTED` covers all four kinds (B12+), or every click reads as a fault | S§13 | **HR4 HR7** |
 | [ ] | **B34** | Backfill generation: 7 days in-process through `ingest()`, `received_at = ts + reporting lag`, **sorted by `received_at`** before writing, server-assigned `source = 'backfill'`. **Owed from B09: the seeder must NOT call `stream.markDirty()`** — measured, one batch across 20,000 minutes gave a **6.20 MiB** frame and a **142 ms** event-loop stall; ~17 MiB / ~400 ms at 56,160 seeded buckets | `src/sim/seed-history.ts` | `npm run seed` on an empty DB → ~1.6M events; `ingest_seq` is monotone in `received_at`; a handful of buckets carry `restated_at` **from frame one** | S§15.2, §15.3 | **HR1 HR2 HR7** |
@@ -548,6 +548,25 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   typechecks, reads as good practice, and passes every other test. **Guarded:**
   `verify.test.ts` greps every `.ts` under `src/` and fails the build; confirmed to trip on one
   injected occurrence. `verify.ts` is the sole exemption, by name.
+- **Grouping `F` by lineage alone loses the version, and silently contradicts §8** (B31b, caught
+  mid-build). §7.1's accrual is version-AGNOSTIC — §7.3: a recut inherits its lineage's frequency —
+  but §8's novelty window is version-SPECIFIC: *"a version bump gets a fresh novelty window … a
+  reused pair does not."* One `GET /api/sim/world` query serves both, so it groups per
+  `(lineage, version, audience)` and the emitter does the two aggregations itself: **sum** across
+  versions for `F`, **one row's** `first_impression_at` for ν. Grouped by lineage only, `a_05`'s
+  recut would inherit `a_01`'s first exposure and arrive with ν = 1.00 instead of a fresh window —
+  which is exactly the claim B28 was built to demonstrate, failing with no error and no visible
+  symptom beyond a slightly lower CTR on one ad.
+- **Making φ and ν live puts a bound on re-emission identity — know the bound before "fixing" it**
+  (B31b). φ and ν now come from the poll, and both feed `p_ctr`, so a replayed tick could in
+  principle draw a different click count. Measured rather than feared: over a ≤2 minute catch-up
+  `F` moves by that window's own impressions against a pool of tens of thousands, so φ shifts
+  ~0.003% and a replayed click flips only if its uniform lands inside that band — ~3e-7 per
+  impression, ~1e-4 per catch-up. **A click's BODY cannot diverge**, because `cost_cents` and the
+  CPC/CPM share are keyed by `(ad, tick, i)` and not by φ, so the worst case is one extra or one
+  missing click and never a `duplicate_conflicting`. **Impressions are exactly identical**, because
+  D56 kept φ out of λ. Anyone re-introducing φ into λ breaks that and the symptom is a wave of
+  `duplicate_conflicting` on every restart.
 - **A stateful AR(1) would break re-emission, and nothing would say so** (B30). §12 defines
   `m_channel` and `m_ad` recursively — `log m(t) = ρ · log m(t−Δ) + ε` — so the obvious
   implementation keeps a running value. But `m` multiplies λ, λ decides a tick's impression count,

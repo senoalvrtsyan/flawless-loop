@@ -22,41 +22,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
 import { ACCOUNT_TZ, CONVERSION_LAG_CUTOFF_MS } from '../shared/config.ts';
 import { localDayStartMs } from '../shared/time.ts';
-
-/** One ad, as the emitter needs it: config plus status. 1:1 with `ads`, minus the audit columns. */
-export type WorldAd = {
-  ad_id: string;
-  status: string;
-  video_id: string;
-  headline_id: string;
-  audience_id: string;
-  channel: string;
-  daily_budget_cents: number;
-  current_generation_id: string;
-  last_decision_seq: number;
-  /** Read-time sum of the two disjoint cost paths (D10, L79-80) over the account-local day. */
-  spend_so_far_today_cents: number;
-};
-
-/** §7's `F(lineage, audience)` — cumulative impressions per pair, both slots, from the log. */
-export type WorldPair = {
-  lineage_id: string;
-  audience_id: string;
-  impressions: number;
-};
-
-export type SimWorld = {
-  /** The fold's high-water mark across every ad. A change here means a lever moved (§16). */
-  last_decision_seq: number;
-  /** The local day the spend figures are summed over, so the emitter never computes it twice. */
-  account_day: { tz: string; starts_at: string };
-  ads: WorldAd[];
-  pairs: WorldPair[];
-  /** §15.3(b)'s pending-conversion re-derivation. Empty until B34 seeds; see below. */
-  pending_backfill_clicks: { click_id: string; ad_id: string; ts: string }[];
-  /** §17's scenario triggers, so there is no second control channel. Empty until P17 writes one. */
-  pending_scenarios: { scenario_id: string; name: string; args_json: string; ts: string }[];
-};
+import type { SimWorld, WorldAd, WorldDelivery } from '../shared/types.ts';
 
 /**
  * §7's accrual, recomputed: impressions per `(lineage, audience)`, over every ad that used the pair,
@@ -68,6 +34,13 @@ export type SimWorld = {
  * to the video lineage *and* the headline lineage; the `SUM` over the union is what makes a lineage
  * used in both slots correct rather than double-counted into two rows.
  *
+ * **Grouped per `(lineage, VERSION, audience)`, because two different rules need two different
+ * groupings and one query can serve both.** §7.1's `F` is version-AGNOSTIC — §7.3: a recut inherits
+ * its lineage's frequency — so the emitter sums these rows across versions. §8's novelty is
+ * version-SPECIFIC — a version bump gets a fresh window — so it reads one row's
+ * `first_impression_at`. Grouping by lineage alone would have made `a_05`'s recut inherit `a_01`'s
+ * novelty window and silently contradict B28.
+ *
  * **Reading `rollup_minute` rather than `signals` is deliberate and is what §16 actually asks for.**
  * §16's requirement is that the emitter's fatigue "cannot silently disagree with the fatigue the app
  * infers" — and the app reads this projection. Going to raw `signals` would be a *third*
@@ -78,10 +51,12 @@ export type SimWorld = {
  * `TEMP` tables that shadow these names, and one `main.`-qualified projection read here would make
  * the verifier check the wrong tables. `verify.test.ts` greps for exactly that and fails the build.
  */
-const PAIRS_SQL = `
-  SELECT lineage_id, audience_id, SUM(impressions) AS impressions
+const DELIVERIES_SQL = `
+  SELECT lineage_id, version, audience_id, SUM(impressions) AS impressions,
+         MIN(minute_start) AS first_impression_at
     FROM (
-      SELECT c.lineage_id AS lineage_id, g.audience_id AS audience_id, r.impressions AS impressions
+      SELECT c.lineage_id AS lineage_id, c.version AS version, g.audience_id AS audience_id,
+             r.impressions AS impressions, r.minute_start AS minute_start
         FROM rollup_minute r
         JOIN config_generations g
           ON g.ad_id = r.ad_id
@@ -89,7 +64,8 @@ const PAIRS_SQL = `
          AND (g.valid_to IS NULL OR r.minute_start < g.valid_to)
         JOIN components c ON c.component_id = g.video_id
       UNION ALL
-      SELECT c.lineage_id AS lineage_id, g.audience_id AS audience_id, r.impressions AS impressions
+      SELECT c.lineage_id AS lineage_id, c.version AS version, g.audience_id AS audience_id,
+             r.impressions AS impressions, r.minute_start AS minute_start
         FROM rollup_minute r
         JOIN config_generations g
           ON g.ad_id = r.ad_id
@@ -97,9 +73,9 @@ const PAIRS_SQL = `
          AND (g.valid_to IS NULL OR r.minute_start < g.valid_to)
         JOIN components c ON c.component_id = g.headline_id
     )
-   GROUP BY lineage_id, audience_id
+   GROUP BY lineage_id, version, audience_id
    HAVING SUM(impressions) > 0
-   ORDER BY lineage_id, audience_id
+   ORDER BY lineage_id, version, audience_id
 `;
 
 /**
@@ -179,7 +155,7 @@ export function simWorld(db: DatabaseSync, nowMs = Date.now()): SimWorld {
         .all() as Omit<WorldAd, 'spend_so_far_today_cents'>[]
     ).map((ad) => ({ ...ad, spend_so_far_today_cents: spendByAd.get(ad.ad_id) ?? 0 }));
 
-    const pairs = db.prepare(PAIRS_SQL).all() as WorldPair[];
+    const deliveries = db.prepare(DELIVERIES_SQL).all() as WorldDelivery[];
 
     // §16's window is the 7-day LAG CUTOFF, not the 72 h settlement horizon: a click older than
     // the cutoff can no longer produce a conversion at all (§11.1), so it is not pending.
@@ -205,7 +181,7 @@ export function simWorld(db: DatabaseSync, nowMs = Date.now()): SimWorld {
       last_decision_seq: ads.reduce((max, ad) => Math.max(max, ad.last_decision_seq), 0),
       account_day: { tz: ACCOUNT_TZ, starts_at: dayStart },
       ads,
-      pairs,
+      deliveries,
       pending_backfill_clicks: pending.map((c) => ({
         click_id: c.click_id,
         ad_id: c.ad_id,

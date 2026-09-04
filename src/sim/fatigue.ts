@@ -120,17 +120,34 @@ export type AdFatigue = {
   phi_ad: number;
 };
 
+/**
+ * One slot's effective frequency: `F / pool`, with §7.3's version reset applied.
+ *
+ * Extracted at B31b so there is **one implementation of the rule and two sources of input**. The
+ * dry run feeds it the nominal accrual and the fixture's components; the live emitter feeds it `F`
+ * recomputed from the signal log and the config the fold currently holds (which a
+ * `swap_component` changes and the fixture does not know about). Those are two different
+ * questions — what the model *would* deliver, and what it *did* — and they must not become two
+ * different arithmetics.
+ */
+export function slotFrequency(
+  version: number,
+  audienceId: string,
+  impressions: number,
+): number {
+  return versionAdjusted(impressions / pool(audienceId), version);
+}
+
 /** One ad's fatigue, given an accrual. Both slots, with §7.3's version reset on each. */
 export function adFatigue(adId: string, accrual: Map<string, number>): AdFatigue {
   const ad = ADS.find((a) => a.ad_id === adId);
   if (ad === undefined) throw new Error(`${adId} is not in the seeded portfolio — §2.3`);
-  const denominator = pool(ad.audience_id);
 
   const slot = (componentId: string): { f: number; phi: number } => {
     const component = COMPONENT.get(componentId);
     if (component === undefined) throw new Error(`no component ${componentId} — §2.1`);
     const F = accrual.get(pairKey(component.lineage_id, ad.audience_id)) ?? 0;
-    const f = versionAdjusted(F / denominator, component.version);
+    const f = slotFrequency(component.version, ad.audience_id, F);
     return { f, phi: phi(f) };
   };
 
@@ -175,6 +192,18 @@ export function novelty(ageHours: number): number {
  * taken literally. The version is in the key because a recut is new to the platform's learning
  * phase even though §7.3 says it is not new to the audience.
  */
+/**
+ * A component's lineage and version. Reference data is static and seeded once (U3), so the fixture
+ * is the right source even on the live path — `GET /api/sim/world` deliberately does not ship the
+ * component table. A `swap_component` to a component outside `§2.1`'s library would throw here,
+ * which is correct: the lever's `to_id` is validated against `components` at B13.
+ */
+export function componentOf(componentId: string): { lineage_id: string; version: number } {
+  const component = COMPONENT.get(componentId);
+  if (component === undefined) throw new Error(`no component ${componentId} — §2.1`);
+  return component;
+}
+
 export function noveltyKey(lineageId: string, version: number, audienceId: string): string {
   return `${lineageId}\u0000v${version}\u0000${audienceId}`;
 }
