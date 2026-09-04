@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D68 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D70 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -132,7 +132,9 @@ level — and not a severity.
 | D65 | Does the live viewport advance its leading edge | **ACCEPTED — C** (the client rolls the window and the stream fills it; the server's window stays on screen as "anchored at") | 2026-09-04 |
 | D66 | Where the headline window totals come from, and how they stay current | **ACCEPTED — C** (server-computed, re-asked over `?include=totals`, carrying `as_of_ingest_seq` and the resolved window) | 2026-09-04 |
 | D67 | How D20's bar is tested, and how the ladder resolves across a selection | **ACCEPTED — B at >50% of non-empty points, with (i)** (per-point suppression; coarsest rung the selection needs; dropped ads named) | 2026-09-04 |
-| D68 | Do we reinstate `SCOPE.md` §4 cut #1, decision scoring | **ACCEPTED — B** (one chunk `B50a` at the end of stage 5, conditional on stage 5 landing without the stop clause firing; the `w` sub-question is open and blocks it) | 2026-09-04 |
+| D68 | Do we reinstate `SCOPE.md` §4 cut #1, decision scoring | **ACCEPTED — B** (one chunk `B50a` at the end of stage 5, conditional on stage 5 landing without the stop clause firing; condition MET at the stage-5 close; the `w` sub-question is answered by **D70**) | 2026-09-04 |
+| D69 | Who marks a scenario trigger consumed, and with what guarantee | **ACCEPTED — A** (serve-and-mark, at-most-once, with a stated flip condition to B) | 2026-09-05 |
+| D70 | The scoring window `w`: symmetric or generation-pinned | **ACCEPTED — A** (symmetric 6 h before/after, with any second lever inside it flagged as contaminated on the entry) | 2026-09-05 |
 
 ---
 
@@ -1134,7 +1136,7 @@ don't present it as a live feature"*
 | **D15** | ACCEPTED — C | First-write-wins for aggregates; **every delivery persisted**; conflicts surfaced | Feeds the DDL and the misbehaviour table. |
 | **D16** | ACCEPTED — C, restated under D27 | Provisional counting, visible re-attribution, orphan health counter | **Restated by D27-B**: provisional placement is the conversion's own minute, and resolution *moves* it to the click's minute — a two-bucket restatement. |
 | **D18** | ACCEPTED — A | SSE with `Last-Event-ID` = `ingest_seq` | D30 builds the payload contract on it. |
-| **D19** | ACCEPTED — cut, **conditionally reinstated by D68** | Decision scoring cut by D26; D68 reinstates it as `B50a` **if** stage 5 lands without `CLAUDE.md` §5's stop clause firing | Cut #1, stated. D68 also names the sub-question D19 left open — symmetric `w` vs generation-pinned — which blocks `B50a`. |
+| **D19** | ACCEPTED — cut, **reinstated by D68; window settled by D70** | Decision scoring cut by D26; D68 reinstates it as `B50a` **if** stage 5 lands without `CLAUDE.md` §5's stop clause firing | Cut #1, stated. D68 also names the sub-question D19 left open — symmetric `w` vs generation-pinned — which blocks `B50a`. |
 | **D21** | ACCEPTED — A | Two stores, shared envelope `{id, ts, received_at, ingest_seq}`, merged at read | This is the answer to `DESIGN.md` §1 — configs, signals and levers distinct in storage. |
 | **D23** | ACCEPTED — B | Two slots kept; `image` / `body_copy` are library-only | Follows D1. Gets a `BRIEF_GAPS` entry. |
 | **D25** | ACCEPTED — A, B specified | Retractions out of scope; `conversion_void` specified in the README | D27's orphan consequence already forces the generic restatement path, so B's "nearly free" claim is now demonstrated rather than asserted. |
@@ -4165,3 +4167,150 @@ thing* — the one whose own scope entry said it reads rollups that already exis
 polish. Making it conditional on stage 5 landing clean means the build never traded a hard
 requirement for a nice-to-have, and the one open sub-question (symmetric vs generation-pinned
 windows) is recorded as blocking that chunk rather than resolved quietly by whoever wrote it.
+
+---
+
+## DECISION #69 — Who marks a scenario trigger consumed, and with what delivery guarantee
+
+**Status:** ACCEPTED — **option A** (serve-and-mark, at-most-once) with a stated flip condition ·
+**Date:** 2026-09-05 · **Blocked:** nothing; raised as a labelled ASSUMPTION at the B50 report and
+ratified at the stage-5 close · **Relates to:** D32, D40, `SIMULATOR.md` §14, §17 · B50
+
+### Question
+
+`sim_scenarios.consumed_at` is documented in the DDL as *"NULL until the simulator picks it up"* —
+but the simulator **cannot write** (D32: it never opens the store, it reaches it only over HTTP). So
+the mark has to be made on its behalf, and who makes it decides the delivery guarantee for a control
+whose entire purpose is causing the interesting thing **on camera**.
+
+### Options
+
+**A) Serve-and-mark.** The server marks `consumed_at` when it serves the trigger on a
+`GET /api/sim/world` poll. **At-most-once.**
+- Pros: no second endpoint, no second control channel (§17's own constraint), and the simulator
+  stays write-free so D32 holds without qualification.
+- Cons: if the poll's **response** is lost in flight the trigger is marked consumed and never
+  applied — the reviewer presses a button and nothing happens, silently. The window is one dropped
+  localhost HTTP response between two processes we own.
+- Forecloses: nothing — see the flip condition.
+- Reversal cost: one endpoint, or one query parameter on the poll that already exists.
+
+**B) The emitter acks** — `?consumed=<ids>` riding the existing poll, or its own endpoint.
+**At-least-once.**
+- Pros: no trigger is ever lost.
+- Cons: a lost ack re-delivers. Harmless while the process lives, because the emitter is idempotent
+  by `scenario_id` in memory — but a **restart** loses that memory, so a re-delivery after a restart
+  really is a second `late_cascade`.
+- Reversal cost: low, but it is strictly more machinery than A.
+
+**C) Never mark.** The emitter's in-process idempotence is the whole mechanism; the column stays
+`NULL` forever.
+- Cons: makes the DDL's own comment a lie, and grows every world poll by one row per trigger for
+  the life of the store. The surface also loses the `pending → picked up` transition, which is the
+  one place a reviewer can watch two processes that share no memory hand something over.
+
+### Wording of record
+
+> Take (a) at-most-once as ratified — the emitter's `scenario_id` idempotence makes (b) purely
+> additive if a dropped poll ever bites on camera, so record it with that flip condition and move on
+
+### The flip condition, which is the substantive half
+
+**If a dropped poll ever loses a trigger on camera, move to B.** It is *purely additive* and that is
+why A is safe to take: the emitter is already idempotent by `scenario_id`, so B changes nothing
+about how triggers are consumed — the ack simply becomes the mark. Nothing that reads or applies a
+trigger has to change, and no schema does.
+
+### Consequences
+
+1. **`markScenariosConsumed()` runs AFTER the read transaction**, never inside it. `readTx` is
+   `BEGIN DEFERRED` and would upgrade to a write lock on the first UPDATE — on the 1 Hz path that
+   also carries ingest. A poll that can block ingest makes the stream stutter once a second, and it
+   would read as backpressure rather than as a lock. (Found while building B50, not designed in.)
+2. **The emitter's idempotence is now load-bearing** rather than incidental, because it is what
+   makes the flip condition cheap. `src/sim/scenarios.ts` keeps a `Set` of seen `scenario_id`s and
+   the file says why.
+3. **The README's named-limits section owes one line**: triggers are delivered at most once, and a
+   dropped poll response loses one — press the button again.
+
+### What it forecloses
+
+Nothing. This is the one decision in the file whose reversal was priced before it was taken.
+
+### How I'd defend this in review
+
+The cheaper guarantee was taken deliberately, with the failure mode named and the upgrade path
+already free — the idempotence that option B would need is in the code either way, so the choice
+cost nothing to defer and would cost one query parameter to change.
+
+---
+
+## DECISION #70 — The scoring window `w`: symmetric, or pinned to generation boundaries
+
+**Status:** ACCEPTED — **option A** (symmetric 6 h before/after, with contamination flagged on the
+entry) · **Date:** 2026-09-05 · **Blocks:** `B50a` — this was the one thing standing in front of it ·
+**Relates to:** D68, D19, D13 · `OPEN_QUESTIONS.md` § DECISION #19 · brief L125
+
+### Question
+
+**D68** reinstated `SCOPE.md` §4 cut #1 — decision scoring — as a conditional `B50a`, and recorded
+one sub-question it did not answer: **is `w` a symmetric before/after window, or is it pinned to the
+decision's own generation boundaries?** Stage 5 landed without the stop clause firing, so D68's
+condition is met and `B50a` is due; this is the last thing in its way.
+
+### Options
+
+**A) Symmetric `w`** — 6 h either side of `decision.ts`, both windows the same length.
+- Pros: one length, so the two sides are comparable without normalising anything, and comparable
+  *across decisions* as well. It is also literally what the brief describes.
+- Cons: contaminated at the edges. A second lever pulled 90 minutes later sits inside the
+  after-window; the before-window can straddle a generation this decision did not cause.
+- Forecloses: nothing — a pinned variant could be added later as a second column.
+
+**B) Generation-pinned `w`** — the before-window is the previous generation's life, the after-window
+is this one's, from `config_generations.[valid_from, valid_to)`.
+- Pros: **never contaminated by construction**, because a contaminating lever *is* the boundary.
+- Cons: the two windows are then different lengths, often wildly — so every comparison needs
+  normalising, and "withheld until settled" has to be evaluated against a `valid_to` that moves.
+- Reversal cost: higher; it is a different query and a different withholding rule.
+
+### Wording of record
+
+> for D68 use the symmetric 6-hour before/after window with any second lever inside it flagged as
+> contaminated on the log entry, since a stated-and-visible contamination beats two unequal windows
+> needing normalisation against a moving `valid_to` — the brief only asks for "a stated
+> before-window vs after-window heuristic"
+
+### Consequences
+
+1. **`w` = 6 h, symmetric**, measured from `decision.ts` — `[ts − 6h, ts)` and `[ts, ts + 6h)`.
+2. **Contamination is DETECTED AND SHOWN, not avoided.** Any other decision on the same ad whose
+   `ts` falls inside either window marks the entry contaminated, and the entry names the offending
+   `decision_seq`s. This is the half of the ratification that does the work: option B buys
+   cleanliness with normalisation, A buys legibility and pays with a label — and a label the reader
+   can see is worth more than a correction they cannot audit.
+3. **Withheld until both windows are past the lateness horizon** (D19 option B, D13). Until then the
+   entry reads *"scoring in Nh"*. **B49's horizon control is what makes a score producible live** —
+   shorten to 2 h and the withholding releases, which is the pairing D19 asked for by name.
+4. **The metric follows D19's recommendation and is not separately ratified**: one metric only —
+   **CPA where both windows carry conversions, CTR otherwise** — with the choice and its limits
+   stated beside the number. D19 asked *"which metric?"* and that half was never answered; the
+   recommendation in the open question is what `B50a` implements, and it is flagged rather than
+   presented as ratified.
+5. **`SCOPE.md` §4 cut #1 moves out of the cut table and into §2** as **P18**. §2–§4 is
+   README-verbatim (`CLAUDE.md` §10), so this is a README change; the README does not exist yet, so
+   the obligation is discharged entirely by the `SCOPE.md` edit.
+
+### What it forecloses
+
+The pinned variant as *the* answer — but not as an addition. Because contamination is already
+detected, the generations are already joined, so a second, generation-pinned column is additive
+rather than a rewrite if a reviewer ever asks for it.
+
+### How I'd defend this in review
+
+The brief asks for *"a stated before-window vs after-window heuristic"* and warns against
+statistical sophistication (L147). The honest failure of a symmetric window is contamination, so the
+build detects it and prints it next to the number rather than engineering it away — which is the
+same posture the fatigue flag and the maturity indicator already take, and it keeps the heuristic
+something a reader can check by hand.
