@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { tx } from './db.ts';
+import { apply } from './apply.ts';
 import type { Disposition, IngestResult, SignalKind, SignalSource } from '../shared/types.ts';
 
 /** Kinds this build ingests. B12 widens it; until then the rest are rejected, not ignored. */
@@ -113,9 +114,13 @@ export function ingest(
     SELECT payload_hash FROM signal_deliveries
     WHERE event_id = ? AND disposition = 'accepted' LIMIT 1
   `);
+  // RETURNING gives back the STORED generated `ts_effective` (the I10 clamp) in the same
+  // statement, so the projection is fed the store's own value rather than a JS recomputation of
+  // MIN() that could drift from it.
   const insertSignal = db.prepare(`
     INSERT INTO signals (event_id, ingest_seq, received_at, ts, ad_id, kind, source)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+    RETURNING ts_effective
   `);
   const highWater = db.prepare('SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals');
 
@@ -167,10 +172,18 @@ export function ingest(
       if (disposition === 'accepted') {
         const e = element as Record<string, unknown>;
         seq += 1;
-        insertSignal.run(
-          eventId, seq, receivedAt, e['ts'] as string, e['ad_id'] as string,
-          e['event'] as string, source,
-        );
+        const kind = e['event'] as SignalKind;
+        const stored = insertSignal.get(
+          eventId, seq, receivedAt, e['ts'] as string, e['ad_id'] as string, kind, source,
+        ) as { ts_effective: string };
+
+        // Same transaction, immediately: D29's incremental upsert. A reader can never observe a
+        // signal whose bucket has not moved (DESIGN §11), and a late arrival is just an event
+        // whose bucket happens to be old — restatement stops being a subsystem (§4.3).
+        apply(db, {
+          event_id: eventId, ingest_seq: seq, ts_effective: stored.ts_effective,
+          ad_id: e['ad_id'] as string, kind,
+        }, receivedAt);
       }
 
       result[disposition] += 1;
