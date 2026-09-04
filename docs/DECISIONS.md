@@ -2947,3 +2947,95 @@ settled by arithmetic against a table already in the document rather than by pre
 deciding argument was not which reading is more realistic — both are — but that under the rejected
 one the model and the read-side heuristic would disagree about what fatigue *is*, and a fatigue flag
 that can never fire is worse than either model.
+
+---
+
+## DECISION #57 — Does §12's demand noise preserve mean volume, at what interval, and does κ do anything
+
+**ACCEPTED — A, 2026-09-04.** Three parts, answered in one pass at the B30 report. Raised because
+implementing §12 exposed three things it leaves unstated.
+
+### Question
+
+**(1)** `log m` is a zero-mean AR(1), so `E[m] = exp(sd²/2)` — 1.0163 on the channel factor, 1.0317
+on the ad factor, **1.0486 together.** §12 fixes the stationary sd and says nothing about the mean,
+but §2.3's `Impr/day` column and §18.3's impressions both read `base_impr_per_day` as the mean.
+**(2)** §12 fixes `τ` and the sd and leaves the *sampling interval* Δ free, while a memory-free
+evaluation costs `O(τ/Δ)` — ~12,400 terms per tick per entity at Δ = 1 s. **(3)** `κ = 200` on the
+click rate has **no effect at all** as §10 writes it: a BetaBinomial's overdispersion enters through
+`(N−1)/(κ+1)`, exactly zero at `N = 1`, and per-tick `N` is 0–3.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| **1A** | **Subtract `sd²/2` from the logs so `E[m] = 1` exactly** | **CHOSEN** |
+| 1B | Keep §12 literal, name the +4.86% as a limit | Rejected — see the rationale |
+| **2** | **Δ = 60 s**, D28's bucket | **RATIFIED** |
+| **3A** | **Draw the click rate once per minute, `Binomial` per tick** — a minute is then exactly `BetaBinomial(N_minute, p̄, κ)` | **CHOSEN** |
+| 3B | Leave κ inert and name it in the README | Rejected once 3A proved affordable |
+
+### Rationale, in Seno's words
+
+> D57 — A. Subtract sd²/2 so E[m] = 1 exactly. I checked the numbers (1.01633 × 1.03174 = 1.04860)
+> and §12 does leave the mean unspecified. Record my reason alongside yours, because it's the one
+> that decides it: D52's pacing baselines were computed against base_impr_per_day, so a systematic
+> +4.86% doesn't just inflate a column — it runs every ad ~5% hot against budget for seven seeded
+> days and ρ_catchup × ρ_terminal throttles to compensate, landing on a_08 and a_12, the two ads
+> D52 already flagged. With a_08's hourly-CPA margin already down to 20% after D56, I don't want a
+> second unmodelled bias moving the same demo moment.
+
+> Δ = 60 s: ratified, same entry. τ/Δ of 45 and 20 resolves the autocorrelation fully and nothing
+> observable is finer than D28's minute bucket.
+
+> κ = 200: take the decision rather than leaving it inert. You're already sampling the AR(1) per
+> minute — draw the click rate on that same schedule, p ~ Beta(κ) once per minute and clicks
+> binomial over that minute's impressions, so §12's "the rate is uncertain, not just the count" is
+> true of the data instead of only of the doc. If that costs more than a few lines, stop and say so,
+> and we name it as a stated limit in the README instead.
+
+**The argument that decided (1) is Seno's, not the one that raised it.** The case put was that
+`base_impr_per_day` should mean what §4.1 says it means. The case that settled it is that the bias
+does not stay in the volume column: **D52's pacing baselines were set against `base_impr_per_day`**,
+so a permanent +4.86% is absorbed by `ρ_catchup × ρ_terminal` throttling, concentrated on the two
+ads D52 deliberately placed near their caps — and `a_08` is the ad whose hourly-CPA headroom D56
+had already cut from 53% to 20%.
+
+### Consequences
+
+1. **`m` carries a `−sd²/2` drift in log space** (`src/sim/noise.ts`). The stationary sd, `ρ` and
+   the autocorrelation are untouched — a constant shift in log space moves only the mean. The dry
+   run prints `E[m] = 1 by construction` beside the realised mean and the uncorrected 1.0486.
+2. **Δ = 60 s is no longer an assumption.** It is also the grid the click rate is now drawn on, so
+   there is one per-minute grid in the model rather than two.
+3. **§10's click block is amended in `SIMULATOR.md`** — `p_ctr` is drawn once per minute and
+   `clicks(t) ~ Binomial(N(t), p_ctr(minute))`, which makes the minute exactly the BetaBinomial §10
+   already named. §12's noise table is amended with it.
+4. **It cost ~55 lines, which is more than "a few".** A `Beta` draw needs a Gamma sampler, and
+   Marsaglia–Tsang with a shape boost for `a < 1` (the smallest `p̄·κ` in the portfolio is `a_04`'s
+   0.63) is the standard route. Reported with the number rather than waved through: the alternative
+   that needed no sampler ran the urn across the whole minute and would have batched click emission
+   to the minute boundary.
+5. **Verified by A/B, not by assertion.** Same impressions, same uniforms, per-minute Beta rate
+   against a fixed `p̄_ctr`: the variance ratio tracks `1 + (N̄−1)/(κ+1)` — `a_08` 1.32 against 1.23
+   predicted, `a_07` 0.99 against 1.01. An absolute `var/mean` would not have shown this, because
+   clicks also inherit the variance of `N`; that was the first version of the measurement and it
+   overshot.
+6. **`κ = 60` for conversions stays inert, as a stated limit.** A conversion draw is over one tick's
+   clicks — 0–1, and still 0–1 over a minute — so the same fix buys nothing. Only an hour-wide
+   window would, and that is a further decision. In `BUILD_PLAN.md` §14 and owed to the README.
+
+### What it forecloses
+
+Modelling a platform whose demand shocks are genuinely mean-inflating — real auction pressure is not
+symmetric in log space, and after (1) ours is. The honest framing is that `base_impr_per_day` is now
+a *mean* rather than a *median-ish typical day*, and anyone wanting the other reading has to say
+which of §2.3, §18.3 and D52 they are willing to restate.
+
+### How I'd defend this in review
+
+All three parts were things the spec left unstated rather than got wrong, and each was settled by
+asking what already depends on the answer: D52's budgets for the mean, D28's bucket for the
+interval, and D20's gates for the granularity the rate uncertainty has to be visible at. The third
+part is the one worth pointing at, because the parameter was *transcribed correctly and did nothing*
+— which no test would have caught, and which the model now demonstrates by A/B rather than claims.

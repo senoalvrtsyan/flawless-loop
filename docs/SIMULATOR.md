@@ -412,12 +412,30 @@ consequence 3), and it rides the rate curve the simulator needs anyway.
 ## 10 — Clicks, conversions, value, spend
 
 ```
-clicks(t)      ~ BetaBinomial(N(t), p_ctr, κ = 200)
-p_ctr          = ctr_base(temperature) × ctr_mult(channel) × φ_ad × ν
+p_ctr(minute)  ~ Beta(p̄_ctr·κ, (1−p̄_ctr)·κ),  κ = 200     -- ONCE PER MINUTE  [D57]
+clicks(t)      ~ Binomial(N(t), p_ctr(minute))             -- so the MINUTE is BetaBinomial
+p̄_ctr          = ctr_base(temperature) × ctr_mult(channel) × φ_ad × ν
 conversions    ~ BetaBinomial(clicks(t), p_cvr, κ = 60)
 p_cvr          = cvr(temperature) × cvr_mult(channel) × dow_cvr
 order value    ~ LogNormal(median = order_value(temperature) × dow_aov, σ = 0.6)
 ```
+
+> **The click rate is drawn per minute, not per tick — D57, 2026-09-04.** This block previously read
+> `clicks(t) ~ BetaBinomial(N(t), p_ctr, κ = 200)`, and **κ had no effect whatsoever**: the
+> overdispersion of a BetaBinomial enters through `(N−1)/(κ+1)`, which is exactly zero at `N = 1`,
+> and per-tick `N` across the portfolio is 0–3. §12's *"the rate is uncertain, not just the count"*
+> was a property of this document and not of the data.
+>
+> Drawing `p` once per minute and taking `Binomial(N(t), p)` on each of the minute's ticks makes a
+> minute's clicks **exactly** `BetaBinomial(N_minute, p̄_ctr, κ)` — the distribution named here, at
+> the granularity **D28** buckets and **D20** gates on — while keeping each click emitted in the
+> same second as the impression that produced it. The minute is `DEMAND.stepMs`, the same grid D57
+> ratified for §12's demand factors.
+>
+> **`κ = 60` for conversions is unchanged and is still inert.** A conversion draw is over one tick's
+> *clicks*, which is 0–1, and stays 0–1 over a minute; only an hour-wide window would give it an
+> effect, and that is a further decision about where cohort-rate uncertainty lives. Named as a limit
+> rather than absorbed — `BUILD_PLAN.md` §14.
 
 - Every click mints a **`click_id`** distinct from its `event_id` (**E3**), derived from the keyed
   RNG (§14) so it is reproducible and so a conversion can reference it before it is emitted.
@@ -495,7 +513,7 @@ perturb, and each has a stated source.
 | Channel demand `m_channel(t)` | log-AR(1), τ = 45 min, stationary sd 0.18 | platform-wide traffic and auction pressure — **moves every ad on that channel together** |
 | Ad delivery `m_ad(t)` | log-AR(1), τ = 20 min, sd 0.25 | platform-side creative rotation, idiosyncratic per ad |
 | Impression counts | `NegBinomial(λ, α = 8)` → `Var/mean = 1 + λ/α` | overdispersion **grows with volume**, the empirical signature of served traffic |
-| Click rate | `BetaBinomial(κ = 200)` | audience composition drift — the *rate* is uncertain, not just the count |
+| Click rate | `Beta(κ = 200)` **once per minute**, then `Binomial` per tick (**D57**) | audience composition drift — the *rate* is uncertain, not just the count, and per minute that is now true of the data as well |
 | Conversion rate | `BetaBinomial(κ = 60)` | the same, and thinner, so cohort ratios are the noisy ones |
 | CPC | `LogNormal(σ = 0.35) × m_channel^0.6` | **competition raises price and volume pressure together** |
 
