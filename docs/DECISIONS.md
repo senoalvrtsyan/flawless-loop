@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D58 (D44, D45 deferred) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D59 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -121,6 +121,7 @@ level — and not a severity.
 | D56 | Where fatigue and novelty enter the model: λ, or `p_ctr` | **ACCEPTED — A** (`p_ctr` only; λ has four factors, not six) | 2026-09-04 |
 | D57 | Does §12's demand noise preserve mean volume, at what interval, and does κ do anything | **ACCEPTED — A / Δ = 60 s / A** (`E[m] = 1` by a −sd²/2 drift; the click rate drawn once a minute) | 2026-09-04 |
 | D58 | `ρ_pacing` is path-dependent, and §14's restart identity is not | **ACCEPTED — B** (sub-second placement made independent of the count) | 2026-09-04 |
+| D59 | `ρ_catchup` boosts delivery the model has no inventory for | **ACCEPTED — B** (ceiling 1.6 → 1.0: pacing throttles, never boosts) | 2026-09-04 |
 
 ---
 
@@ -3129,3 +3130,89 @@ fabricated `duplicate_conflicting` is the worst available, because it is indisti
 the divergence onto a channel that is already honest about itself (an event that exists or does
 not) and costs a property no reader of this build can observe. It was measured before it was
 decided, and the measurement is in the entry.
+
+---
+
+## DECISION #59 — `ρ_catchup` boosts delivery the model has no inventory for
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-04 · **Blocks:** B32's commit, and B33 behind it
+**Relates to:** `SIMULATOR.md` §9, §21, §2.3, §18.3 · D52 · D56 · D57 · I3/P11 · HR7
+
+### Question
+
+§9 gives `ρ_catchup` a ceiling of **1.6**, so an ad behind pace is sped up. Built and measured at
+B32, that turned out to inflate the entire seeded portfolio. The chain: **D52's budgets were
+derived from a baseline computed at `φ = ν = 1`**, a fatigued world spends far less than that
+baseline, so every ad is more than 20 points behind pace all day — and `ρ_catchup`'s clamps bind at
+a pace gap of ±0.2, so every ad sits **on** the ceiling rather than on the curve.
+
+Measured, 24 h dry run of the twelve seeded ads:
+
+| ad | budget | spent | `a` end | mean ρ | in taper | impressions | §2.3 says | vs nominal |
+|---|---|---|---|---|---|---|---|---|
+| a_01 | 250000 | 52076 | 0.208 | 1.456 | 0.0% | 99968 | 73500 | **1.36×** |
+| a_04 | 12000 | 8400 | 0.700 | 1.396 | 0.0% | 25746 | 17640 | **1.46×** |
+| a_05 | 90000 | 20353 | 0.226 | 1.462 | 0.0% | 37389 | 25480 | **1.47×** |
+| a_08 | 95000 | 85797 | 0.903 | 1.270 | **0.1%** | 88840 | 63700 | **1.39×** |
+| a_11 | 15000 | 11738 | 0.782 | 1.259 | 0.0% | 21067 | 17640 | 1.19× |
+| a_12 | 9000 | 8818 | 0.980 | 1.041 | 10.3% | 20300 | 19600 | 1.04× |
+
+Every ad delivered **1.19×–1.47×** §2.3's stated `Impr/day`. `a_08` — the ad D52 placed near its cap
+so the taper would be visible — spent **0.1%** of ticks in the taper. Only `a_12` behaved as D52
+designed. **This is 8× the +4.86% bias D57 was ratified to remove**, for the reason Seno gave in
+that entry: a systematic volume bias does not stay in the volume column, it lands on pacing and on
+the two flagged ads.
+
+`fixtures.ts` had anticipated the *spend* gap (*"a_01 at φ 0.25 spends ~$610, not $1,992"*). The
+sentence that did not survive is D52's conclusion — *"Ten sit ~25% above their baseline, so §9's
+pacing is inert for them."* Pacing was not inert; it was **pinned**.
+
+### Options as presented
+
+| | Option | Verdict |
+|---|---|---|
+| A | **Accept, and restate §2.3.** `Impr/day` becomes "volume at ρ = 1"; §18.3's ladder and D20's gate placements are re-derived at the new volumes | Rejected — a stated table the data misses by up to 47% is the opposite of HR7's *"the mock data is a design artifact"*, and it moves `a_08`'s hourly-CPA headroom a third time (53% → 20% at D56 → again) |
+| **B** | **Cap `ρ_catchup` at 1.0 — throttle only, never boost.** One constant; `SIMULATOR.md` §9 and §21 amended in place with the reason, as D56 amended §3 and D57 amended §10/§12 | **CHOSEN** |
+| C | **Re-derive the twelve budgets against realised spend**, so `a` tracks `e` and both terms live on the curve | Rejected for now — reopens D52, which rejected exactly this as *"a chosen number wearing a formula's clothes"*; budgets stop being an account setting and become fitted; needs a reseed and moves every §18.3 rung and B35's calibration. The better model given a week |
+
+### Rationale, in Seno's words
+
+> B — amend SIMULATOR.md §9 and §21, then re-run
+
+**Recorded as a bare option choice**, so the reasoning of record is the one put with the
+recommendation rather than a reconstruction in Seno's voice. That reasoning: **§9's catch-up half
+models a constraint this simulator does not have.** λ is exogenous in §3 with no auction-supply
+ceiling, so *"behind pace"* here means *the budget is larger than the demand*, and the honest
+response is to deliver what demand supports rather than to invent 60% more of it. B keeps every
+claim §9 makes that the artifact actually demonstrates — the taper, the +5% tolerance, the instant
+`set_budget` response — and drops the one it cannot honestly show.
+
+### Consequences
+
+1. **`PACING.catchupMax` is 1.0.** `ρ_catchup = clamp(1 + 3.0·(e − a), 0.05, 1.0)`.
+2. **`SIMULATOR.md` §9 and §21 are amended in place**, carrying the measurement and the reason, not
+   just the new number. §22 gains no row: nothing outside `SIMULATOR.md` changes.
+3. **D52's claim becomes true.** With the ceiling at 1.0 and `a < e` all day, `ρ_catchup` is exactly
+   1 for the ten unconstrained ads — *"pacing is inert for them"* now holds as written.
+4. **`ρ_catchup` is not dead.** It still throttles an ad running *ahead* of its channel's shape of
+   the day, which is the intraday behaviour §9's `e` exists to express.
+5. **D26 consequence 3 is untouched.** Raising `a_12`'s budget lifts `ρ_terminal` off the floor and
+   the rate rises within one tick — the second closable decision still closes.
+6. **B35's calibration gets its reference back.** §2.3's `Impr/day` is checkable again, and the only
+   ads expected below it are `a_08` and `a_12`, which is what D52 intended and what STATUS's
+   "what is owed" already told B35 to expect.
+
+### What it forecloses
+
+Any demo of an ad **accelerating** to hit its budget — §9 now models pacing in the throttling
+direction only. Reinstating it means taking option C first, because the boost is only honest once
+budgets are set against spend the model can actually reach.
+
+### How I'd defend this in review
+
+The parameter was transcribed correctly and the section implemented as written; what was wrong was
+an assumption underneath it — that an ad behind pace has inventory to catch up into. This build's λ
+is exogenous, so it does not. The failure was invisible in the spec and obvious in one dry run
+against §2.3's own column, which is exactly the check stage 3 was designed around: every chunk
+compares against a table already in the document, so *"does it match"* is arithmetic rather than
+judgement. It did not match, by up to 47%, and the number is in the entry.

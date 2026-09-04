@@ -389,10 +389,29 @@ front-loads its budget into the morning and goes dark before prime time. So:
 e(t) = ∫ d_c dt from day start to t  /  ∫ d_c dt over the whole day     -- expected traffic elapsed
 a(t) = spend_so_far_today / daily_budget_cents                          -- actual budget consumed
 
-ρ_catchup  = clamp(1 + 3.0 · (e − a),  0.05, 1.6)      -- behind pace: speed up; ahead: throttle
+ρ_catchup  = clamp(1 + 3.0 · (e − a),  0.05, 1.0)      -- ahead of pace: throttle. NEVER boosts.
 ρ_terminal = clamp((1.05 − a) / 0.15,  0, 1)           -- the taper into the cap
 ρ_pacing   = ρ_catchup × ρ_terminal
 ```
+
+**`ρ_catchup`'s ceiling is 1.0, not 1.6 — amended in place by D59 (2026-09-04, at B32), with the
+reason rather than the value alone.** The 1.6 ceiling assumed an ad is *delivery-limited by
+pacing*: speed it up and the inventory is there. **Ours are demand-limited.** §3's λ is exogenous
+and has no auction-supply ceiling, so a boost manufactures impressions this model says do not
+exist — and it does so permanently, because D52's budgets are deliberately generous and the
+baselines behind them were computed at `φ = ν = 1` while a fatigued world spends far less.
+
+Measured at B32 before the amendment, over a 24 h dry run of the seeded portfolio: every ad sat
+**on** the 1.6 clamp (ρ_catchup's clamps bind at a pace gap of ±0.2, and every ad was 20+ points
+behind all day) and delivered **1.19×–1.47× §2.3's stated `Impr/day`**. `a_08`, the ad D52 placed
+near its cap so the taper would be visible, spent **0.1%** of ticks in the taper. D52's conclusion
+— *"Ten sit ~25% above their baseline, so §9's pacing is inert for them"* — was false as written:
+pacing was not inert, it was pinned. With the ceiling at 1.0 it is true.
+
+What the amendment costs is stated too: an ad that underspends its budget is no longer accelerated
+to hit it, so §9 no longer models catch-up in the upward direction. Everything else in this section
+is untouched — `ρ_catchup` still throttles an ad running ahead of its channel's shape of the day,
+the taper still tapers, and the +5% tolerance is unchanged.
 
 | `a` (on pace, `e` = `a`) | 0.50 | 0.85 | 0.90 | 0.95 | 1.00 | 1.05 |
 |---|---|---|---|---|---|---|
@@ -924,9 +943,11 @@ FATIGUE                        φ(f) = 0.25 + 0.75·exp(−0.35·f)          [D3
 NOVELTY                        ν(age_h) = 1 + 0.25·exp(−age_h/18)
 
 PACING                                                                [I3, P11]
-  ρ_catchup                    clamp(1 + 3.0·(e − a), 0.05, 1.6)
+  ρ_catchup                    clamp(1 + 3.0·(e − a), 0.05, 1.0)      [ceiling 1.6 -> 1.0, D59]
   ρ_terminal                   clamp((1.05 − a)/0.15, 0, 1)
   overspend tolerance          +5%
+  (D59: pacing throttles, never boosts. lambda is exogenous in §3, so an ad behind pace has no
+   inventory to catch up into; the 1.6 ceiling ran the whole portfolio 1.19-1.47x §2.3. See §9.)
 
 CONVERSION LAG                                                        [D36]
   purchase, fast               Exponential(mean 12 min),  prob p_fast
