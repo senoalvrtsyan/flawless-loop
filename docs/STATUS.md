@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, read half open · 7 / 63 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 in progress · stage 1, a number on screen · 8 / 63 chunks**
 
 ---
 
@@ -13,16 +13,17 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 document is provisional.
 
 **Phase 5 (implementation) is running.** Seno gave the go-ahead 2026-09-04. **Stage 0 (B01–B03) is
-closed** — the store. **Stage 1 (B04–B11) is over halfway**: B04–B07 are in. The write half works
-end to end — an event POSTed to `/api/ingest` is stamped, validated, deduped, persisted and rolled
-up into `rollup_minute` in one transaction, and survives a restart — and the read half now has its
-first path: `GET /api/snapshot` returns the bucket rows for a minute-aligned window plus the cursor,
-in one read transaction. Seven commits, one per chunk, each approved before it landed.
+closed** — the store. **Stage 1 (B04–B11) is five chunks in of eight**: B04–B08. The spine now runs
+end to end in one direction. An event POSTed to `/api/ingest` is stamped, validated, deduped,
+persisted and rolled up into `rollup_minute` in one transaction; `GET /api/snapshot` returns that
+bucket's row for a minute-aligned window plus the cursor, in one read transaction; and a React page
+on **:5173** puts the number on screen, where it survives a refresh and a restart of both processes.
+Eight commits, one per chunk, each approved before it landed.
 
-**Next is B08** — the first client code in the repo: fetch the snapshot, render one number, no chart
-and no styling. Then B09/B10 make it live over SSE, and B11 replaces `curl` with the simulator
-process. `BUILD_PLAN.md` §4 calls stage 1 *"the riskiest thing in the build"*:
-everything after it is width on a proven spine.
+**Next is B09/B10** — make it live over SSE; then B11 replaces `curl` with the simulator process and
+stage 1 closes. `BUILD_PLAN.md` §4 calls stage 1 *"the riskiest thing in the build"*: everything
+after it is width on a proven spine. **What is still missing from the skeleton is only the live
+push** — the number is correct and durable, but it moves only on a refresh.
 
 **No decision blocks anything from here to B35.** For the first time since Phase 0 the path is
 clear. D44/D45 are *deferred* (**F4**) and come back at the stage 3 → 4 seam; see "What is open".
@@ -56,15 +57,19 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | **`src/shared/types.ts`** | B05. The brief's `Signal` (L76) **verbatim**, `event` discriminator and all; `Disposition`, `SignalSource`, `IngestResult`. |
 | **`src/server/ingest.ts`** | B05. `ingest(db, raw, source, now)` — DESIGN §5.1 in one transaction. **Also the seeder's entry point** (SIMULATOR §15.2): one writer of `ingest_seq`. |
 | **`src/server/snapshot.ts`** | B07. `GET /api/snapshot` — `parseSnapshotQuery()` (explicit offset required, bounds snapped to the minute, echoed) and `snapshot()`. Read-only by construction: SELECTs and nothing else. B21 adds settlement state, B38 the ratios, B51 the descriptors. |
+| **`index.html`, `vite.config.ts`** | B08. Vite dev-serves `src/web` alone on **:5173** and proxies `/api` to :8787 (D41-A). Client fetches relative paths, so no CORS and one configuration. Unstyled: D45 deferred. |
+| **`src/web/main.tsx`, `src/web/App.tsx`** | B08. Fetch the snapshot for the last hour, render **one bucket's `impressions` verbatim** plus the resolved window, `as_of_ingest_seq` and a raw-response `<details>`. No sum — see **D46**. Nothing durable client-side (§3). |
 | **`src/server/apply.ts`** | B06. **The single projection writer (D7).** `apply()`, `floorMinute()`, D29's upsert. Impressions only; B16/B18 widen it. |
-| **`src/{sim,web}/…`** | B01 placeholders, still empty: `src/sim/index.ts` (B11), `src/web/main.tsx` (B08). |
+| **`src/sim/index.ts`** | B01 placeholder, still empty — B11 fills it. Exits cleanly, which the dev runner tolerates by design. |
 
 ## How to run what exists
 
 ```
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
-npm run dev           # server on :8787 + the (still empty) simulator process
+npm run dev           # THREE processes: server :8787, Vite client :5173, sim (empty until B11)
+                      # then open http://localhost:5173 — StrictMode fetches the snapshot TWICE
+                      # in dev, so two GET /api/snapshot per load is expected, not a bug
 npm run typecheck     # tsc --noEmit, must be clean
 npm test              # node --test — no test files yet (D43), exits 0
 sqlite3 data/loop.sqlite ".schema"
@@ -85,7 +90,7 @@ empty. `node:sqlite` prints an `ExperimentalWarning` on every run — that is **
 
 ## The build plan in one paragraph
 
-Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B07 done) is the walking skeleton and the whole
+Stage 0 (B01–B03, **done**) is the schema. **Stage 1 (B04–B11, B04–B08 done) is the walking skeleton and the whole
 point of the ordering**: one simulated event, persisted, aggregated, transported over SSE, on screen,
 surviving a refresh *and* a restart of both processes — impressions only, one hard-coded ad, before
 any breadth. Stage 2 (B12–B24) is the full write path — fold, generations, all four signal kinds,
@@ -110,6 +115,13 @@ one-line-each version is `docs/CHEATSHEET.md` table 1 (currently one pass behind
 - **D41–D43, F4 (2026-09-04, Phase 5 toolchain)** — single package + Vite client-only · `node:http`
   + hand-rolled router · `node:test` on the functions whose wrongness is invisible · D44/D45
   deferred, not open.
+- **D46 (2026-09-04, at B08)** — window aggregation: the server computes **and signs** totals and
+  ratios; **SSE keeps per-minute absolute rows unchanged**; the client may re-bucket to display
+  granularity only under the **same server-issued descriptor**. Seno's own option, an amendment to
+  the three offered. It also corrected a misreading of mine that is worth not repeating: **§10.2's
+  "compare the client to itself" is about the rejected D30-A (the client aggregating RAW events)**,
+  not a ban on all client arithmetic — what forbids an undescribed total is **§10.1**, because
+  B52's `<Metric>` cannot render a value with no descriptor.
 - **U1–U7**, and **U8–U9** (2026-09-04) — store path `data/loop.sqlite`; `ExperimentalWarning` left
   visible.
 - **8 cheap defaults** — ratified as a block.
@@ -130,7 +142,7 @@ wrongness cannot be seen by hand or by the B24 sweep.
 
 ## What is open
 
-**Nothing blocks any chunk from B08 to B35.**
+**Nothing blocks any chunk from B09 to B35.**
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
@@ -152,10 +164,10 @@ obligations come with that, both of which bite silently if dropped, and both are
 | | |
 |---|---|
 | **Current stage** | **Stage 1 — the walking skeleton (B04–B11)**, write half done |
-| **Last completed chunk** | **B07** — `GET /api/snapshot?from&to&ads`, the first read path. |
-| **Next chunk** | **B08** — client shell: fetch the snapshot, render one number. No chart, no styling (D45 is deferred — unstyled HTML, and say so). Files `src/web/main.tsx`, `src/web/App.tsx`, `index.html`. Spec `DESIGN.md` §3, §3.1. **First client code in the repo.** Verify: number appears, refresh → same number, restart the server → still there. |
+| **Last completed chunk** | **B08** — client shell, one number on screen, commit `f050dae`. |
+| **Next chunk** | **B09** — `GET /api/stream`: SSE transport, per-minute **absolute** bucket rows on a flush tick, `Last-Event-ID` resume from `as_of_ingest_seq`. Spec `DESIGN.md` §3.1 steps 2–4, §5.5 (D30). **D46 fixes its wire shape:** per-minute absolute rows only — no display-granularity variant, or D30 consequence 2's idempotent resume breaks. |
 | **In flight** | nothing |
-| **Chunks ticked** | **7 / 63** (B01–B07) — 63 because B20a was added, see below |
+| **Chunks ticked** | **8 / 63** (B01–B08) — 63 because B20a was added, see below |
 | **Cut line status** | nothing cut |
 | **Plan edits made during Phase 5** | **B16 split** (2026-09-04, Seno's call): B16 was to widen `SUPPORTED` to all three remaining kinds while B18 extended `apply()` — so B16 would have shipped a server that 500s on its own verify step. B16 now takes **click + spend, ingest *and* `apply()`**; **conversion ingest moved to B18**, with placement, because `ingest()` calls `apply()` for every accepted signal and a no-op branch would be the exact divergence `default: throw` prevents. **B17's `curl` verification is therefore B18's**; B17 is exercised on a fixture. |
 | **Plan edits, cont.** | **B20a added** (2026-09-04, Seno's call, after B07): `src/shared/time.ts` — one implementation of the timestamp invariant (`isCanonicalIso` / `toCanonicalIso` / `floorMinute`), inserted immediately **before B21** because B21's horizon sweep would otherwise be the *fourth* copy of that rule (ingest's round-trip B05, `apply()`'s regex B06, snapshot's inline snap B07). Lettered, not renumbered: `B21`–`B62` are cited by id across four documents. |
@@ -176,6 +188,11 @@ against the real store, and are not in any design document.
   property the design exists to demonstrate and **will not show up as a test failure**.
   `sim_scenarios` is **not** a projection and is the one table in `002_projections.sql` that
   `apply()` does not own.
+- **A client that re-buckets must aggregate at the descriptor's own `granularity_s` and forward the
+  descriptor byte-for-byte** (D46, bites at B38/B51/B52/B53). Re-bucketing to a granularity the
+  descriptor does not name makes the drill-down replay a *different question* — and it can **pass by
+  coincidence**. The HMAC catches a client-minted descriptor; nothing catches this. **B53's
+  drill-down is the check that makes D46 safe**, so it is not optional.
 - **B24's agreement sweep must be a single whole-log pass**, not `replay()` called per bucket. The
   obvious implementation is O(buckets × N): 4 seconds becomes hours.
 - **Settlement is evaluated at the arriving event's `received_at`, never at wall-clock `now`**
@@ -285,18 +302,23 @@ version gap is the first thing to check.
 
 ## Next action
 
-**Announce B08, build it, report, wait.** Nothing needs deciding first.
+**Announce B09, build it, report, wait.** Nothing needs deciding first.
 
-B08 is the **first client code in the repo**: fetch `/api/snapshot` and render one number, no chart
-and no styling. D45 (styling) is **deferred** until B36, so B08 uses unstyled HTML and says so in
-its report — a stylesheet here would settle D45 by drift, which §2 of `BUILD_PLAN.md` forbids. Read
-`DESIGN.md` §3 before writing it: the persistence-boundary table is what fixes *what the client is
-allowed to own* (viewport, SSE cursor, a render cache — nothing durable, no `localStorage`). The
-number must come back after a refresh AND after a server restart, which is HR1.
+B09 is `GET /api/stream` — SSE. Read `DESIGN.md` §3.1 steps 2–4 and §5.5 before writing it. Three
+things already fixed that it must respect:
 
-Two things B07 leaves for the client to know: the snapshot echoes the **snapped** window in
-`query`, so the client renders the window the server actually answered rather than the one it asked
-for; and `as_of_ingest_seq` is the cursor B09 hands back as `Last-Event-ID`.
+- **D30: absolute rows, never deltas.** For every bucket touched by a signal with
+  `ingest_seq > cursor`, send the bucket's **current** row. A delta replayed after a reconnect
+  double-counts; an absolute row is idempotent, and the reviewer *will* refresh.
+- **D46 (new): the stream stays per-minute.** No display-granularity rows on the wire — that is
+  exactly what D46 rejected, because it breaks D30 consequence 2's idempotent resume. Totals and
+  ratios are the snapshot's job.
+- `openSse()` already exists in `src/server/http.ts` from B04, unused until now; `apply()` already
+  returns the `BucketKey` it moved, so the dirty set needs no new plumbing.
+
+The client's cursor is `as_of_ingest_seq` from the snapshot, handed back as `Last-Event-ID` (D18).
+`§3.1` also specifies the `resnapshot` frame for a cursor the server cannot serve cheaply — state
+whether B09 implements it or B10 does.
 
 For reference, the remaining gates in `CLAUDE.md` §4 order:
 

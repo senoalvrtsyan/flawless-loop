@@ -539,6 +539,17 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   in `sqlite_master`, so even that much makes `.schema` differ between a fresh store and an old
   one.) Schema changes get a new numbered file.
 
+- **A client that re-buckets must aggregate at the descriptor's own `granularity_s`, and forward
+  the descriptor byte-for-byte** (D46, ratified at B08; bites at B38/B51/B52/B53). D46 permits the
+  client to re-bucket server-computed counts to display granularity, on the condition that what it
+  renders carries the **server-issued** descriptor unchanged — the descriptor being *the query, not
+  the answer*. Two ways that goes silently wrong: re-bucketing to a granularity the descriptor does
+  not name (the drill-down then replays a different question, and may *pass* by coincidence when
+  the totals happen to match), or minting/editing a descriptor client-side to match the chart. The
+  HMAC catches the second and nothing catches the first, so it is a rule. The check that makes D46
+  safe is **B53's drill-down**, which is therefore not optional: it is where a client aggregation
+  bug becomes a visible **FAIL** instead of a plausible number.
+
 - **No new dependency without a decision** (§3), and no drive-by refactors (§5).
 - **Every chunk leaves the app runnable.** If a chunk cannot, it is two chunks.
 - **If a chunk reveals the design is wrong, stop coding and reopen the design doc.** Do not patch

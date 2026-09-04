@@ -2571,3 +2571,55 @@ scoping from the start?
 **Batch note.** Answer D41–D43 to unblock B01. D44 and D45 can wait until stage 4 without stalling
 anything; if you would rather decide them later, say so and `BUILD_PLAN.md` §2 gets a note that they
 are deferred rather than open.
+
+---
+
+## Wave 8 — Phase 5 read side (D46)
+
+**Raised at B08, 2026-09-04, and ratified the same day** — `docs/DECISIONS.md` § Wave 8. Kept here
+because `CLAUDE.md` §3's compression allowance requires the full option analysis to survive
+somewhere; the entry there points at this section.
+
+### D46 — Where window aggregation lives: who computes a displayed total
+
+**Blocked:** nothing at the time of asking — B08 shows a per-bucket number under any answer. Blocks
+**B38** (ratios); shapes **B36** (portfolio list, granularity), **B51** (descriptor issuance),
+**B52** (`<Metric>`), **B53** (drill-down), and — the part I missed — **B09/B10** (the live path).
+
+**Context as presented.** `DESIGN.md` §10.1's `TraceDescriptor` is itself a window aggregate:
+`metric` + `ad_ids` + `from`/`to` + `granularity_s`. §10.2 adds *"if the client did the arithmetic
+(D30-A), the walk-back would compare the client to itself."* Meanwhile `BUILD_PLAN.md` B38's file
+list puts `src/web/metrics.ts` on the **client**, which reads as client-side CTR/CPA/ROAS. B07 puts
+per-bucket counts on the wire and no total at all, so B08 had nothing to render as a headline
+number.
+
+| | Option | How it works | Forecloses | Reversal cost |
+|---|---|---|---|---|
+| **A** | Server computes every displayed aggregate | Snapshot grows a totals/series block per metric and granularity; B51 signs each. `web/metrics.ts` becomes formatting only | Nothing. Costs one SQL `SUM` per metric in the read transaction that already exists | Low now; high once B38/B51 are built on another answer |
+| **B** | Client aggregates from server bucket counts | Drill-down offered on buckets only; totals explicitly not drillable | **HR5 on every headline number the strategist actually reads** | Medium — B38, B51 and B53 all move |
+| **C** | Hybrid | Server computes window totals and ratios (drillable); client re-buckets for coarser chart granularity, labelled not drillable | Little, but two aggregation rules are on screen at once | Low |
+| **D** | **C with one change — Seno's amendment** | Server computes **and signs** totals and ratios in the snapshot; SSE keeps per-minute absolute rows unchanged; the client's re-bucketing to display granularity **carries the same server-issued descriptor** | Nothing identified | Low |
+
+**My recommendation was A, and two of its supporting arguments were wrong.** Recorded because the
+entry in `DECISIONS.md` is the defence and a wrong argument inside it would not survive review:
+
+1. **§10.2 does not forbid client arithmetic.** *"Compare the client to itself"* is about the
+   rejected **D30-A** — the client aggregating **raw** events. It says nothing about a client
+   aggregating server-computed counts, so **B does not fail on that argument.** B fails on **§10.1**
+   instead: the descriptor rides on values the *server* sends, so a client-computed total has no
+   descriptor and **B52's `<Metric>` cannot render it.** Same conclusion, different reason — and the
+   reason is what a reviewer will test.
+2. **None of A/B/C answered the live path**, which is **B09/B10**, the very next chunks. Under
+   strict A the post-SSE total is either recomputed on the client anyway — A violated within two
+   chunks of being chosen — or SSE has to carry display-granularity rows, which breaks **D30
+   consequence 2**'s idempotent resume, the property that makes a reconnect safe.
+
+**Why D resolves it.** The descriptor is *the query, not the answer* (§10.1's own words,
+`granularity_s` included), so a client that re-buckets under an unchanged server descriptor is not
+making a claim of its own — it is answering the server's question at the server's granularity, and
+**B53 checks that answer against raw**. A client aggregation bug therefore reads as **FAIL in the
+drill-down** rather than as a plausible number. D34's quarantine holds, because nothing renders
+without a descriptor. D10 is untouched: counts aggregate, the division comes after.
+
+**The trade, stated.** A makes client arithmetic bugs *impossible*; D makes them *caught on click*.
+D buys the live path for that price.

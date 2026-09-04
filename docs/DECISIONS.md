@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D43 (D44, D45 open) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D46 (D44, D45 deferred) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -106,6 +106,7 @@ level — and not a severity.
 | D42 | HTTP server: `node:http` or a framework | **ACCEPTED — A** (`node:http` + a ~40-line router) | 2026-09-04 |
 | D43 | Test runner, and what gets a test at all | **ACCEPTED — A** (`node:test`, four pure functions) | 2026-09-04 |
 | D44, D45 | Chart rendering · styling | **DEFERRED to stage 4** (B36/B37) — see F4 | 2026-09-04 |
+| D46 | Where window aggregation lives — who computes a displayed total | **ACCEPTED — D**, Seno's own option (an amendment to the three offered) | 2026-09-04 |
 | F4 | D44/D45 are deferred, not open | **DECIDED** | 2026-09-04 |
 | U8, U9 | Store path `data/loop.sqlite` · `ExperimentalWarning` left visible | **ACCEPTED** — ratified at B02 | 2026-09-04 |
 
@@ -2140,3 +2141,112 @@ re-raised: a chunk wanting it quiet must argue the case anew.
 **How I'd defend this in review.** The store's location and the driver's experimental status are
 both things a reviewer will notice within a minute of cloning; each is written down with its reason
 rather than discovered.
+
+---
+
+# Wave 8 — Phase 5 read side (D46)
+
+Raised at **B08**, 2026-09-04, and answered the same day. One decision, and the chosen option is
+**Seno's own** — an amendment to the three I offered, which is recorded as such rather than folded
+into my recommendation.
+
+**Wording of record.** Quoted in full below, because unlike the Wave 7 sentences this rationale
+*is* the analysis: it corrects two arguments of mine and adds the constraint none of my options
+met. Full option table in `docs/OPEN_QUESTIONS.md` § Wave 8 — the §3 compression allowance.
+
+---
+
+## DECISION #46 — Where window aggregation lives: who computes a displayed total
+
+**Status:** ACCEPTED — **option D, authored by Seno** · **Date:** 2026-09-04 ·
+**Blocked:** nothing when asked · **Blocks:** B38 · **Shapes:** B09, B10, B36, B51, B52, B53
+
+### Question
+
+`DESIGN.md` §10.1's `TraceDescriptor` is a window aggregate (`metric` + `ad_ids` + `from`/`to` +
+`granularity_s`) issued by the server with the value. `BUILD_PLAN.md` B38 nonetheless puts
+`src/web/metrics.ts` on the client. B07 sends per-bucket counts and no total, so B08 had no
+headline number it could legitimately render. Who computes a displayed window total — and its
+ratios?
+
+### Options as presented (one line each; full analysis in `OPEN_QUESTIONS.md` § Wave 8)
+
+- **A)** Server computes every displayed aggregate; snapshot grows signed totals/series;
+  `web/metrics.ts` becomes formatting only. Forecloses nothing; reversal cost low now, high later.
+- **B)** Client aggregates from server bucket counts; only buckets are drillable. **Forecloses HR5
+  on every headline number the strategist reads.**
+- **C)** Hybrid — server computes window totals and ratios; client re-buckets for coarser chart
+  granularity, labelled not drillable.
+- **D)** *Added by Seno.* C with one change: the client's re-bucketing carries the **same
+  server-issued descriptor**.
+
+**My recommendation was A. Two of its supporting arguments were wrong** — see the rationale.
+
+### Chosen
+
+**D.** Server computes and signs totals and ratios in the snapshot. **SSE keeps per-minute absolute
+rows, unchanged.** The client may re-bucket to display granularity, and what it renders carries the
+server's descriptor unmodified.
+
+### Rationale — Seno's words
+
+> "#46 — option D, an amendment to your three. Two corrections: §10.2's "compare the client to
+> itself" is about the rejected D30-A (client aggregates raw), so B doesn't fail on that argument;
+> it fails on §10.1 — the descriptor rides on values the server sends, so a client-computed total
+> has no descriptor and B52's <Metric> can't render it. And none of A/B/C answers the live path,
+> which is B09/B10 — next up. Under strict A the post-SSE total either gets recomputed on the
+> client anyway, or SSE carries display-granularity rows and breaks D30 consequence 2's idempotent
+> resume.
+>
+> D(essentially C with one change): the descriptor is the query, not the answer (§10.1's words,
+> granularity_s included). Server computes and signs totals and ratios in the snapshot; SSE keeps
+> per-minute absolute rows unchanged; the client's re-bucketing to display granularity carries the
+> same server-issued descriptor, so the quarantine holds and B53 checks it against raw — a client
+> aggregation bug reads as FAIL in the drill-down. Stays inside D10: counts aggregate, the division
+> comes after. Trade vs A: A makes client arithmetic bugs impossible, D makes them caught on click.
+> Worth it to avoid paying in B09."
+
+### The two corrections, kept separate
+
+Both are corrections to **my** analysis and both change what this decision defends:
+
+1. **§10.2 is not a ban on client arithmetic.** It is about **D30-A**, the client aggregating
+   **raw** events. The rule that actually binds is **§10.1**: a descriptor rides on server-sent
+   values, so a client-invented total is unrenderable by **B52's `<Metric>`** (D34's quarantine).
+   Cited wrongly, the argument would have collapsed the first time a reviewer opened §10.2.
+2. **The live path was missing from all three options.** Under strict A, B09/B10 force a choice
+   between recomputing the total on the client anyway and pushing display-granularity rows down
+   the stream — and the second breaks **D30 consequence 2**'s idempotent resume. A decision that
+   fails two chunks after it is taken was not a decision.
+
+### Consequences
+
+1. **B38 widens `snapshot()`** with server-computed totals and ratios per requested metric —
+   counts summed in SQL, the division after (D10 unchanged). `src/web/metrics.ts` survives, but as
+   **re-bucketing and formatting under a server descriptor**, never as an independent number.
+2. **B09/B10 are unaffected.** The stream carries per-minute absolute rows exactly as D30 specifies,
+   so the idempotent resume stands and there is no display-granularity variant on the wire.
+3. **B51 signs the descriptor for every server-sent metric**, and the client passes it through
+   **byte-for-byte**. It must re-bucket to the descriptor's own `granularity_s` — re-bucketing to a
+   different one while forwarding the descriptor asks the drill-down a question the number does not
+   answer. Written into `BUILD_PLAN.md` §14.
+4. **B53's drill-down becomes the check on client aggregation**, not just on server arithmetic: it
+   replays the descriptor against raw and compares to the displayed figure, so a client re-bucketing
+   bug surfaces as an explicit **FAIL** in front of the reviewer.
+5. **B52's `<Metric>`** still refuses to render anything without a descriptor. That is what makes
+   consequence 3 enforceable rather than conventional.
+
+### What it forecloses
+
+**Nothing identified** — which is the honest answer and also why the reversal cost is low. What it
+*spends* is stated in Seno's own trade: strict A would make a client arithmetic bug **impossible**,
+where D makes it **caught on click**. If a client re-bucketing bug ever ships and is not clicked, D
+is the option that let it through, and the mitigation is B53 being demonstrated rather than merely
+built.
+
+### How I'd defend this in review
+
+The descriptor is the query, not the answer — so the client is allowed to aggregate as long as it
+aggregates *the server's question*, which the drill-down then re-answers from raw events and checks
+against what is on screen; that keeps the stream's absolute per-minute rows, and their idempotent
+resume, intact.
