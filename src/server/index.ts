@@ -18,6 +18,7 @@ import { fatigueReport, type FatigueReport } from './fatigue-flag.ts';
 import { createStream } from './stream.ts';
 import { createTail } from './tail.ts';
 import { listDecisions, postDecision, type PostResult } from './decisions.ts';
+import { listComponents, type ComponentRow } from './components.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -126,12 +127,28 @@ const routes: readonly Route[] = [
   },
   {
     method: 'GET',
+    /**
+     * **B46 — the swap picker's candidates.** Static reference data: no lever writes `components`
+     * (`SCOPE.md` §4 cut #7), so this takes no window, no selection and no cursor. Its own endpoint
+     * rather than a member of the snapshot because §3.1 fixes that envelope and because re-sending
+     * a constant on every window roll would be four copies a minute of something that never moves.
+     */
+    path: '/api/components',
+    handler: (_req, res) => {
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const body: { components: ComponentRow[] } = { components: listComponents(db) };
+      sendJson(res, 200, body);
+    },
+  },
+  {
+    method: 'GET',
     path: '/api/snapshot',
     handler: (_req, res, url) => {
-      // DESIGN §3.1 step 1. The response is the buckets plus the cursor and nothing more: the
-      // envelope's other members arrive with the projections that produce them — `ads[]` and
-      // `generations[]` with the fold (B12), `decisions[]` with the decision log read (B36),
-      // `stream_health` with the telemetry block (B44).
+      // DESIGN §3.1 step 1. **The envelope is complete as of B47/B48**: `ads[]` landed at B36,
+      // `generations[]` and `decisions[]` land here with the surfaces that read them, and
+      // `stream_health` rides the stream's own frames (B44) rather than this response. Every
+      // member is read in ONE transaction, which is what makes a chart annotated with a
+      // generation boundary and a log explaining it describe the same instant.
       const parsed = parseSnapshotQuery(url.searchParams);
       if (!parsed.ok) {
         sendJson(res, 400, { error: 'bad_request', message: parsed.error });

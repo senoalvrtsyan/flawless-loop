@@ -39,6 +39,10 @@
   --state-settled-dash: none;
   --state-restated: #c2410c;
   --state-restated-dash: 6 3;
+  /* B48. The third vertical rule on the chart, and the only one that marks a human act. Solid
+   * where the horizon is long-dashed and a restatement is dotted, with a ▼ and a text label, so
+   * the three are told apart by dash pattern and glyph before colour is consulted at all (D45). */
+  --generation: #7c3aed;
 
   /* §11's stream telemetry. Quarantined by treatment so it can never read as a performance
    * metric — monospace, muted, never the ink colour a number uses. */
@@ -218,3 +222,65 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
                    border-left: 3px solid var(--border); padding-left: .6rem; margin-bottom: 1rem; }
 .fatigue__limits ol { margin: .3rem 0 0; padding-left: 1.2rem; }
 .fatigue__limits li { margin-bottom: .25rem; }
+
+
+/* ── The action console and the decision log — B46, B47 ────────────────────────────────────────
+ *
+ * The console is a FORM, deliberately plain: `SCOPE.md` §7 and the brief both put visual polish
+ * outside what matters here, and a lever that looks like a lever is worth less than a lever whose
+ * precondition is legible on screen. What is styled is the part that carries meaning — the
+ * outcome banner, which is the only place a compare-and-swap rejection is ever shown.
+ *
+ * Applied and refused are told apart by a GLYPH (✔ / ✖) and a left border weight as well as by
+ * colour, the same non-colour-channel rule D45 fixed for settlement state.
+ */
+
+.console { border: 1px solid var(--border); background: var(--surface-sunk);
+           padding: .6rem .7rem; margin: 0 0 1rem; }
+.console__row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: flex-end;
+                margin-bottom: .5rem; }
+.console__row:last-child { margin-bottom: 0; }
+.console__field { display: flex; flex-direction: column; gap: .15rem; }
+.console__field--wide { flex: 1 1 22rem; }
+.console__label { font-size: .72rem; color: var(--ink-muted); text-transform: uppercase;
+                  letter-spacing: .04em; }
+.console__current { font-size: .76rem; color: var(--ink-muted); align-self: center; }
+.console input, .console select { font: inherit; font-size: .85rem; padding: .15rem .35rem;
+                                  border: 1px solid var(--border); background: var(--surface); }
+.console__field--wide input { width: 100%; }
+.console button { font: inherit; font-size: .85rem; padding: .15rem .5rem; cursor: pointer;
+                  border: 1px solid var(--border); background: var(--surface); }
+.console button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent);
+                                       color: #fff; }
+.console__submit { font-weight: 600; }
+.console__submit:disabled { cursor: progress; color: var(--ink-muted); }
+.console__hint { font-size: .74rem; color: var(--ink-muted); flex: 1 1 18rem; align-self: center; }
+.console__outcome { font-size: .8rem; margin: .6rem 0 0; padding: .4rem .6rem;
+                    background: var(--surface); }
+.console__outcome--applied { border-left: 3px solid var(--status-live); }
+.console__outcome--refused { border-left: 3px double var(--state-restated); }
+
+.log { border-collapse: collapse; font-size: .8rem; margin: 0 0 .5rem; width: 100%; }
+.log th, .log td { padding: .2rem .6rem .2rem 0; text-align: left; vertical-align: top; }
+.log thead th { color: var(--ink-muted); font-weight: 600; border-bottom: 1px solid var(--border);
+                text-transform: uppercase; letter-spacing: .04em; font-size: .72rem; }
+.log tbody tr { border-bottom: 1px solid var(--surface-sunk); }
+.log__seq { font-variant-numeric: tabular-nums; color: var(--ink-muted); text-align: right; }
+.log__ts { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
+           white-space: nowrap; }
+.log__rationale { max-width: 22rem; }
+.log__none { color: var(--ink-muted); }
+/* The action is named as text, never by colour alone — the tint is the second channel. */
+.log__action { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
+               padding: 0 .25rem; border: 1px solid var(--border); white-space: nowrap; }
+.log__action--pause { color: var(--status-paused); }
+.log__action--resume, .log__action--launch { color: var(--status-live); }
+.log__action--swap_component { color: var(--generation); }
+
+/* B48's boundaries in words. Left border is solid and coloured like the chart's rule, so the list
+ * and the canvas read as one annotation rather than two. */
+.boundaries { list-style: none; margin: 0 0 .5rem; padding: 0; }
+.boundaries__item { border-left: 3px solid var(--generation); padding: .2rem 0 .2rem .6rem;
+                    margin-bottom: .2rem; font-size: .8rem; }
+.boundaries__mark { color: var(--generation); }
+.boundaries__meta { color: var(--ink-muted); font-size: .76rem; }

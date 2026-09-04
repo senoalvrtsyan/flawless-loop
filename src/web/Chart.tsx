@@ -24,6 +24,7 @@ import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import type { BucketRow } from '../server/snapshot.ts';
 import { metricColumn, pointCounts } from './series.ts';
+import type { Boundary } from './generations.ts';
 import { clears, type ChartPlan } from './gate.ts';
 import { HORIZON_MS } from '../shared/config.ts';
 import { HALF_LIFE_MS, ewma, formatCents, formatCtr, formatRoas } from './metrics.ts';
@@ -58,6 +59,25 @@ const HORIZON_STROKE = '#5b6470';
 const RESTATED_STROKE = '#c2410c';
 const MARKER = 9;
 
+/**
+ * **B48 — a generation boundary, drawn so it cannot be confused with the other two rules.**
+ *
+ * Three vertical rules now share this canvas, and D45's non-colour requirement is what keeps them
+ * apart at a glance and in greyscale:
+ *
+ *   | rule | dash | label | what it means |
+ *   |---|---|---|---|
+ *   | settlement horizon | `6 4` long dash | `settled ◂ / ▸ live` mid-height | age |
+ *   | restated point | `2 2` fine dot + square marker | none | this number moved |
+ *   | **generation boundary** | **solid, with a ▼ at the top** | **`a_03 g4` at the top** | **config changed here** |
+ *
+ * Solid-and-labelled is the right treatment for this one because it is the only rule of the three
+ * that marks a HUMAN act: a lever was pulled at this instant, and everything to the right of it is
+ * a different ad configuration than everything to the left. The step in the series at that x is
+ * explained by this rule and, per §4.2, by nothing else.
+ */
+const BOUNDARY_STROKE = '#7c3aed';
+
 export type ChartProps = {
   rows: readonly BucketRow[];
   /** The window on screen — the client's current frame under D65, not the anchor. */
@@ -73,6 +93,13 @@ export type ChartProps = {
    * unless they asked otherwise.
    */
   smooth: boolean;
+  /**
+   * **B48** — the config changes that fall inside `window`, for the charted ads, already diffed
+   * (`generations.ts`). The component draws them and derives nothing: which boundaries are in view
+   * and what each one changed are both decisions with a wrong answer that draws a normal chart, so
+   * they are tested there rather than computed here.
+   */
+  boundaries: readonly Boundary[];
 };
 
 /** Axis and legend formatting per metric — the y values are raw numbers in the metric's own unit. */
@@ -95,7 +122,7 @@ function formatValue(metric: MetricKey, value: number | null): string {
  * Where the restated marks go: `[seriesIndex, pointIndex]` pairs, read through a ref so the draw
  * hook always sees the current set without the plot being rebuilt when it changes.
  */
-type Marks = { restated: readonly (readonly boolean[])[] };
+type Marks = { restated: readonly (readonly boolean[])[]; boundaries: readonly Boundary[] };
 
 /** uPlot options. Rebuilt whenever the SERIES SET changes — uPlot cannot add a series in place. */
 function options(
@@ -183,6 +210,41 @@ function options(
               ctx.setLineDash([2, 2]);
             });
           });
+
+          // 3. **The generation boundaries** (B48). Drawn LAST, so a config change is legible on
+          //    top of both the settlement rule and the restatement hairlines — it is the only one
+          //    of the three that a human caused, and it is the one the reader is looking for when
+          //    a series steps.
+          ctx.setLineDash([]);
+          ctx.strokeStyle = BOUNDARY_STROKE;
+          ctx.fillStyle = BOUNDARY_STROKE;
+          ctx.lineWidth = 1;
+          ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          // Stack the labels when two boundaries land close together, so a swap and a budget
+          // change a minute apart read as two events rather than as one smudge.
+          let lastLabelX = Number.NEGATIVE_INFINITY;
+          let row = 0;
+          for (const boundary of marks.current.boundaries) {
+            const seconds = boundary.atMs / 1_000;
+            if (seconds <= min || seconds >= max) continue;
+            const x = left + u.valToPos(seconds, 'x');
+            ctx.beginPath();
+            ctx.moveTo(x, top);
+            ctx.lineTo(x, top + height);
+            ctx.stroke();
+            // The ▼ is the non-colour channel: a solid rule alone could be mistaken for a series
+            // at a metric with one flat value, and a triangle at the top cannot.
+            ctx.beginPath();
+            ctx.moveTo(x - 4, top);
+            ctx.lineTo(x + 4, top);
+            ctx.lineTo(x, top + 5);
+            ctx.closePath();
+            ctx.fill();
+            row = x - lastLabelX < 60 ? row + 1 : 0;
+            lastLabelX = x;
+            ctx.fillText(`${boundary.ad_id} g${boundary.seq_in_ad}`, x + 3, top + 14 + row * 11);
+          }
           ctx.restore();
         },
       ],
@@ -202,7 +264,7 @@ function options(
   };
 }
 
-export function Chart({ rows, window, plan, smooth }: ChartProps) {
+export function Chart({ rows, window, plan, smooth, boundaries }: ChartProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const plot = useRef<uPlot | null>(null);
   const { data, labels, restated } = useMemo(() => {
@@ -231,8 +293,8 @@ export function Chart({ rows, window, plan, smooth }: ChartProps) {
   // a dependency on it.
   const labelsRef = useRef<string[]>(labels);
   labelsRef.current = labels;
-  const marksRef = useRef<Marks>({ restated: [] });
-  marksRef.current = { restated };
+  const marksRef = useRef<Marks>({ restated: [], boundaries: [] });
+  marksRef.current = { restated, boundaries };
   const metricRef = useRef<MetricKey>(plan.metric);
   metricRef.current = plan.metric;
 

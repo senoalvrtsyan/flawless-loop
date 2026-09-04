@@ -23,6 +23,8 @@ const ad = (over: Partial<AdRow> = {}): AdRow => ({
   audience_id: 'cold_us',
   daily_budget_cents: 50_000,
   launched_at: T(0, 0),
+  video_id: 'v_04',
+  headline_id: 'h_01',
   current_generation_id: 'g_a_12_002',
   last_decision_seq: 2,
   ...over,

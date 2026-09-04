@@ -38,6 +38,8 @@ const ad = (ad_id: string, launched = T(0, 0)): AdRow => ({
   launched_at: launched,
   current_generation_id: `g_${ad_id}_002`,
   last_decision_seq: 2,
+  video_id: 'v_04',
+  headline_id: 'h_01',
 });
 
 const bucket = (ad_id: string, minute: string, over: Partial<MetricCounts>): BucketRow =>

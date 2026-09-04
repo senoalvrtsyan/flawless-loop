@@ -45,10 +45,10 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | 1 | **The world has a past** — the app opens onto seven days, not an empty chart | B36 | ✅ below |
 | 2 | Read a signal off the chart | B37, **B38** | ✅ below — ratios landed at B38 |
 | 3 | The gate refuses to draw a ratio it cannot support | **B39**, B40 | ✅ below |
-| 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | B46, B47 | — |
+| 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | **B46, B47, B48** | ✅ below |
 | 5 | **A late conversion restates a settled bucket** | **B41, B42, B43**, B49 | ✅ below |
 | 6 | **Walk a number back to its events** | B52, B53 | — |
-| 7 | Configs are versioned; the swap is visible | B48, B56 | — |
+| 7 | Configs are versioned; the swap is visible | **B48**, B56 | partly — the boundary and the swap are in beat 4; B56's component screen is still owed |
 | 8 | Kill everything and restart — the world is still there | B60 | — |
 
 ---
@@ -255,6 +255,98 @@ browser, and it is structurally incapable of producing a number on the chart."*
     event age, dispositions, rows spilled, frames backpressured, orphans unresolved. The scope line
     says they are measured over the last N deliveries this process has seen and reset on restart —
     correct for transport figures, and said rather than implied.
+
+---
+
+## Beat 4 — pull a lever, the world responds (B46, B47, B48)
+
+**Say:** *"Everything so far has been reading. This is the half that writes — and it writes exactly
+one table. `ads` is not edited by this form; it is re-derived from the row this form appends."*
+
+This is `CLAUDE.md` §6's third hard requirement in one gesture: *"the strategist sees a signal,
+takes an action, the world responds. Pausing `a_12` stops its events."*
+
+### The lever, and the world responding (B46)
+
+1. **Window `1h`, granularity `minute`, metric `Impressions`, select `a_12` only.** It is delivering;
+   the series climbs. Leave the chart on screen — the point is what happens to *this* line.
+2. **Scroll to "Decision loop — pull a lever".** The header line above the form is the current fold:
+   status, budget, both component slots, the generation id, and *"after decision #N"*. Every one of
+   those came from the `ads` projection, which exists only because `applyDecision()` ran.
+3. **Lever `Pause`, ad `a_12`, rationale** — required, and the form refuses an empty one before the
+   endpoint does, before the schema `CHECK` does. Type something a strategist would actually write:
+   *"CTR collapsed against its peak — stop spending while I look."* **Apply.**
+4. **The banner:** `✔ applied · decision #25 … a_12 is now paused … generation g_a_12_003`. That
+   state was read from **inside the transaction that wrote the log row**, so it is not an optimistic
+   value that could still be rejected.
+5. **Watch the chart.** Within one simulator tick — a second — `a_12`'s impressions stop arriving
+   and its line goes flat. Nothing in the client did that: the emitter polls `/api/sim/world`, sees
+   `status: 'paused'`, and stops drawing from λ for that ad. **The loop closed through the store.**
+
+**Say:** *"Note what did NOT happen. No code path went from that button to the `ads` table. The
+button appended one row to `decisions`; `applyDecision` folded it and wrote the projection. That is
+the one property this whole design is built to demonstrate, and `/api/verify` is how we check it."*
+
+### The guard, which is the interesting refusal (B46)
+
+6. **Lever `Set budget` on `a_12`.** The form shows a field labelled **`from_cents` (precondition)**,
+   pre-filled with the current value. **Change it to anything else** and Apply.
+7. **`✖ refused (409) · stale_precondition — set_budget expected from_cents 1, current is 9000`.**
+   The server's message, verbatim, with the current value in it.
+
+   **Say:** *"That is a compare-and-swap. `from_cents` is not an annotation — it is an assertion
+   about the world the human formed their intent in. We have one actor, so this is a staleness guard
+   for a stale tab or a double-submit, not a concurrency feature, and the README says so rather than
+   implying a multi-actor story we cannot demonstrate. And we do not retry it. The 409 hands back
+   the current value, so a helpful client could re-send and succeed — which would assert an intent
+   nobody expressed."*
+8. **Nothing was written.** A refused lever consumes no `decision_seq`, opens no generation and
+   leaves no log row. Check it: `curl -s localhost:8787/api/health` — `decision_seq` is unmoved.
+9. **Try `Resume` on a live ad.** `409 illegal_transition — an ad in 'live' does not admit 'resume'`.
+   The hint beside the buttons said that would happen; the button submitted anyway, because the
+   transition table lives in `fold.ts` and a copy of it in the form is a second thing to keep in
+   step. The form is not the authority and does not pretend to be.
+
+### The log, which is the authority (B47)
+
+10. **"Decision log — what produced this config".** Newest first — `#25 … a_12 pause — stop delivery
+    | opened g_a_12_003 | "CTR collapsed against its peak…"`. Actor, rationale, `decision_seq`, and
+    the generation each decision opened.
+11. **Run it against the store**, in a terminal beside the browser:
+    ```
+    sqlite3 data/loop.sqlite 'SELECT decision_seq, ad_id, action, rationale FROM decisions ORDER BY decision_seq DESC LIMIT 5'
+    ```
+    The same rows. The surface reverses fold order for reading and does nothing else to them.
+12. **Then `curl -s -o /dev/null -w "%{http_code}\n" localhost:8787/api/verify`** → `200`. It
+    rebuilt `ads`, `config_generations`, `conversion_attribution` and `rollup_minute` from the two
+    logs into shadow tables and diffed all four. **Measured after the three levers above: all four
+    hash-matched at `decision_seq` 27, in 11.7 s.**
+
+    **Say:** *"That is the payoff of one writer. The log is authoritative and everything else is a
+    projection, so a divergence would be a bug in one function — and the rebuild is also the repair."*
+
+### The swap, and the boundary it draws (B48)
+
+13. **Lever `Swap component`, slot `video`, on `a_12`.** The picker offers the real library, grouped
+    by lineage: **`v_05 · Unboxing hook, recut · vl_04 v2`** sits directly under `v_04 · vl_04 v1`,
+    its parent. That two-version lineage is in the seed on purpose (D3). Rationale: *"fatigue flag on
+    vl_04 — try the recut before writing the ad off."* Apply.
+14. **A solid vertical rule with a ▼ appears on the chart**, labelled `a_12 g4`, at the instant of
+    the swap — the third kind of rule on this canvas, and told apart from the settlement horizon
+    (long-dashed) and a restatement hairline (fine-dotted) by dash pattern and glyph before colour
+    is consulted at all.
+15. **Below the chart, the same boundary in words:**
+    `▼ a_12 gen 4 at 2026-09-04T19:33:17Z · video v_04 → v_05 · decision #26 by human:nk: "fatigue
+    flag on vl_04 — try the recut before writing the ad off"`
+
+    **Say:** *"Nothing stores 'this generation changed the video'. The pair of `config_generations`
+    rows already says it, and a stored summary is a second copy of a fact that can go stale. The step
+    in the series at that line is explained by the generation, and by nothing else."*
+
+**What this beat does not show.** Whether the swap *worked*. The log records what was tried and why,
+never whether it helped — decision scoring is `SCOPE.md` §4 cut #1, and **D68** reinstates it
+conditionally as `B50a` if stage 5 lands clean. Say that plainly; it is a scope cut with a named
+reason, not an omission.
 
 ---
 

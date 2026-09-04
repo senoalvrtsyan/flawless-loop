@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-04 · **Phase 5 · STAGE 4 IS CLOSED — THE SIGNAL SURFACE IS BUILT · 51 / 68 chunks**
+**Last updated:** 2026-09-04 · **Phase 5 · STAGE 5 IS RUNNING — THE LOOP CLOSES · 54 / 68 chunks** (69 if `B50a` lands)
 
 ---
 
@@ -505,8 +505,32 @@ copy-pasteable block. Reversible at any time: **"solo from here"** restores the 
 ## Traps that will not fail loudly
 
 `BUILD_PLAN.md` §14 is authoritative; carried here so a cold resume sees them without opening the
-plan. **Each produces wrong or slow output with no error.** Forty-two now — the Phase 5 ones were
+plan. **Each produces wrong or slow output with no error.** Forty-nine now — the Phase 5 ones were
 found against the real store and are in no design document.
+
+**The newest (G13 — B46, B47, B48):**
+
+- **A test fixture that agrees with the code and disagrees with the STORE passes, and proves
+  nothing.** `components.test.ts` first asserted the only two kinds are `video` and `headline` —
+  true of the fixture, false of the store, which holds **sixteen components across four kinds**
+  (`body_copy`, `headline`, `image`, `video`). The code was right; the claim was wrong, and it would
+  have kept passing while the swap picker silently emptied. Found by curling the real endpoint.
+- **A generation boundary's `prev` must be found by `seq_in_ad - 1`, not by array position** — the
+  rows are ordered by `(ad_id, seq_in_ad)`, so position works until an ad's chain does not start at
+  1, and then `a_02`'s first change is labelled with `a_01`'s config. A sentence either way.
+- **Generation 1 is not a boundary** (it is `create_ad`, so a rule there claims a step in a series
+  with no points to its left), and **the boundary window is half-open on `valid_from`** or the same
+  change is drawn at the right edge of one view and the left edge of the next.
+- **A console that mirrors `fold.ts`'s transition table has put the rule in two places** and the
+  copy is the one that goes stale. All four levers submit; the 409 is the answer; the hint disables
+  nothing.
+- **Retrying a `stale_precondition` is the one "helpful" fix that defeats I13** — the 409 carries
+  the current value, so a re-send would succeed while asserting an intent nobody expressed.
+- **The idempotency key is held across a NETWORK failure and released after any server answer.**
+  Regenerating on a timeout folds twice if the first POST landed; reusing after a 409 sends the
+  next, different decision under a spent key.
+- **A lever must not patch client state from the POST's response** — it changes `ads`,
+  `config_generations` and the log at once, so re-run §3.1 from step 1, the path a refresh takes.
 
 **The newest (G12 — B41–B45):**
 
@@ -790,6 +814,17 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
+- **THE BROWSER, still.** G13 was verified the same way stage 4 was — headlessly, against the real
+  store, through the shipped client modules (`generations.ts`, `decisions.ts`) and the real
+  endpoints. `vite build` is clean, so it compiles and bundles. **Nobody has clicked the console.**
+  What is uneyeballed: the form's own layout, the outcome banner, the ▼ boundary markers and their
+  label stacking when two land within 60 px, and B42's greyscale check — which now has a **third**
+  vertical rule to keep distinct.
+- **`GET /api/components` is a reading, not a ratified decision** (G13). See the Next-action block.
+- **`docs/ai-sessions/05-phase-5-Impl-9.md` is still a raw 1,350-line terminal export** (`65c45bb`).
+  The convention is a curated capture — prompts, decisions, turning points, ~220 lines; see
+  `-Impl-8.md`. Unchanged by this batch.
+
 - **`docs/CHEATSHEET.md` is DROPPED and deleted** (Seno, 2026-09-04). Nothing is owed for it at any gate. `DECISIONS.md`'s index table is the revise-from view.
 - **`docs/DEMO.md` does not exist yet and is owed from the B36 group onward** (D50). Every stage-4
   and stage-5 group appends its walkthrough steps as it lands **and says so in its report** — a
@@ -964,6 +999,50 @@ read the same file without complaint, but if a `.schema` or a query plan ever lo
 version gap is the first thing to check.
 
 ## Next action
+
+**G13 IS CLOSED — B46, B47, B48, one commit. STAGE 5 HAS FOUR CHUNKS LEFT, AND TWO OF THEM ARE
+SINGLE-GATED (B49, B50).** **D68 was recorded first, in its own commit (`80158a2`), before anything
+was built on it.**
+
+**The loop closes.** The action console is on the page: four levers, a required rationale, and the
+compare-and-swap precondition as a **visible, editable field** — which is the only way I13 is
+demonstrable in a single browser tab. Measured against a copy of the seeded store through the real
+endpoint: `pause a_12` → 200, seq 24 → 25, `g_a_12_003` opened; the **same `decision_id` again →
+`replayed: true`, still seq 25**; three refusals (`illegal_transition`, `stale_precondition`,
+empty rationale) left `decision_seq` at **24**; then `swap_component v_04 → v_05` (seq 26) and
+`set_budget $350 → $700` (seq 27). **`GET /api/verify` after all three: 200, all four projections
+hash-matched at `decision_seq` 27, 11.7 s.** That last line is the batch's real check — the levers
+went through `applyDecision()` and nothing else, so the log still rebuilds the world.
+
+**`DESIGN.md` §3.1's envelope is finally complete.** `generations[]` and `decisions[]` now ride the
+snapshot beside `ads[]` and the buckets, **in one read transaction** — 27 and 27 on the mutated
+store, **27 of 27 joined through `opened_by_decision` with zero orphans**. That single transaction
+is the whole reason they are not two endpoints: a chart annotated with a generation and a log
+explaining it have to be describing the same instant.
+
+**Three vertical rules now share the canvas**, and D45's non-colour rule is what keeps them apart:
+the settlement horizon is long-dashed with a mid-height label, a restatement is fine-dotted with a
+hollow square, and a **generation boundary is solid with a ▼ and an `a_12 g4` label**. Beneath the
+chart the same boundaries are written out with the decision's own rationale. **Nothing stores what
+a generation changed** — it is diffed from the adjacent pair, in `generations.ts`, with five tests,
+because a boundary at the wrong instant draws a completely normal chart.
+
+**Two structural notes for whoever picks this up.**
+
+- **`src/server/components.ts` + `GET /api/components` is new and is NOT a ratified decision** — it
+  is a plain read of seeded reference data that the swap picker cannot work without, kept off the
+  §3.1 envelope because components never change and re-sending them on every window roll would be
+  four copies a minute of a constant. B56's Workbench screen (P15) reads the same endpoint. **Say so
+  in the README's extensions pass rather than letting it look ratified.**
+- **`AdRow` gained `video_id` and `headline_id`** for the same reason `daily_budget_cents` was
+  already there: they are `swap_component`'s precondition values, and a console without them would
+  have to invent a `from_id`, which is the compare-and-swap defeated by the client meant to use it.
+
+**146 tests** (139 + 2 components + 5 generations). `tsc` clean, `vite build` clean, tree clean.
+
+**Verification ran on a COPY** (`scratchpad/g13.sqlite`, a 0.2 s `cp`), never on `data/loop.sqlite`
+— the real store still holds its 24 seeded decisions and has not been reseeded.
+
 
 **THE B36 GATE IS CLEARED** (2026-09-04). **D44** — uPlot `1.6.32`, pinned exact, imported in
 `src/web/Chart.tsx` and nowhere else, installed at **B37** and not before; a flip condition to

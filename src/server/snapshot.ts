@@ -25,6 +25,8 @@ import { HAS_EXPLICIT_OFFSET, ceilToMinute, floorToMinute } from '../shared/time
 import { bucketState, type SettlementState } from './settlement.ts';
 import { ZERO_COUNTS, addCounts, derive, type MetricCounts, type MetricSet } from '../shared/metrics.ts';
 import { maturityFor, type Maturity } from './maturity.ts';
+import { listDecisions } from './decisions.ts';
+import type { Decision } from '../shared/decisions.ts';
 import type { BucketKey } from './apply.ts';
 
 /**
@@ -86,6 +88,17 @@ export type AdRow = {
   launched_at: string | null;
   current_generation_id: string;
   last_decision_seq: number;
+  /**
+   * **B46 adds the two component slots**, and they are here for one reason: they are the
+   * PRECONDITION values `swap_component` compares against (I13, §2.3). A console that offered a
+   * swap without them would have to either omit `from_id` — which the endpoint rejects — or invent
+   * one, which is the compare-and-swap defeated by the client it exists to guard.
+   *
+   * `daily_budget_cents` above is `set_budget`'s precondition and was already carried, so this is
+   * the same field for the other two levers rather than a new kind of payload.
+   */
+  video_id: string;
+  headline_id: string;
 };
 
 export type Snapshot = {
@@ -100,6 +113,28 @@ export type Snapshot = {
    * twelve rows, so the cost of always sending it is nothing next to a second round trip.
    */
   ads: AdRow[];
+  /**
+   * **B47 / B48 — `DESIGN.md` §3.1's envelope, finally complete.** §3.1 has said
+   * `{ ads[], generations[], decisions[], buckets[], … }` since Phase 2; `ads[]` landed at B36 and
+   * these two were waiting for the surfaces that read them.
+   *
+   * They are **one read transaction with the buckets**, and that is the whole reason they are here
+   * rather than on two endpoints of their own. B48 draws a boundary on the chart at a generation's
+   * `valid_from`; B47 shows the decision that opened it. Read separately, the chart could be drawn
+   * from buckets taken before a lever and annotated with the generation that lever opened, and the
+   * screen would be internally inconsistent with nothing on it to blame.
+   *
+   * **Unfiltered by `query.ads`, like `ads[]` and unlike `totals[]`** — for the same reason: the
+   * decision log is a portfolio-level artefact and B47 offers a global view, which it could not do
+   * from a response that had already dropped the ads you are not charting. The client filters.
+   *
+   * **Unbounded, and this is the same stated limit `listDecisions` carries**: decisions are human
+   * lever pulls (24 from the seeder, plus whatever the demo adds) and a generation is opened by at
+   * most one of them. If that stops being true the fix is a cursor, not a silent `LIMIT`, because a
+   * truncated log folds to the wrong config.
+   */
+  generations: GenerationRow[];
+  decisions: Decision[];
   /** Ordered by `(ad_id, minute_start)`, both request paths, so hand-diffs are reproducible. */
   buckets: BucketRow[];
   /**
@@ -320,8 +355,42 @@ const TOTALS_ALL_ADS = `SELECT ad_id, ${TOTALS_COLUMNS} FROM rollup_minute
  */
 const SELECT_PORTFOLIO = `
   SELECT ad_id, name, status, channel, audience_id, daily_budget_cents, launched_at,
-         current_generation_id, last_decision_seq
+         current_generation_id, last_decision_seq, video_id, headline_id
     FROM ads ORDER BY ad_id
+`;
+
+/**
+ * **B48** — one row of `config_generations` (§2.3's DDL, verbatim in field names).
+ *
+ * The half-open interval `[valid_from, valid_to)` is the point: `valid_to === null` means the
+ * generation is the one live NOW, and two adjacent generations tile without overlap, so "the config
+ * of `a_12` at `T`" is a lookup rather than a scan. B48 draws a rule at `valid_from` and nowhere
+ * else — the boundary is the instant the config changed, and it belongs to the generation it opens.
+ */
+export type GenerationRow = {
+  generation_id: string;
+  ad_id: string;
+  seq_in_ad: number;
+  valid_from: string;
+  valid_to: string | null;
+  opened_by_decision: string;
+  video_id: string;
+  headline_id: string;
+  audience_id: string;
+  channel: string;
+  daily_budget_cents: number;
+  status: string;
+};
+
+/**
+ * In `(ad_id, seq_in_ad)` order — the chain's own order, so a reader can see the tiling by eye and
+ * a gap in `seq_in_ad` is visible rather than inferred. `ix_gen_ad_window` is not used and does not
+ * need to be: this is 24 rows on the seeded week and it is the whole table by design.
+ */
+const SELECT_GENERATIONS = `
+  SELECT generation_id, ad_id, seq_in_ad, valid_from, valid_to, opened_by_decision,
+         video_id, headline_id, audience_id, channel, daily_budget_cents, status
+    FROM config_generations ORDER BY ad_id, seq_in_ad
 `;
 
 const SELECT_LOG_POSITION = `SELECT COALESCE(MAX(ingest_seq), 0) AS seq FROM signals`;
@@ -446,6 +515,7 @@ export function totalsOnly(db: DatabaseSync, query: SnapshotQuery): TotalsRespon
 
 export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
   const portfolio = db.prepare(SELECT_PORTFOLIO);
+  const generations = db.prepare(SELECT_GENERATIONS);
   const perAd = db.prepare(SELECT_ONE_AD);
   const allAds = db.prepare(SELECT_ALL_ADS);
   const logPosition = db.prepare(SELECT_LOG_POSITION);
@@ -475,6 +545,11 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
     return {
       query,
       ads,
+      // Same transaction as `ads` and the buckets (see the type's note). `listDecisions` is the
+      // decision log's ONE reader — B47 does not get a second query that could order differently
+      // from the one the fold replays, and `null` asks it for every ad.
+      generations: generations.all() as unknown as GenerationRow[],
+      decisions: listDecisions(db, null),
       buckets: withState(buckets, new Date().toISOString()),
       // Same transaction, same predicate, same instant as the buckets above — so "sum the rows
       // yourself and compare" is a check on the arithmetic and never a race.

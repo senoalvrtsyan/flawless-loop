@@ -358,9 +358,9 @@ The deep surface, per D1. Read-only — no levers yet.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
-| [ ] | **B46** | Action console: `pause` / `resume` / `set_budget` / `swap_component`, rationale required, compare-and-swap rejection surfaced honestly rather than retried | `src/web/Console.tsx` | **Pause `a_12` in the browser → its events stop within a second and its series flattens.** Raise a budget → the rate rises. Submit with a stale `from_cents` → rejected with the current value shown | D§7, §11; S§9 | **HR3 HR6** |
-| [ ] | **B47** | Decision log surface: per-ad and global, with actor, rationale, `decision_seq`, and the generation each opened | `src/web/DecisionLog.tsx` | Every row matches `sqlite3 decisions`; the config on screen is the fold of exactly these rows | D§7 | **HR6** |
-| [ ] | **B48** | Generation boundaries drawn on the chart from `config_generations` | `src/web/Chart.tsx` | Swap `a_03`'s video → a boundary appears and the CTR steps at it; the discontinuity is explained by the generation and by nothing else | D§4.2, §8 | **HR6** |
+| [x] | **B46** | Action console: `pause` / `resume` / `set_budget` / `swap_component`, rationale required, compare-and-swap rejection surfaced honestly rather than retried | `src/web/Console.tsx`, `src/web/decisions.ts` *(the pure display half, split out for B47)*, `src/server/components.ts`, `src/server/components.test.ts`, `src/server/index.ts`, `src/server/snapshot.ts`, `src/web/App.tsx`, `src/web/app.css` | **Measured on a copy of the seeded store, through the real endpoint.** `pause a_12` → 200, `decision_seq` 24 → 25, `g_a_12_003` opened, status `paused`. **The same `decision_id` again → `replayed: true`, still seq 25** — U5's key is held across a network failure and regenerated after any server answer. **Three refusals wrote nothing**: `resume` on a live ad → 409 `illegal_transition` *"an ad in 'live' does not admit 'resume'"*, a stale `from_cents` → 409 `stale_precondition` *"expected from_cents 1, current is 9000"*, an all-whitespace rationale → 400 — and `decision_seq` was **still 24** after all three. `swap_component` `v_04 → v_05` (D3's two-version lineage) → seq 26, `set_budget` `$350 → $700` → seq 27. **The console does not mirror `fold.ts`'s transition table and does not retry a rejection**, both stated in the file | D§7, §11; S§9 | **HR3 HR6** |
+| [x] | **B47** | Decision log surface: per-ad and global, with actor, rationale, `decision_seq`, and the generation each opened | `src/web/DecisionLog.tsx`, `src/web/decisions.ts`, `src/server/snapshot.ts`, `src/web/App.tsx`, `src/web/app.css` | `DESIGN.md` §3.1's envelope is complete: `decisions[]` and `generations[]` now ride the snapshot **in the same read transaction as `ads[]` and the buckets**, which is what stops a chart annotated with a generation from describing a different instant than the log explaining it. Measured: 27 decisions, 27 generations, **27 of 27 joined through `opened_by_decision` with zero orphans**. Fold order is served and REVERSED for display, in the display and nowhere near the fold. A decision that opened no generation renders `—` with the reason (§7 opens one *only if config changed*), not a blank | D§7 | **HR6** |
+| [x] | **B48** | Generation boundaries drawn on the chart from `config_generations` | `src/web/generations.ts`, `src/web/generations.test.ts`, `src/web/Chart.tsx`, `src/web/App.tsx`, `src/web/app.css` | Three boundaries drawn in the 1 h window after the three levers above, each explained by its own decision: `a_12` gen 3 *status live → paused*, `a_12` gen 4 *video v_04 → v_05*, `a_03` gen 3 *budget $350 → $700/day*. **The change is DERIVED by diffing adjacent generations and stored nowhere.** Generation 1 is not a boundary (it is the ad coming into existence); the window is half-open on `valid_from` so a boundary is drawn in exactly one view; the previous generation is found by `seq_in_ad - 1`, **not by array position**, or `a_02`'s first change is labelled with `a_01`'s config. Five tests. Third vertical rule on the canvas, told apart from the other two by dash pattern and a ▼ glyph before colour (D45) | D§4.2, §8 | **HR6** |
 | [ ] | **B49** | **P16** — horizon control: shortening the horizon re-evaluates settlement across the affected range and restates what moves | `src/server/settlement.ts`, `src/web/Horizon.tsx` | Drop the horizon from 72 h to 2 h → buckets flip from `live` to `settled`, and any that had moved since are marked restated. Uses `ix_rollup_time`, not a full scan | D§5.7 (F2) | **HR4** |
 | [ ] | **B50** | **P17** — scenario control: the seven triggers via `POST /api/sim/scenario`, persisted to `sim_scenarios`, delivered on the existing world poll | `src/server/sim-scenario.ts`, `src/sim/scenarios.ts`, `src/web/Scenarios.tsx` | Fire `late_cascade` → settled buckets restate on screen within seconds. Fire `orphan_burst` → a two-bucket restatement. Fire `stall` → the liveness display says so. The trigger is a row, so the moment replays | S§17 | **HR4** |
 
@@ -519,6 +519,38 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+**The newest (G13 — B46, B47, B48):**
+
+- **A test fixture that agrees with the code and disagrees with the STORE passes, and proves
+  nothing.** The first `components.test.ts` asserted that the only two component kinds are `video`
+  and `headline` — true of the fixture, false of the seeded store, which holds sixteen components
+  across **four** kinds (`body_copy`, `headline`, `image`, `video`). The console filters by slot
+  name, so the code was right; the test was checking the wrong claim and would have gone on passing
+  while the picker silently emptied. Found by curling `/api/components` against the real store,
+  which is the only way it could have been found.
+- **A generation boundary's `prev` must be found by `seq_in_ad - 1`, never by array position.** The
+  rows arrive ordered by `(ad_id, seq_in_ad)`, so position works right up until an ad's chain does
+  not start at 1 — and then `a_02`'s first change is labelled with `a_01`'s config. The label is a
+  sentence either way and the chart is normal either way.
+- **Generation 1 is not a boundary.** It is opened by `create_ad`, so a rule there claims a step in
+  a series with no points to its left. Drawing it looks like diligence.
+- **The boundary window must be half-open on `valid_from`**, like the buckets. Closed on both ends
+  draws the same config change at the right edge of one view and the left edge of the next, which
+  reads as two lever pulls a minute apart.
+- **A console that mirrors `fold.ts`'s transition table has put the rule in two places**, and the
+  copy is the one that goes stale. All four levers are always submittable and the 409 is the
+  answer; the on-screen hint says what the server will say and disables nothing.
+- **Retrying a `stale_precondition` is the one "helpful" fix that defeats I13.** The 409's message
+  carries the current value, so a client could re-send with it and succeed — asserting an intent
+  nobody expressed, against a world that changed after the human formed the intent.
+- **The idempotency key must be held across a NETWORK failure and released after any server
+  answer.** Regenerating it on a timeout folds the decision twice if the first POST landed;
+  reusing it after a 409 sends the next, different decision under a spent key.
+- **A lever must not patch client state from the POST's response.** It changes `ads`,
+  `config_generations` and the log in one transaction; applying just the returned `ad` leaves the
+  chart's boundaries and the log a step behind, and the three disagree until an unrelated fetch.
+  Re-run §3.1 from step 1 — the same path a refresh takes.
 
 **The newest (G12 — B41–B45):**
 

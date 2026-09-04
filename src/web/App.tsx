@@ -23,10 +23,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // Type-only, therefore erased at build time — no server module, and no `node:sqlite`, reaches the
 // bundle. The wire types' permanent home is `src/shared/wire.ts`, which B44/B51 create; importing
 // them across the boundary until then beats moving an approved file in a chunk about the client.
-import type { AdRow, Snapshot, TotalsResponse } from '../server/snapshot.ts';
+import type { AdRow, GenerationRow, Snapshot, TotalsResponse } from '../server/snapshot.ts';
 import type { RestatementEntry } from '../server/restatements.ts';
 import type { TailFrame } from '../shared/wire.ts';
 import type { FatigueReport } from '../server/fatigue-flag.ts';
+import type { ComponentRow } from '../server/components.ts';
+import type { Decision } from '../shared/decisions.ts';
 import {
   applyRows,
   createStore,
@@ -57,6 +59,9 @@ import { Maturity } from './Maturity.tsx';
 import { Timeline } from './Timeline.tsx';
 import { Tail } from './Tail.tsx';
 import { FatigueFlag } from './FatigueFlag.tsx';
+import { Console, fetchComponents } from './Console.tsx';
+import { DecisionLog } from './DecisionLog.tsx';
+import { boundariesIn } from './generations.ts';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
@@ -103,7 +108,20 @@ function windowEndingNow(minutes: number): { from: string; to: string } {
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
-  | { phase: 'ready'; store: BucketStore; cursor: number; ads: AdRow[] };
+  | {
+      phase: 'ready';
+      store: BucketStore;
+      cursor: number;
+      ads: AdRow[];
+      /**
+       * **B47 / B48** — the fold's two other projections, from the SAME read transaction as `ads`
+       * and the buckets (§3.1's envelope). They are held here rather than fetched separately so
+       * that the chart's boundary at 18:04, the generation named on it, and the decision that
+       * opened it are all facts about one instant.
+       */
+      generations: GenerationRow[];
+      decisions: Decision[];
+    };
 
 /** Why the stream is not currently feeding us, if it is not. */
 type Link = 'connecting' | 'live' | 'down';
@@ -157,6 +175,12 @@ export function App() {
    * inside a tick, and it costs two whole-store joins (114 ms measured).
    */
   const [fatigue, setFatigue] = useState<FatigueReport | null>(null);
+  /**
+   * **B46** — the swap picker's candidates. Fetched ONCE, on mount, and never again: `components`
+   * is seeded reference data that no lever writes (`SCOPE.md` §4 cut #7), so re-reading it on a
+   * window roll would be four copies a minute of a constant.
+   */
+  const [components, setComponents] = useState<readonly ComponentRow[]>([]);
 
   /**
    * Toggling from "all" selects that ad ALONE rather than deselecting it out of twelve.
@@ -181,6 +205,18 @@ export function App() {
     console.warn(`[stream] server asked for a resnapshot: ${reason}`);
     setGeneration((n) => n + 1);
   }, []);
+
+  /**
+   * **B46** — re-run §3.1 from step 1 after a lever landed.
+   *
+   * Deliberately the SAME path as a refresh and as a `resnapshot`, and deliberately NOT a patch of
+   * local state from the POST's response. A decision changes `ads`, opens a `config_generations`
+   * row and appends to the log, all inside one transaction; a client that applied the returned
+   * `ad` to its own array would be holding a config the chart's boundaries and the log's rows had
+   * not caught up with, and the three would disagree until the next unrelated fetch. One re-read is
+   * cheap (the window is 60 minutes by default) and it cannot drift.
+   */
+  const reload = useCallback(() => setGeneration((n) => n + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -216,6 +252,8 @@ export function App() {
           // would disagree with the server's on the boundary minute.
           store: createStore(snapshot.query, snapshot.buckets),
           cursor: snapshot.as_of_ingest_seq,
+          generations: snapshot.generations,
+          decisions: snapshot.decisions,
           // The WHOLE portfolio, not the selection — a list that hid the ads you are not looking
           // at would make selecting them impossible.
           ads: snapshot.ads,
@@ -283,6 +321,18 @@ export function App() {
    * so the resume contract (D47) and the anchor are both untouched by the roll.
    */
   useEffect(() => {
+    const controller = new AbortController();
+    fetchComponents(controller.signal)
+      .then(setComponents)
+      // An empty list leaves the swap picker empty and says so on screen; it does not break the
+      // other three levers, which need no candidates.
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) console.warn('[components] read failed', err);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     const id = setInterval(() => {
       setState((prev) => {
         if (prev.phase !== 'ready') return prev;
@@ -348,7 +398,7 @@ export function App() {
     );
   }
 
-  const { store, cursor, ads } = state;
+  const { store, cursor, ads, generations, decisions } = state;
   const latest = latestBucket(store);
   // "All" resolved to a concrete list, in the portfolio's own order, so the chart's series order
   // and the list's row order are the same thing and a colour means one ad in both.
@@ -371,6 +421,12 @@ export function App() {
     .sort((a, b) => (a.minute_start < b.minute_start ? -1 : 1));
   const settledInView = inView.filter((row) => row.state === 'settled').length;
   const liveInView = inView.filter((row) => row.state === 'live').length;
+
+  // B48. Charted ads only, inside the frame on screen, generation 2 and up — the arithmetic and
+  // the "what changed" label are `generations.ts`'s, with tests, because a boundary drawn at the
+  // wrong instant produces a chart that looks entirely normal.
+  const boundaries = boundariesIn(generations, store.window, chartedIds);
+  const decisionById = new Map(decisions.map((d) => [d.decision_id, d]));
 
   return (
     <div className="shell">
@@ -443,7 +499,13 @@ export function App() {
         {/* B37/B39. One series per selected ad, drawn from the SAME bucket rows the headline is
             summed from — so a reviewer comparing the two is comparing one source to itself, and
             B53's drill-down is what compares either of them to raw events. */}
-        <Chart rows={[...store.rows.values()]} window={store.window} plan={plan} smooth={smooth} />
+        <Chart
+          rows={[...store.rows.values()]}
+          window={store.window}
+          plan={plan}
+          smooth={smooth}
+          boundaries={boundaries}
+        />
 
         {/* **D20 requires the chart to say which rung it picked, and D67 requires the gated count
             and its reason to be on screen.** Both live here. A chart that had quietly coarsened, or
@@ -488,6 +550,43 @@ export function App() {
             </>
           ) : null}
         </p>
+
+        {/* **B48 — the boundaries in words, beside the same boundaries as rules on the chart.**
+            The chart can only carry `a_03 g4`; the step it explains is only explained once the
+            reader can see WHAT changed and WHY a human changed it. The rationale is the decision's
+            own, joined through `config_generations.opened_by_decision` — so the annotation and the
+            log below are the same fact reached from two directions. */}
+        {boundaries.length === 0 ? (
+          <p className="gate">
+            no config changes in this window for the charted ads — every step in these series is the
+            world moving, not a lever
+          </p>
+        ) : (
+          <ul className="boundaries">
+            {boundaries.map((b) => {
+              const decision = decisionById.get(b.opened_by_decision);
+              return (
+                <li key={b.generation_id} className="boundaries__item">
+                  <span className="boundaries__mark">▼</span>{' '}
+                  <code>{b.ad_id}</code> gen {b.seq_in_ad} at <code>{b.at}</code> ·{' '}
+                  <strong>{b.changes.join(' · ')}</strong>
+                  {decision === undefined ? (
+                    // The FK is `NOT NULL REFERENCES decisions(decision_id)`, so this is
+                    // unreachable while the two arrive in one transaction — said rather than
+                    // rendered blank, because a silently missing rationale reads as "none given".
+                    <span className="boundaries__meta"> · opening decision not in this response</span>
+                  ) : (
+                    <span className="boundaries__meta">
+                      {' '}
+                      · decision #{decision.decision_seq} by <code>{decision.actor}</code>:{' '}
+                      &ldquo;{decision.rationale}&rdquo;
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
         {plan.dropped.length > 0 ? (
           <p className="gate gate--dropped">
@@ -611,6 +710,17 @@ export function App() {
             {latest.restated_at !== null ? <> · <strong>restated</strong></> : null}
           </p>
         )}
+
+        {/* **B46 — the loop closes here.** Above the decision log, because the log is the record of
+            what this console did; below the numbers, because a lever is pulled in response to them.
+            The world responds within one simulator tick: pause `a_12` and its impressions stop
+            arriving, which is visible on the chart above without touching anything else. */}
+        <h2 className="section">Decision loop — pull a lever</h2>
+        <Console ads={ads} components={components} onApplied={reload} />
+
+        {/* B47 — the authoritative log, and the config on the left is its fold. */}
+        <h2 className="section">Decision log — what produced this config</h2>
+        <DecisionLog decisions={decisions} generations={generations} selected={selected} />
 
         {/* B43 — §5.6's timeline. Below the chart, because an entry explains a mark on it. */}
         <h2 className="section">Restatements — settled buckets that moved</h2>
