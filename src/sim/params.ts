@@ -207,6 +207,69 @@ export const NOISE = {
 export const SPEND_TICK_S = 60;
 
 /**
+ * §9's budget pacing — **I3 / P11**. Budget is a **pacing multiplier, not a cap**: there is no
+ * fifth ad state and no `budget_exhausted`.
+ *
+ * ```
+ * ρ_catchup  = clamp(1 + 3.0 · (e − a), 0.05, 1.0)
+ * ρ_terminal = clamp((1.05 − a) / 0.15,  0, 1)
+ * ```
+ *
+ * **`catchupMax` is 1.0, not §9's original 1.6 — D59, amended in §9 and §21 in place.** Pacing
+ * throttles an ad running ahead of its channel's shape of the day and never boosts one behind.
+ * The 1.6 ceiling assumed an ad is delivery-limited by pacing; §3's λ is exogenous with no
+ * auction-supply ceiling, so a boost manufactures impressions this model says do not exist.
+ * Measured at B32 before the amendment: every seeded ad sat ON the clamp for the whole day and
+ * delivered 1.19–1.47× §2.3's stated `Impr/day`, and `a_08` — placed near its cap by D52 so the
+ * taper would be visible — spent 0.1% of ticks in it.
+ *
+ * `overspendTolerance` is the +5% §9 states out loud: *"real platforms overspend slightly and a
+ * simulator that lands exactly on the number would be the tell."* Delivery is untouched until 90%
+ * of budget and slides to zero at 105%, which is `terminalBand` = 1.05 − 0.90.
+ */
+/**
+ * §13's injected misbehaviour rates. **Per event unless the comment says otherwise.**
+ *
+ * §13 cross-references `DESIGN.md` §6 so that every injected fault has a named handler and every
+ * handler has something that triggers it. These are the trigger rates, transcribed; the handlers
+ * were all built in stage 2.
+ *
+ * The three delay ranges (`dupMaxDelayS`, `reorderLong*`, `orphanHoldS`) are §13's own words in
+ * its Rate column — "re-sent 1–20 s later", "held 30–120 s", "withheld 90 s, then released" (the
+ * last from §17's `orphan_burst`, which is the same mechanism on demand).
+ *
+ * `skewMinS`/`skewMaxS` are §13's "+5–90 s". The clamp that handles them is I10's generated
+ * column, which keeps both the claimed `ts` and the effective one.
+ */
+export const FAULTS = {
+  dupIdentical: 0.008,
+  dupConflicting: 0.0005,
+  dupMaxDelayS: 20,
+  reorderShort: 0.03,
+  reorderLong: 0.003,
+  reorderLongMinS: 30,
+  reorderLongMaxS: 120,
+  /** Of CLICKS, not of all events — §13 states both orphan rows as a share of clicks. */
+  orphanReleased: 0.004,
+  orphanNever: 0.006,
+  orphanHoldS: 90,
+  malformed: 0.001,
+  skew: 0.002,
+  skewMinS: 5,
+  skewMaxS: 90,
+  dualClickId: 0.0005,
+  loss: 0.002,
+} as const;
+
+export const PACING = {
+  catchupGain: 3.0,
+  catchupMin: 0.05,
+  catchupMax: 1.0,
+  overspendTolerance: 1.05,
+  terminalBand: 0.15,
+} as const;
+
+/**
  * §8's novelty. `ν(age_hours) = 1 + 0.25 · exp(−age_hours / 18)` — +25% CTR in the first minutes,
  * ~4% left after two days.
  *

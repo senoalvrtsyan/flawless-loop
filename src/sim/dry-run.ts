@@ -29,6 +29,7 @@ import {
   P_FAST,
   SPEND_TICK_S,
   TEMPERATURE,
+  PACING,
 } from './params.ts';
 import {
   adFatigue,
@@ -47,7 +48,11 @@ import {
 import { demand, demandConstants, demandFactor } from './noise.ts';
 import { purchaseLagMs, reportingLagMs } from './lag.ts';
 import { diurnal, dowVolume, lambdaPerSecond, negBinomial } from './rate.ts';
-import { localHour, localMs, localWeekday } from '../shared/time.ts';
+import { localDayStartMs, localHour, localMs, localWeekday } from '../shared/time.ts';
+import { expectedElapsed, pacing } from './pacing.ts';
+import { FAULTS } from './params.ts';
+import { emptyCounts, injectFaults, type FaultName } from './faults.ts';
+import { derivedId } from './rng.ts';
 import {
   beta,
   betaBinomial,
@@ -129,6 +134,13 @@ export type AdTally = {
   cpmAccruedCents: number;
   spendCents: number;
   spendTicks: number;
+  /** §9, B32: Σρ and the tick count, so the section can print the window's mean throttle. */
+  rhoSum: number;
+  rhoTicks: number;
+  /** §9's `a` at the last tick of the window — how close the ad ended the day to its cap. */
+  finalA: number;
+  /** Ticks at which `ρ_terminal < 1`, i.e. inside the taper rather than merely behind pace. */
+  taperTicks: number;
 };
 
 const emptyTally = (): AdTally => ({
@@ -140,6 +152,10 @@ const emptyTally = (): AdTally => ({
   cpmAccruedCents: 0,
   spendCents: 0,
   spendTicks: 0,
+  rhoSum: 0,
+  rhoTicks: 0,
+  finalA: 0,
+  taperTicks: 0,
 });
 
 export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
@@ -149,7 +165,7 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   console.log(
     `\n=== B25 · §3 arrival process · §4 diurnal and day of week ===\n` +
       `${hours} h from ${localStamp(fromMs)} ${ACCOUNT_TZ} · seed '${seed}'\n` +
-      `§12's m_channel·m_ad ARE applied (B30). ρ_pacing (B32) held at 1.00.\n` +
+      `§12's m_channel·m_ad ARE applied (B30). §9's ρ_pacing IS applied (B32).\n` +
       `φ and ν are NOT applied and never will be — D56 puts both in p_ctr only.\n`,
   );
 
@@ -172,6 +188,12 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
   const nuByAd = new Map(ADS.map((a) => [a.ad_id, adNovelty(a.ad_id, ages)]));
   const tally = new Map(ADS.map((a) => [a.ad_id, emptyTally()]));
   const intervalAccrual = new Map(ADS.map((a) => [a.ad_id, 0]));
+  // §9's `a` needs spend so far on the ACCOUNT-LOCAL day, which is what the live emitter reads off
+  // the world poll. Here it is accumulated from the same two disjoint cost paths the store sums
+  // (D10, L79-80): rounded CPM spend deltas and click `cost_cents`. It resets at local midnight,
+  // so a window spanning one shows the rollover rather than carrying yesterday's total across it.
+  const spentToday = new Map(ADS.map((a) => [a.ad_id, 0]));
+  let spendDay = localDayStartMs(fromMs);
   let dSum = 0;
   let dCount = 0;
   let mSum = 0;
@@ -193,12 +215,22 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
       for (let s = 0; s < 3_600; s++) {
         const tick = hourStart + s;
         const atMs = tick * 1000;
-        // §12's two demand factors are the ONLY §3 factor this chunk passes — D56 keeps φ and ν
-        // out of λ, and ρ_pacing is B32.
+        // §12's demand factors and §9's ρ. D56 keeps φ and ν out of λ; with ρ here, §3's factor
+        // list is complete and this line is the emitter's line.
         const m = demandFactor(ad.channel, ad.ad_id, atMs);
         mSum += m;
         mCount++;
-        const lambda = lambdaPerSecond(ad.ad_id, ad.channel, atMs, { demand: m });
+        const day = localDayStartMs(atMs);
+        if (day !== spendDay) {
+          spendDay = day;
+          for (const id of spentToday.keys()) spentToday.set(id, 0);
+        }
+        const rho = pacing(ad.channel, atMs, spentToday.get(ad.ad_id) ?? 0, ad.daily_budget_cents);
+        own.rhoSum += rho.rho;
+        own.rhoTicks++;
+        own.finalA = rho.a;
+        if (rho.terminal < 1) own.taperTicks++;
+        const lambda = lambdaPerSecond(ad.ad_id, ad.channel, atMs, { demand: m, rho: rho.rho });
         const n = negBinomial(seed, ad.ad_id, tick, lambda);
         hourExpected += lambda;
         hourDrawn += n;
@@ -213,7 +245,10 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
           mChannel: demand('channel', ad.channel, atMs),
         });
         own.clicks += clicks.length;
-        for (const click of clicks) own.clickCostCents += click.cost_cents;
+        for (const click of clicks) {
+          own.clickCostCents += click.cost_cents;
+          spentToday.set(ad.ad_id, (spentToday.get(ad.ad_id) ?? 0) + click.cost_cents);
+        }
 
         // Conversions are COUNTED here and emitted nowhere: §10 schedules them (§11, B29). Keyed
         // on the `cvr` stream by `(ad, tick)`, which is the key B29 will re-derive them from.
@@ -242,6 +277,7 @@ export function arrivalProcess(opts: DryRunOptions): Map<string, AdTally> {
           if (cents > 0) {
             own.spendCents += cents;
             own.spendTicks++;
+            spentToday.set(ad.ad_id, (spentToday.get(ad.ad_id) ?? 0) + cents);
           }
         }
       }
@@ -836,5 +872,257 @@ function clickRateUncertainty(opts: DryRunOptions): void {
       `  a conversion draw is over one tick's CLICKS, which is 0-1, and stays 0-1 over a minute. It\n` +
       `  would take an hour-wide window to give it any effect — a further decision about where\n` +
       `  cohort-rate uncertainty lives, not a fix. Stated as a limit in BUILD_PLAN.md §14.`,
+  );
+}
+
+/**
+ * §9 — budget pacing. **B32.**
+ *
+ * Three checks, in the order the section's claims depend on each other: `ρ_terminal` against §9's
+ * own printed table, `e(t)` against the properties §9 asserts of it, and then what the window's
+ * simulated spend actually did to the twelve ads — which is the only one of the three that could
+ * have come out differently.
+ */
+export function pacingSection(opts: DryRunOptions, tallies: Map<string, AdTally>): void {
+  console.log(
+    `\n=== B32 · §9 budget pacing: throttle, never cliff ===\n` +
+      `ρ_catchup = clamp(1 + ${PACING.catchupGain.toFixed(1)}·(e − a), ${PACING.catchupMin}, ${PACING.catchupMax})   ` +
+      `ρ_terminal = clamp((${PACING.overspendTolerance} − a)/${PACING.terminalBand}, 0, 1)\n` +
+      `Budget is a MULTIPLIER, not a cap (I3/P11): there is no fifth ad state.\n`,
+  );
+
+  // §9's printed table, which states `ρ_terminal` at six values of `a`. Reproduced rather than
+  // asserted: this is the comparison D43 asks for on a chunk whose arithmetic is all in the spec.
+  const SPEC: readonly (readonly [number, number])[] = [
+    [0.5, 1.0],
+    [0.85, 1.0],
+    [0.9, 1.0],
+    [0.95, 0.67],
+    [1.0, 0.33],
+    [1.05, 0.0],
+  ];
+  console.log(`  §9's ρ_terminal table — the taper into the cap. ρ_terminal does not read e at all:`);
+  console.log(`    ${pad('a', 6)}  ${pad('ρ_term', 8)}  ${pad('§9 says', 8)}  verdict`);
+  let allMatch = true;
+  for (const [a, expected] of SPEC) {
+    const p = pacing('meta_feed', opts.fromMs, a * 100_000, 100_000);
+    const ok = Math.abs(Number(p.terminal.toFixed(2)) - expected) <= 0.005;
+    allMatch &&= ok;
+    console.log(
+      `    ${pad(a.toFixed(2), 6)}  ${pad(p.terminal.toFixed(2), 8)}  ${pad(expected.toFixed(2), 8)}  ` +
+        `${ok ? 'MATCH' : 'DIFFERS'}`,
+    );
+  }
+  console.log(
+    `  ${allMatch ? 'MATCH' : 'DIFFERS'} — delivery is untouched to 90% of budget and slides to zero at ` +
+      `${PACING.overspendTolerance * 100}%. The +5% overspend tolerance is stated, not accidental.`,
+  );
+
+  // ρ_catchup is the other term and §9 gives it no table, so its clamps are printed instead —
+  // they are where the interesting behaviour is, and the per-ad rows below land on one of them.
+  console.log(`\n  ρ_catchup by pace gap. Ahead of pace throttles; behind pace does NOT boost — D59:`);
+  console.log(
+    `    ${pad('e − a', 7)}  ` +
+      [-0.4, -0.2, -0.05, 0, 0.05, 0.2, 0.4]
+        .map((g) => pad(g.toFixed(2), 6))
+        .join('  '),
+  );
+  console.log(
+    `    ${pad('ρ_catch', 7)}  ` +
+      [-0.4, -0.2, -0.05, 0, 0.05, 0.2, 0.4]
+        .map((g) =>
+          pad(
+            Math.min(
+              Math.max(1 + PACING.catchupGain * g, PACING.catchupMin),
+              PACING.catchupMax,
+            ).toFixed(2),
+            6,
+          ),
+        )
+        .join('  '),
+  );
+  console.log(
+    `    The ceiling binds for every ad at or behind pace, and the 0.05 floor at 32 points ahead.\n` +
+      `    At §9's original 1.6 ceiling the ±0.2 gaps both clamped, and every seeded ad sat on the\n` +
+      `    upper one all day — the measurement that produced D59.`,
+  );
+
+  console.log(`\n  e(t), the expected traffic elapsed — NOT elapsed clock time. Per channel, by local hour:`);
+  const dayStart = localDayStartMs(opts.fromMs);
+  const hoursToShow = [0, 3, 6, 9, 12, 15, 18, 21];
+  console.log(`    ${pad('channel', 14)}  ` + hoursToShow.map((h) => pad(`${String(h).padStart(2, '0')}:00`, 6)).join('  ') + `  ${pad('24:00', 6)}`);
+  for (const c of CHANNELS) {
+    const row = hoursToShow.map((h) => pad(expectedElapsed(c, dayStart + h * 3_600_000).toFixed(3), 6));
+    // The day's last millisecond, not the next midnight — `e` is periodic, so 24:00 reads as 0.
+    const end = expectedElapsed(c, dayStart + 86_400_000 - 1);
+    console.log(`    ${pad(c, 14)}  ` + row.join('  ') + `  ${pad(end.toFixed(3), 6)}`);
+  }
+  console.log(
+    `    Clock time would read 0.125 / 0.250 / 0.375 … at those hours. It does not, and that gap IS\n` +
+      `    §9's point: paced linearly every ad front-loads into the morning and goes dark by prime time.`,
+  );
+
+  // §9 claims the local-midnight rollover produces no discontinuity, "because e resets with it".
+  // That claim is conditional and the condition is worth printing rather than repeating.
+  console.log(`\n  The local-midnight rollover, for an ad that ended the day at various a:`);
+  console.log(`    ${pad('a at 23:59', 11)}  ${pad('ρ before', 9)}  ${pad('ρ after', 9)}  jump`);
+  for (const a of [0.6, 0.8, 1.0, 1.05]) {
+    const before = pacing('meta_feed', dayStart + 86_400_000 - 1, a * 100_000, 100_000).rho;
+    const after = pacing('meta_feed', dayStart + 86_400_000, 0, 100_000).rho;
+    console.log(
+      `    ${pad(a.toFixed(2), 11)}  ${pad(before.toFixed(3), 9)}  ${pad(after.toFixed(3), 9)}  ` +
+        `${(after - before >= 0 ? '+' : '') + (after - before).toFixed(3)}`,
+    );
+  }
+  console.log(
+    `    §9's "the rollover produces no discontinuity" now holds for every UNDERspending ad —\n` +
+      `    ρ_catchup is already 1 on both sides of midnight under D59, so there is nothing to jump.\n` +
+      `    An ad that ended AT or OVER its cap still steps up, because ρ_terminal releases when a\n` +
+      `    resets. That step is the budget day starting, which is the behaviour, not an artifact.`,
+  );
+
+  console.log(`\n  What the window's own spend did — the only rows here that could have come out differently:`);
+  console.log(
+    `    ${pad('ad', 6)}  ${pad('channel', 14)}  ${pad('budget', 8)}  ${pad('spent', 8)}  ` +
+      `${pad('a end', 7)}  ${pad('mean ρ', 7)}  ${pad('taper', 6)}  ${pad('impressions', 11)}  ` +
+      `${pad('§2.3 says', 10)}  vs nominal`,
+  );
+  const dowWeight = dowVolume(opts.fromMs + 43_200_000);
+  for (const ad of ADS) {
+    const t = tallies.get(ad.ad_id);
+    if (t === undefined || t.rhoTicks === 0) continue;
+    // §2.3's stated Impr/day, scaled by the window and the day-of-week weight — the figure ρ = 1
+    // would have delivered, and therefore the figure §18.3's ladder was calibrated against.
+    const nominal = ((BASE_IMPR_PER_DAY[ad.ad_id] ?? 0) * dowWeight * opts.hours) / 24;
+    console.log(
+      `    ${pad(ad.ad_id, 6)}  ${pad(ad.channel, 14)}  ${pad(ad.daily_budget_cents, 8)}  ` +
+        `${pad(t.spendCents + t.clickCostCents, 8)}  ${pad(t.finalA.toFixed(3), 7)}  ` +
+        `${pad((t.rhoSum / t.rhoTicks).toFixed(3), 7)}  ` +
+        `${pad(`${((100 * t.taperTicks) / t.rhoTicks).toFixed(1)}%`, 6)}  ${pad(t.impressions, 11)}  ` +
+        `${pad(Math.round(nominal), 10)}  ${(t.impressions / nominal).toFixed(2)}×`,
+    );
+  }
+  console.log(
+    `    D52 set the ten unconstrained budgets ~25% above a baseline computed at φ = ν = 1 and\n` +
+      `    concluded "§9's pacing is inert for them" — true only because D59 capped ρ_catchup at 1.0.\n` +
+      `    At §9's original 1.6 ceiling this table read 1.19–1.47× nominal on EVERY ad, because a\n` +
+      `    fatigued world spends far below that baseline and ρ_catchup's clamps bind at a ±0.2 gap,\n` +
+      `    so every ad sat ON the clamp all day. a_08 spent 0.1% of ticks in the taper it exists to\n` +
+      `    show. λ is exogenous in §3, so the boost bought inventory the model does not have.\n` +
+      `    a_08 and a_12 running BELOW §2.3's Impr/day is the intended result — B35 must expect it.`,
+  );
+}
+
+/**
+ * §13 — the injected misbehaviours. **B33.**
+ *
+ * Measures the injector against §13's own Rate column. The sample is synthetic in its MIX — half
+ * impressions, 40% clicks, 10% spend, so the two click-conditional rows get enough clicks to be
+ * measurable — but not in its keys: every `event_id` is built with the same `derivedId` call the
+ * emitter uses, and every fault decision is a keyed draw over that id, so the rates measured here
+ * are the rates the live emitter injects.
+ *
+ * **Volumes are NOT measured here.** The 5-minute live run in the plan item's verify column is
+ * what checks the rates against real traffic and real dispositions; this checks the injector.
+ */
+export function faultSection(opts: DryRunOptions): void {
+  const { seed } = opts;
+  const SAMPLE = 120_000;
+  console.log(
+    `\n=== B33 · §13 injected misbehaviours ===\n` +
+      `Every fault is a KEYED draw over the event_id (§14), so a re-emitted event makes the same\n` +
+      `decision and a restart re-derives its own duplicates rather than inventing new ones.\n` +
+      `${SAMPLE.toLocaleString('en-US')} synthetic events, mix 50/40/10 impression/click/spend.\n`,
+  );
+
+  const counts = emptyCounts();
+  let clicks = 0;
+  let sent = 0;
+  let heldTotal = 0;
+  const startTick = Math.floor(opts.fromMs / 1000);
+
+  for (let n = 0; n < SAMPLE; n++) {
+    const ad = ADS[n % ADS.length];
+    if (ad === undefined) continue;
+    const tick = startTick + Math.floor(n / ADS.length);
+    const id = derivedId(seed, 'eid', ad.ad_id, tick, n % 7);
+    const r = n % 10;
+    const signal =
+      r < 5
+        ? { event_id: id, ts: new Date(tick * 1000).toISOString(), ad_id: ad.ad_id, event: 'impression' as const }
+        : r < 9
+          ? {
+              event_id: id,
+              ts: new Date(tick * 1000).toISOString(),
+              ad_id: ad.ad_id,
+              event: 'click' as const,
+              click_id: derivedId(seed, 'cid', ad.ad_id, tick, n % 7),
+              cost_cents: 62,
+            }
+          : {
+              event_id: id,
+              ts: new Date(tick * 1000).toISOString(),
+              ad_id: ad.ad_id,
+              event: 'spend' as const,
+              amount_cents: 130,
+            };
+    if (signal.event === 'click') clicks++;
+    const out = injectFaults(seed, tick, [signal], counts);
+    sent += out.now.length;
+    heldTotal += out.held.length;
+  }
+
+  // §13's Rate column, and the denominator each rate is stated against. The two orphan rows are
+  // "of clicks" in §13's own words; everything else is per event.
+  const SPEC: readonly (readonly [FaultName, number, 'event' | 'click', string])[] = [
+    ['dup_identical', FAULTS.dupIdentical, 'event', 'D15 — duplicate_identical'],
+    ['dup_conflicting', FAULTS.dupConflicting, 'event', 'D15/I7 — first write wins, conflict kept'],
+    ['reorder_short', FAULTS.reorderShort, 'event', 'D12 — ingest_seq supplies the order'],
+    ['reorder_long', FAULTS.reorderLong, 'event', 'D12'],
+    ['orphan_released', FAULTS.orphanReleased, 'click', 'D16 — provisional then promoted'],
+    ['orphan_never', FAULTS.orphanNever, 'click', 'D16 — orphan_expired past the horizon'],
+    ['malformed', FAULTS.malformed, 'event', 'rejected_invalid, raw body retained'],
+    ['skew', FAULTS.skew, 'event', 'I10 — clamped, both values kept'],
+    ['dual_click_id', FAULTS.dualClickId, 'click', 'E3 — the partial unique index'],
+    ['loss', FAULTS.loss, 'event', 'G21 — NOTHING. The failure we cannot see'],
+  ];
+
+  console.log(
+    `  ${pad('fault', 17)}  ${pad('§13 says', 9)}  ${pad('measured', 9)}  ${pad('n', 6)}  ${pad('of', 6)}  verdict`,
+  );
+  let allOk = true;
+  for (const [name, rate, denom, handler] of SPEC) {
+    const n = counts[name];
+    const base = denom === 'click' ? clicks : SAMPLE;
+    const measured = n / base;
+    // Binomial 4σ on the stated rate — wide enough that a correct injector never trips it, tight
+    // enough that a rate wrong by a factor does. The point of the check is the FACTOR, not the
+    // third decimal: a transcription slip shows as 10× or 0×, never as 1.1×.
+    const sigma = Math.sqrt((rate * (1 - rate)) / base);
+    const ok = Math.abs(measured - rate) <= 4 * sigma;
+    allOk &&= ok;
+    console.log(
+      `  ${pad(name, 17)}  ${pad(`${(100 * rate).toFixed(3)}%`, 9)}  ` +
+        `${pad(`${(100 * measured).toFixed(3)}%`, 9)}  ${pad(n, 6)}  ${pad(denom === 'click' ? 'clicks' : 'events', 6)}  ` +
+        `${ok ? 'MATCH' : 'DIFFERS'}   ${handler}`,
+    );
+  }
+  console.log(
+    `  ${allOk ? 'MATCH' : 'DIFFERS'} — all ten within 4σ of §13's stated rate.\n` +
+      `  ${sent} of ${SAMPLE} events went out in their own tick; ${heldTotal} were held for a later one.`,
+  );
+
+  console.log(
+    `\n  Two of the ten cannot be OBSERVED yet, and the table above measures the trigger, not the\n` +
+      `  outcome. orphan_released and orphan_never are defined against a conversion, and nothing\n` +
+      `  emits a live conversion until B34 — §15.3(b) puts the pending-click set in the store, so a\n` +
+      `  withheld click currently reads as a late click and a dropped one as loss. The mechanism is\n` +
+      `  already right: §11's lag is keyed by click_id alone and does not care when the click was\n` +
+      `  delivered, so the same code produces real provisional-then-promoted orphans at B34.\n` +
+      `\n  Three deliberate NON-injections, so this table is not misread as complete (§13): signals\n` +
+      `  for a non-live ad (I11 — a self-check that should read ZERO under our own simulator);\n` +
+      `  retraction/refund/void (D25/G43 — unrepresentable by the contract, named as BREAKING, not\n` +
+      `  tolerated); and burst/gap/stall, which are §17 scenarios rather than background rates.\n` +
+      `\n  Late conversion past 72 h is EMERGENT from §11's lag mixture at 2.3-4.6%, not injected.`,
   );
 }

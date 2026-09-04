@@ -13,18 +13,19 @@
 // falling back to `fixtures.ts` would deliver a config the fold may have changed.
 //
 // What is real as of B25 is the RATE. §3's λ now carries §4's per-channel shape of the day and its
-// day-of-week weight, and the count is `NegBinomial(λ, α = 8)` rather than a constant. The factors
-// that are still absent are passed as 1.0 by name rather than left out, each on its own plan item:
-// fatigue (B26), novelty (B28), pacing (B32), the two AR(1) demand factors (B30). Clicks, cost and
-// spend are B27; the conversion schedule B29; the injected misbehaviours B33; the 7-day backfill
-// and the T0 seam B34 and B35.
+// day-of-week weight, and the count is `NegBinomial(λ, α = 8)` rather than a constant. **As of B32
+// λ's factor list is complete**: §9's ρ_pacing is the last one, and nothing is passed as 1.0 by
+// absence any more (φ and ν are not on that list and never will be — D56 puts both in `p_ctr`).
+// Clicks, cost and spend are B27; the conversion schedule B29; the injected misbehaviours B33; the
+// 7-day backfill and the T0 seam B34 and B35.
 
 import { derivedId } from './rng.ts';
 import { lambdaPerSecond, negBinomial } from './rate.ts';
 import { demand, demandFactor } from './noise.ts';
 import { WORLD_URL, currentWorld, liveAds, pollWorld, type LiveAd } from './world.ts';
-import type { AdConfig } from '../shared/types.ts';
 import { clicksForTick, cpmAccrualCents, isSpendBoundary, spendCents } from './emit.ts';
+import { pacing } from './pacing.ts';
+import { FAULT_NAMES, emptyCounts, injectFaults, type Held } from './faults.ts';
 import { SPEND_TICK_S } from './params.ts';
 import {
   arrivalProcess,
@@ -33,7 +34,9 @@ import {
   demandNoise,
   fatigue,
   localMidnightAtOrBefore,
+  faultSection,
   noveltySection,
+  pacingSection,
   type DryRunOptions,
 } from './dry-run.ts';
 import type { IngestResult, Signal } from '../shared/types.ts';
@@ -78,37 +81,71 @@ const MAX_PENDING = 10_000;
  * re-derive the same `event_id` with a different `ts` on restart, which is
  * `duplicate_conflicting` — a platform correction (§5.1 step 4) — rather than a duplicate.
  */
-function impressionsForTick(ad: AdConfig, tick: number): number {
-  // §3's λ at this second, then §12's draw. Every remaining factor defaults to 1.0 inside
-  // `lambdaPerSecond` and is named on its own plan item; passing nothing is the honest statement
-  // that they are absent, not that they are one. **φ and ν are not among them and never will be**
-  // — D56 puts both in `p_ctr` only, because fatigue changes what an impression is worth rather
-  // than how many arrive.
+function impressionsForTick(live: LiveAd, tick: number): number {
+  const ad = live.config;
+  // §3's λ at this second, then §12's draw. **φ and ν are not passed and never will be** — D56
+  // puts both in `p_ctr` only, because fatigue changes what an impression is worth rather than how
+  // many arrive. §12's two demand factors are passed (B30), and §9's ρ is passed here (B32), which
+  // completes §3's factor list: nothing defaults to 1.0 by absence any more.
   //
-  // §12's two demand factors ARE passed (B30) — they are the only one of §3's remaining factors
-  // that is. They stay a pure function of `t` for exactly the reason below.
-  //
-  // A pure function of `(ad, tick)`, which is what lets the 60-second `spend` delta below
-  // re-derive an interval's impressions instead of accumulating them.
+  // **ρ is the one factor that is NOT a pure function of `t`** — it reads `spend_so_far_today` off
+  // the world poll, so a tick re-derived later computes a different λ than its own emission did.
+  // That is inherent to §9 (a pacer that reacts to realised spend cannot be memoryless in time) and
+  // it is what **D58** decided the shape of: `ts` no longer depends on the count, so the
+  // divergence can only add or drop an event at the tail, never rewrite one already sent.
   return negBinomial(
     SEED,
     ad.ad_id,
     tick,
     lambdaPerSecond(ad.ad_id, ad.channel, tick * 1_000, {
       demand: demandFactor(ad.channel, ad.ad_id, tick * 1_000),
+      rho: pacing(ad.channel, tick * 1_000, live.spend_so_far_today_cents, live.daily_budget_cents)
+        .rho,
     }),
   );
 }
 
-/** Sub-second placement: spread evenly inside the tick's second rather than drawn for it. §14's
- * list of named streams is closed, and inventing one for jitter would make that list a guess.
- * Nothing reads sub-second placement yet — D28 buckets by the minute. */
-const spreadMs = (tick: number, i: number, of: number): number =>
-  tick * 1_000 + Math.floor(((i + 0.5) * 1_000) / Math.max(of, 1));
+/**
+ * Sub-second placement — **a pure function of `(tick, i)` alone, per D58.**
+ *
+ * It used to spread evenly across the tick's second, dividing by the number of events in it. That
+ * made every event's `ts` a function of the COUNT, so a count that came out differently on a
+ * re-emission rewrote the body of events whose `event_id` was unchanged: `duplicate_conflicting`,
+ * which §5.1 step 4 surfaces as a platform correction. Harmless while λ was a pure function of `t`;
+ * B32's ρ is not, because it reads realised spend. Measured before the decision was put: 1.66% of
+ * a catch-up's impressions would have landed conflicting at the drift `a_12` sees in §9's terminal
+ * taper, against the 0.05% §13 injects on purpose.
+ *
+ * Indexing by millisecond instead means a count change can only APPEND at the tail or omit there —
+ * never rewrite an event already sent. Nothing reads sub-second placement (D28 buckets by the
+ * minute), so the even spread was the cheaper of the two properties to give up. The clamp at 999
+ * keeps the event inside its own second; λ peaks near 1.5/s across the portfolio, so it is a
+ * tripwire rather than a live branch.
+ */
+const spreadMs = (tick: number, i: number): number => tick * 1_000 + Math.min(i, 999);
+
+/**
+ * The CPM accrual of the interval currently open, per ad.
+ *
+ * In-process and deliberately NOT durable — D40-A's "no durable state of its own" is about state
+ * that would have to survive a restart, and this does not: `FIRST_TICK` is aligned down to a spend
+ * boundary, so a restart's catch-up regenerates every interval it will bill from that interval's
+ * own first tick. An ad paused mid-interval loses the partial accrual it had built, which is a
+ * cent or two and errs towards under-billing a paused ad — the only direction that cannot
+ * fabricate a signal for an ad the fold says is not live (§13's stated non-injection).
+ */
+const accruals = new Map<string, { start: number; cents: number }>();
+
+function accrue(adId: string, tick: number, cents: number): void {
+  const start = Math.floor(tick / SPEND_TICK_S) * SPEND_TICK_S;
+  const open = accruals.get(adId);
+  if (open === undefined || open.start !== start) accruals.set(adId, { start, cents });
+  else open.cents += cents;
+}
 
 function eventsForAd(live: LiveAd, tick: number): Signal[] {
   const ad = live.config;
-  const count = impressionsForTick(ad, tick);
+  const count = impressionsForTick(live, tick);
   const events: Signal[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -117,7 +154,7 @@ function eventsForAd(live: LiveAd, tick: number): Signal[] {
       // Always the second that has ALREADY closed, so `ts` is in the past and I10's skew clamp
       // never fires. A simulator running its clock ahead would have every event clamped to
       // `received_at` and collapsed into the current minute.
-      ts: new Date(spreadMs(tick, i, count)).toISOString(),
+      ts: new Date(spreadMs(tick, i)).toISOString(),
       ad_id: ad.ad_id,
       event: 'impression',
     });
@@ -140,7 +177,7 @@ function eventsForAd(live: LiveAd, tick: number): Signal[] {
   for (const click of clicks) {
     events.push({
       event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 'c', click.index),
-      ts: new Date(spreadMs(tick, click.index, clicks.length)).toISOString(),
+      ts: new Date(spreadMs(tick, click.index)).toISOString(),
       ad_id: ad.ad_id,
       event: 'click',
       click_id: click.click_id,
@@ -152,34 +189,37 @@ function eventsForAd(live: LiveAd, tick: number): Signal[] {
   // that has just closed. Unix seconds divisible by 60 are minute boundaries and D28 buckets by
   // the UTC minute, so `[tick − 60, tick)` is exactly one bucket and the delta lands in it.
   //
-  // The interval's impressions are RE-DERIVED rather than accumulated as the ticks went by. That
-  // costs 60 keyed draws a minute and buys the restart property: a re-emitted spend event is
-  // byte-identical, so it lands as `duplicate_identical` rather than as a correction. It stays
-  // exact under B31b because λ carries no φ (D56) — the one place that decision pays off twice.
+  // **The interval's accrual is ACCUMULATED as its ticks are emitted, not re-derived at the
+  // boundary** — changed at B32, and forced by ρ rather than chosen. B27 re-derived all 60 seconds
+  // of impressions at the boundary, which was exact only while λ was a pure function of `t`. ρ
+  // reads realised spend and moves within the minute, so a re-derivation at the boundary bills a
+  // different impression count than the bucket actually holds: measured at 6.3% of spend events
+  // off by a cent at the drift `a_12` sees in the taper, and it billed a full minute of CPM for an
+  // ad that was paused for most of it, because `impressionsForTick` does not know about status.
+  // Accumulating bills exactly what was emitted, which is what HR5 asks of the money column.
   //
-  // The interval must be one this process actually EMITTED, not merely one it can re-derive. Boot
-  // aligns `FIRST_TICK` down to a boundary, so the first tick generated is itself a boundary — and
-  // the interval it closes lies entirely BEFORE boot. Emitting it billed a full minute of CPM
-  // against zero impressions: found by reading the store, where a bucket held a `spend` row and no
-  // `impression` rows at all. Alignment is what makes this guard lossless: the first interval it
-  // skips is one no process ever emitted, and every later one starts on a tick this process
-  // generated, so a restart re-emits the boundary byte-identically instead of dropping it.
-  if (isSpendBoundary(tick) && tick - SPEND_TICK_S >= FIRST_TICK) {
-    let accrued = 0;
-    for (let t = tick - SPEND_TICK_S; t < tick; t++) {
-      accrued += cpmAccrualCents(ad, impressionsForTick(ad, t));
-    }
-    const cents = spendCents(accrued);
-    if (cents > 0) {
-      events.push({
-        event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 's'),
-        ts: new Date((tick - 1) * 1_000).toISOString(),
-        ad_id: ad.ad_id,
-        event: 'spend',
-        amount_cents: cents,
-      });
+  // The B27 guard it replaces is now structural rather than a condition. `FIRST_TICK` is aligned
+  // down to a boundary, so an interval is only ever entered at its start; an accrual whose `start`
+  // is not `tick − 60` is one this process did not generate in full, and it is dropped rather than
+  // billed. The failure that guard was written for — a bucket with a `spend` row and zero
+  // `impression` rows — cannot be expressed here at all.
+  const closed = accruals.get(ad.ad_id);
+  if (isSpendBoundary(tick)) {
+    accruals.delete(ad.ad_id);
+    if (closed !== undefined && closed.start === tick - SPEND_TICK_S) {
+      const cents = spendCents(closed.cents);
+      if (cents > 0) {
+        events.push({
+          event_id: derivedId(SEED, 'eid', ad.ad_id, tick, 's'),
+          ts: new Date((tick - 1) * 1_000).toISOString(),
+          ad_id: ad.ad_id,
+          event: 'spend',
+          amount_cents: cents,
+        });
+      }
     }
   }
+  accrue(ad.ad_id, tick, cpmAccrualCents(ad, count));
 
   return events;
 }
@@ -219,6 +259,16 @@ const FIRST_TICK =
   Math.floor((Math.floor(Date.now() / 1_000) - CATCHUP_S) / SPEND_TICK_S) * SPEND_TICK_S;
 let nextTick = FIRST_TICK;
 let pending: Signal[] = [];
+
+/**
+ * §13's held deliveries: duplicates waiting out their 1–20 s, reordered events, and withheld
+ * clicks. In-process and not durable, for the same reason the spend accrual is not — a process
+ * that dies loses them, and a lost delivery is indistinguishable from the 0.2% emitter loss §13
+ * injects on purpose. The catch-up then re-derives the event, makes the SAME keyed fault decision,
+ * and schedules the copy again.
+ */
+let held: Held[] = [];
+const faultCounts = emptyCounts();
 let linkUp = true;
 let busy = false;
 
@@ -241,7 +291,11 @@ async function post(batch: readonly Signal[]): Promise<boolean> {
     console.log(
       `[sim] sent ${result.received} · accepted ${result.accepted}` +
         ` · dup ${result.duplicate_identical}/${result.duplicate_conflicting}` +
-        ` · rejected ${result.rejected_invalid} · ingest_seq ${result.ingest_seq}`,
+        ` · rejected ${result.rejected_invalid} · ingest_seq ${result.ingest_seq}` +
+        ` · injected ${FAULT_NAMES.filter((n) => faultCounts[n] > 0)
+          .map((n) => `${n} ${faultCounts[n]}`)
+          .join(' ')}` +
+        ` · held ${held.length}`,
     );
     return true;
   } catch (err) {
@@ -276,7 +330,30 @@ async function tick(): Promise<void> {
     if (world === null) return;
 
     const live = liveAds(world, Date.now());
-    for (; nextTick < now; nextTick++) pending.push(...eventsForTick(nextTick, live));
+    for (; nextTick < now; nextTick++) {
+      // §13's injectors sit BETWEEN generation and the wire, which is where a delivery fault
+      // belongs: the world produced the event, the transport is what mangles it. Nothing upstream
+      // of this line knows faults exist, so `--dry-run`'s model sections measure the clean model.
+      const injected = injectFaults(SEED, nextTick, eventsForTick(nextTick, live), faultCounts);
+      pending.push(...injected.now);
+      held.push(...injected.held);
+    }
+
+    // Anything whose hold has expired joins this tick's batch. Released events carry their ORIGINAL
+    // `ts`, which is what makes them genuinely out of order rather than merely late-looking: D12
+    // gives order to `ingest_seq`, assigned on arrival, so the store sees the inversion.
+    if (held.length > 0) {
+      const due = held.filter((h) => h.atTick <= nextTick);
+      if (due.length > 0) {
+        held = held.filter((h) => h.atTick > nextTick);
+        for (const h of due) pending.push(h.signal);
+      }
+      if (held.length > MAX_PENDING) {
+        const dropped = held.length - MAX_PENDING;
+        held = held.slice(dropped);
+        console.error(`[sim] DROPPED ${dropped} held deliveries — hold queue over ${MAX_PENDING}`);
+      }
+    }
     if (pending.length === 0) return;
 
     const batch = pending;
@@ -328,7 +405,10 @@ if (dry !== null) {
   noveltySection();
   conversionLag(dry);
   demandNoise(dry);
-  clickAndCostPath(dry, arrivalProcess(dry));
+  const tallies = arrivalProcess(dry);
+  pacingSection(dry, tallies);
+  faultSection(dry);
+  clickAndCostPath(dry, tallies);
   console.log(`\n[dry-run] ${((Date.now() - started) / 1_000).toFixed(1)}s · nothing was emitted\n`);
   process.exit(0);
 }
@@ -336,6 +416,7 @@ if (dry !== null) {
 console.log(
   `[sim] polling ${WORLD_URL} at ${1_000 / TICK_MS} Hz → posting to ${INGEST_URL}` +
     ` · seed '${SEED}' · §3 λ with §4 diurnal + day-of-week and §12 demand, NegBinomial(λ, α=8)` +
+    ` · §9 ρ_pacing from the poll's spend-so-far · §13's ten injected misbehaviours` +
     ` · §10 clicks at p_ctr with φ and ν FROM THE LOG (D56/D57), CPM spend every ${SPEND_TICK_S}s` +
     ` · replaying from ${new Date(FIRST_TICK * 1_000).toISOString()}` +
     `\n[sim] emitting for every ad the fold says is live — a pause takes effect within one tick`,
