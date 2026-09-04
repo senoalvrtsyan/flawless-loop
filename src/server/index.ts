@@ -8,6 +8,7 @@
 import { createServer } from 'node:http';
 import { openDb, DB_PATH } from './db.ts';
 import { createRouter, readBody, sendJson, type Route } from './http.ts';
+import { verify, type VerifyResult } from './verify.ts';
 import { ingest } from './ingest.ts';
 import type { IngestResult } from '../shared/types.ts';
 import { parseSnapshotQuery, snapshot } from './snapshot.ts';
@@ -126,6 +127,19 @@ const routes: readonly Route[] = [
       // Never returns: the response becomes a long-lived SSE stream (DESIGN §3.1 steps 2-4).
       // B10a added resume — the cursor is `max(?cursor=N, Last-Event-ID)` per D47.
       stream.subscribe(req, res, url);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/verify',
+    handler: (_req, res) => {
+      // B22/§7. Rebuilds every projection from the logs into shadow tables and diffs them against
+      // the live ones. Read-only with respect to `main` — the rebuild lands in `temp` (D55) — so
+      // it is safe to hit at any time, including while the simulator is running.
+      const result: VerifyResult = verify(db);
+      // 200 for a clean bill, 409 for a divergence: a reviewer refreshing this should not have to
+      // read the body to know the answer, and a script should not have to either.
+      sendJson(res, result.ok ? 200 : 409, result);
     },
   },
   {
