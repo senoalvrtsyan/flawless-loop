@@ -3,7 +3,33 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **Phase 5 · STAGE 6 IS CLOSED, AND D71 IS BUILT · 63 / 69 chunks**
+**Last updated:** 2026-09-05 · **PHASE 5 IS CLOSED — 69 / 69 chunks. THE BUILD IS COMPLETE.**
+
+---
+
+## If you are reading this cold
+
+**There is nothing left to build.** All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven
+stages are closed, and `README.md` exists. `tsc` clean, `npx vite build` clean, **172 tests**, tree
+clean.
+
+1. **`npm start`** — migrate, seed if empty, run everything, print the URL. First run ~5m20s.
+2. **`README.md`** is the front door and is written for a reviewer, not for you. It carries the
+   design notes, `SCOPE.md` §2–§4 verbatim, the misbehaviour table, 28 named limits, the extensions
+   register, the life of one event with real ids, and the four ways to check the numbers.
+3. **`docs/DEMO.md`** is the walkthrough — eight beats, followed cold at B61 in a real browser,
+   20–25 minutes.
+4. **`docs/DECISIONS.md`**'s index table is the one-line-each view of D1–D71.
+
+**What to be careful about, in one list:** `data/loop.sqlite` is the seven-day store and reseeding
+it costs 5m20s and 750 MB, so read it and use a scratch `DB_PATH` for anything that writes · run
+**one server per store** (descriptors are signed per-process) · `npx vite build`, not just `tsc`,
+catches a server import leaking into the client bundle · nothing writes a projection except
+`apply()` (**D7**) · `BUILD_PLAN.md` §14 holds ~95 traps that will not fail loudly, each written the
+day it was found.
+
+**If work resumes**, the open items are in [What is owed](#what-is-owed) below — none of them block
+anything, and the largest (`B33a`, the fault split) is a plan edit that is Seno's call.
 
 ---
 
@@ -91,6 +117,14 @@ the stage 3 → 4 seam; see "What is open", which also carries the two unratifie
 **One caveat on `DESIGN.md`.** It was approved at the Phase 2 close and has since been **corrected
 in one place and extended in two** by Phase 3 — read it *with* the "What Phase 3 changed in
 `DESIGN.md`" section below, not instead of it.
+
+**STAGE 7 IS CLOSED, AND WITH IT PHASE 5.** `G17` = B57+B58+B59+B60+B61+B62, six chunks in one
+batch at Seno's instruction (*"stage 7 in 1 batch"*), one past D48's five-chunk cap and inside the
+same stage. The stop clause did not fire. `npm start` is the one command (**B57**); `README.md` is
+written in three parts (**B58/B59/B60**) with `SCOPE.md` §2–§4 verbatim and byte-checked by a test;
+`docs/DEMO.md` had its final ordered pass **followed cold in a real browser** (**B61**), which is the
+first time anyone clicked any of stages 4–6 and which produced four corrections; and the raw terminal
+exports for sessions 9, 10 and 11 are now curated captures (**B62**).
 
 ## What exists
 
@@ -470,9 +504,9 @@ is open.**
 
 | | |
 |---|---|
-| **Current stage** | **Stage 7 · packaging (B57–B62) is NEXT.** Stages 0–6 are CLOSED. The traceability spine and the Workbench screen landed as one batch, **G16**. |
-| **Last completed chunk** | **B56**, closing stage 6 — **G16 = B51+B52+B53+B54+B55+B56**, six chunks in one batch at Seno's instruction (*"stage 6 in 1 batch"*), which is one past D48's five-chunk cap and inside the same stage. Six commits, per chunk. **The stop clause did not fire** — no decision was needed, nothing revealed the design wrong, nothing wanted a dependency (`node:crypto` is a built-in, named not asked). Behind it: **B50a** `64baeda`, **D69/D70** `9ecf8bd`, **B49+B50** `6f36400`. Older: **B45**, closing stage 4. Two batches: **G12b** = B44+B45 and **G12a** `912042d` = B41+B42+B43, behind **G11** `baf18c2` (B38a+B38+B39+B40) and **D65–D67** `96e727d`. |
-| **Next gate** | **Stage 5, B46–B50 — the decision loop.** B46 the action console, B47 the decision log surface, B48 generation/diff display, **B49 the horizon sweep (P16)** and **B50 the scenario controls (P17)**. **B49 and B50 are the two remaining single-gated chunks** per §13. **And the stage-4 → 5 seam owes D49's one named question, unanswered as of this line: *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"*** — that is `SCOPE.md`'s list, not `BUILD_PLAN.md` §12's, and they number differently. |
+| **Current stage** | **NONE — PHASE 5 IS CLOSED.** All seven stages done. Stage 7 (packaging) landed as one batch, **G17**. |
+| **Last completed chunk** | **B62**, closing stage 7 and phase 5 — **G17 = B57+B58+B59+B60+B61+B62**, six chunks in one batch (*"stage 7 in 1 batch"*), one past D48's cap and inside one stage. Five commits plus this one. **The stop clause did not fire.** Behind it: **B56**, closing stage 6 — **G16 = B51+B52+B53+B54+B55+B56**, six chunks in one batch at Seno's instruction (*"stage 6 in 1 batch"*), which is one past D48's five-chunk cap and inside the same stage. Six commits, per chunk. **The stop clause did not fire** — no decision was needed, nothing revealed the design wrong, nothing wanted a dependency (`node:crypto` is a built-in, named not asked). Behind it: **B50a** `64baeda`, **D69/D70** `9ecf8bd`, **B49+B50** `6f36400`. Older: **B45**, closing stage 4. Two batches: **G12b** = B44+B45 and **G12a** `912042d` = B41+B42+B43, behind **G11** `baf18c2` (B38a+B38+B39+B40) and **D65–D67** `96e727d`. |
+| **Next gate** | **None.** (Historic row, kept for the record:) **Stage 5, B46–B50 — the decision loop.** B46 the action console, B47 the decision log surface, B48 generation/diff display, **B49 the horizon sweep (P16)** and **B50 the scenario controls (P17)**. **B49 and B50 are the two remaining single-gated chunks** per §13. **And the stage-4 → 5 seam owes D49's one named question, unanswered as of this line: *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"*** — that is `SCOPE.md`'s list, not `BUILD_PLAN.md` §12's, and they number differently. |
 | **Stage 4's gates** | ~~**B36**~~ · ~~**B37**~~ (both single-gated) · ~~**G11** B38a+B38+B39+B40~~ · ~~**G12a** B41+B42+B43~~ · ~~**G12b** B44+B45~~ — **all closed. Stage 4 is done.** |
 | **G12, for the record** | Seno widened the gate again mid-stage: *"carry on through the end of stage 4, B41 → B45, in one or two batches rather than gates of 3–5 … announce the batch in a line, build it, report once."* Run as 3 + 2, which is still inside D48's five-chunk cap, so nothing needed amending. **Neither batch stopped mid-build** — the first time since G7 that a group has not hit the stop clause. |
 | **G11, for the record** | It **stopped before the first line** under D48's clause, for the third distinct trigger: not a decision arising mid-build, but three decisions the announcement itself surfaced — and one of them (**D65**) came out of *measuring a claim about the app before writing it down*, which found that the read side was live for at most one minute. The stop clause has now fired seven times. |
@@ -480,9 +514,10 @@ is open.**
 | **G9, for the record** | B32+B33. **It stopped mid-build TWICE under D48** — once before the first line for **D58**, once after B32 built and ran for **D59**. That is the stop clause firing on its two distinct triggers: a decision (§3) and *"the chunk reveals the design was wrong"*. Both were caught by measuring rather than trusting: D58 by pricing the divergence before writing the code, D59 by comparing delivered volume against §2.3's own column. |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
-| **Chunks ticked** | **63 / 69** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, B38a, B39–B50, **B50a**, **B51–B56**) |
-| **Stage 6's gate** | ~~**G16** B51+B52+B53+B54+B55+B56~~ — closed. **Stage 6 is done.** |
-| **Remaining** | **B57–B62, stage 7 (packaging)** — six chunks. Nothing before them is open. |
+| **Chunks ticked** | **69 / 69** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, B38a, B39–B50, B50a, B51–B56, **B57–B62**) |
+| **Stage 6's gate** | ~~**G16** B51+B52+B53+B54+B55+B56~~ — closed. |
+| **Stage 7's gate** | ~~**G17** B57+B58+B59+B60+B61+B62~~ — closed. **B61 is the chunk that finally put the app in a browser**, driven through Chrome over CDP against a scratch copy; it produced four corrections and they are marked ⚑ in `DEMO.md`. |
+| **Remaining** | **Nothing.** 69 of 69 chunks ticked. |
 | **In flight** | nothing |
 | **Chunks ticked (older line, superseded)** | **51 / 68** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, **B38a**, B39–B45) — 68 because **B20a**, **B31a/b**, **B35a** and now **B38a** were added and **B10 was split into B10a/B10b** |
 | **Cut line status** | nothing cut |
@@ -887,6 +922,77 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
+<a id="what-is-owed"></a>
+
+**Everything stage 7 was carrying is closed.** Kept below with the entries struck through, because a
+list that only shows what remains loses the record of what was owed and when it was paid.
+
+**CLOSED BY STAGE 7 (`G17`):**
+
+- ~~The README does not exist~~ — **B58/B59/B60.** Design notes, `SCOPE.md` §2–§4 verbatim (checked
+  byte-for-byte by `src/shared/docs.test.ts`, which trips on one changed word), the misbehaviour
+  table verbatim, **28 named limits in four groups**, the E1–E15 / I1–I20 register assembled from
+  `BRIEF_GAPS.md`, the life of one event with real ids, the component-performance query with its
+  real output, copy-on-write with its honest scope note, and four ways to check the numbers.
+- ~~Every named limit the build owed the README~~ — **B59.** D69's at-most-once triggers · B51's
+  per-process descriptor key · B53's 400/200 caps with the re-sum over everything · the drill-down's
+  real cost · D71's sixteen-minute floor · B35's in-flight conversion · B05's `payload_json`
+  re-serialisation · `INJECT_FAULTS_INTO_BACKFILL` as a reading · the untested taper slide ·
+  `agree`'s three unread projections · the straddled minute · `ts_effective` in
+  `resolveAttribution()` · `ad_id`-known unvalidated. All of them, with their reasons.
+- ~~`BRIEF_GAPS.md` §H4 — `DESIGN.md` §10.1's `spend_cents` against the code's `spend`~~ — **B60**
+  opened §10 and made the correction; §H4 is marked CLOSED.
+- ~~One-command run~~ — **B57.** `npm start`, which never reseeds a non-empty store and prints a
+  heartbeat through the seed's silent 249-second generate phase.
+- ~~`docs/DEMO.md`'s final ordered pass, with the refresh and restart tests as written steps~~ —
+  **B61**, and beat 8 is written.
+- ~~**THE BROWSER**~~ — **B61.** Stages 4, 5 and 6 had been verified headlessly and *nobody had
+  clicked any of it*. All of it has now been clicked, in Chrome, against a scratch copy of the
+  seven-day store: the drill-down's three verdict treatments, the `as_of` rewind, the eight-step
+  trace, the component library's nested version lists, B42's three vertical rule kinds and its ▼
+  markers, the action console (rationale guard, lever applied, `a_12`'s emission stopped), the
+  scenario console (`late_cascade` fired, restated buckets 14 → 24), the refresh test and the
+  restart test. **Four corrections came out of it** — see `DEMO.md`'s ⚑ marks and the two README
+  rows about the drill-down.
+- ~~`-Impl-9.md` and `-Impl-10.md` are raw terminal exports~~ — **B62.** Sessions 9, 10 **and 11**
+  are now curated captures in `-Impl-8.md`'s convention, plus `-Impl-12.md` for this session. The
+  raw exports remain in git history at `65c45bb` and `6573384`.
+- ~~**B44 owes two items from B09**~~ — **STALE ENTRY, CORRECTED.** Both shipped with B44: the flush
+  caps rows per frame and spills the remainder to the next tick (`stream.ts` → `tail.noteSpill`),
+  and the socket-full warning logs **once per connection** and is a counter on the surface
+  (`rows_spilled`, `frames_backpressured`).
+
+**STILL OPEN — none of it blocks anything, and none of it is a defect:**
+
+- **`B33a`, the fault split (~90 lines, `scripts/faults.ts`), is proposed and undone.** Splitting
+  malformed (0.1%) from dual click-id (0.05%) means re-running `validate()` over retained
+  `payload_json`, which reads the store — so it cannot live in `src/sim` (**D32**). It is a
+  `npm run faults` chunk in the shape `scripts/agree.ts` already established. **A plan edit is
+  Seno's call and it was left undone.**
+- **`ad_id` known (§5.1 step 2) is not validated at ingest**, and adding it would make an unseeded
+  store reject every simulator event. It needs a plan row or a decision to drop it. Named in the
+  README's limits and in a comment in `ingest.ts`. Note I11's boundary: never reject on ad *status*.
+- **`projection_meta` is unwritten, deliberately.** Using it to skip the rebuild across `/api/verify`
+  calls would make `verify.ts` a second writer of a projection, which needs a decision rather than a
+  quiet extension. Nothing reads the table today.
+- **Three one-line document corrections**, each waiting for the next chunk that opens its file rather
+  than being done as a drive-by (`CLAUDE.md` §5): `DESIGN.md` §2.3's `DecisionBody` sketch is one
+  field wider than the code (D51) · `DESIGN.md` §5.2 says "the click's `ts`" where
+  `resolveAttribution()` uses `ts_effective` · `src/server/index.ts`'s snapshot-handler comment
+  predicts `ads[]` and `generations[]` in the envelope, which no plan row ever asked for.
+- **Two rules shipped at B14 under a group approval with no `DECISIONS.md` entry of their own**, and
+  recorded here so a later reader does not mistake them for ratified design: a reused `decision_id`
+  carrying a *different* body is refused `409 decision_id_reused`; and **every** fold refusal is a
+  `409`, including `ad_unknown`. Both are cheap to reverse.
+- **The pacing taper's slide has never been shown live** — delivery going to zero and back has been,
+  the gradual slide has not. The README does not claim it.
+- **A handed-over conversion landing in a SETTLED bucket has not been shown live** on a store younger
+  than 72 h. Seven days is where it appears, which is a fact about which store the demo runs on
+  rather than about the code.
+
+**The historical entries below are kept as the record of what was owed and when.**
+
+
 - ~~**D71 — the scoring window's demo problem**~~ — **RATIFIED as option B** (2026-09-05, `6198b73`)
   and **BUILT**. `?window_h=` beside `?horizon_h=`; D70's 6 h stays the default and the documented
   figure; the caption and the column header name the window each score was **answered** at.
@@ -1117,12 +1223,57 @@ version gap is the first thing to check.
 
 ## Next action
 
-**STAGE 6 IS CLOSED. `G16` = B51+B52+B53+B54+B55+B56, six chunks, six commits, one batch.** The
-plan is 69 chunks and **63 are ticked**. `tsc` clean, `vite build` clean, **169 tests**, tree clean.
-Everything below was measured against a copy of the seven-day store; `data/loop.sqlite` is untouched
-and has not been reseeded.
+**THERE IS NO NEXT CHUNK. `G17` = B57+B58+B59+B60+B61+B62 closed stage 7 and phase 5.** The plan is
+69 chunks and **all 69 are ticked**. `tsc` clean, `npx vite build` clean, **172 tests**, tree clean.
 
-**Stage 7 (packaging, B57–B62) is next, and nothing blocks it.**
+**What a reviewer does:** `npm i && npm start`, then `README.md`, then `docs/DEMO.md`.
+
+**What stage 7 measured, all against the real seven-day store with the emitter running:**
+
+| Claim | Measured |
+|---|---|
+| `GET /api/verify` — four projections rebuilt from the logs and hash-matched | **200 in 11.5 s**, 12 + 24 + 1,389 + 71,689 rows |
+| `npm run agree` — every bucket's counts re-derived from raw | **OK in 4.0 s**, 1,587,720 events → 71,696 buckets |
+| `POST /api/trace` — one ad, six hours, past window | **0.6–1.4 s**, MATCH |
+| `POST /api/trace` — twelve ads, six hours, past window | **6.5 s**, MATCH |
+| `POST /api/trace` — twelve ads, live window, in the browser | **7–10 s**, `NOT_COMPARABLE` (correct — see below) |
+| `DESIGN.md` §8's temporal reverse join over the whole store | **25 ms**, six videos |
+| `npm start` on an empty store | seeds, heartbeats every 15 s, then serves |
+| `npm start` on a seeded store | **does not reseed**; up in ~1 s |
+| Pause `a_12` in the browser | **0 signals for `a_12` over four consecutive 15 s windows**, others unaffected |
+| Fire `late_cascade` in the browser | trigger written, **picked up 0.88 s later**, restated buckets **14 → 24** |
+| Kill all three processes and restart | 150 events re-derived, **104 `duplicate_identical`**, 44 accepted, all 33 decisions back |
+
+### The one thing B61 found that changes how the app is demonstrated
+
+**On a window that includes *now*, the drill-down answers `NOT_COMPARABLE` rather than `MATCH`** —
+and it is right to. The descriptor is signed at the snapshot's `as_of_ingest_seq`; by the time the
+recomputation finishes, more events have landed inside the window, so `rollup_minute` reflects a
+later log position than the recomputation answers. A projection has no `as_of`, so there is nothing
+to agree or disagree with. With twelve ads emitting, **seven events land inside a seven-second read**,
+and pressing *now* re-signs at a head that has already moved again.
+
+**Point it at one ad, or at a window that has ended, and it reads `MATCH`** — both measured. This is
+B54's `NOT_COMPARABLE` doing exactly the job it was added for; the alternative is a screen built to
+prove agreement that accuses a correct store of disagreeing with itself. It is now a sentence in
+`DEMO.md` step 23 and a row in the README's limits.
+
+### Stage 7's other three corrections, all from doing rather than describing
+
+1. **The seed's 249-second generate phase writes nothing to stdout**, so `npm start` on an empty
+   store was four minutes of silence before the existing write-phase progress bar appeared. Found by
+   running it. `start.mjs` pipes stdout and heartbeats after 15 s of quiet.
+2. **The README's first draft got `v_04` vs `v_05` backwards** — it said the recut clicked better and
+   converted about the same. Computed from the printed rows: CTR 1.09% → 0.63%, CVR 12.3% → 15.7%.
+   It clicks *worse* and converts *better*, and the comparison is confounded by audience, lifetime
+   and D35's pair-keyed fatigue anyway. Corrected, with the confound stated.
+3. **The action console re-selects the legal lever after one lands** — pause an ad and the selection
+   moves to `Resume`. The right affordance and a demo trap: a second Apply without looking applies
+   the *other* lever.
+
+**`data/loop.sqlite` was read but never written to by stage 7's verification** beyond the live
+emitter's own ingestion; every lever pull and scenario trigger above ran against
+`scratchpad/b61.sqlite`, a copy of the `g13` scratch store.
 
 ### D71 landed after stage 6, and it is not a chunk
 
