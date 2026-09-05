@@ -55,7 +55,10 @@ for (const { name, entry } of PROCS) {
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    console.log(`[dev] ${signal} — stopping ${children.length} processes`);
+    // Guarded, not unconditional: under `npm start` this runner is a CHILD of `start.mjs`, so a
+    // terminal Ctrl-C reaches it twice — once from the process group and once forwarded — and an
+    // ungated log line makes one shutdown look like two (B57).
+    if (!shuttingDown) console.log(`[dev] ${signal} — stopping ${children.length} processes`);
     shutdown(0);
   });
 }

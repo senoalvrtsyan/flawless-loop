@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "start": "node scripts/start.mjs",
     "dev": "node scripts/dev.mjs",
     "db:migrate": "node src/server/migrate.ts",
     "seed": "node src/sim/seed-world.ts",
