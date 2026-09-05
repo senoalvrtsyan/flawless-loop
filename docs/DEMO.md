@@ -1,11 +1,14 @@
 # DEMO.md — the walkthrough
 
-**Created at B36 under D50, and written incrementally: every stage-4 and stage-5 group appends its
-own steps as it lands and says so in its report.** B61 is the final ordered pass over this file —
+**Created at B36 under D50, and written incrementally: every stage-4, -5 and -6 group appended its
+own steps as it landed and said so in its report.** B61 is the final ordered pass over this file —
 it re-orders, prunes and rehearses, but it does not write the content cold, because a script
 assembled at the end from memory is a script that describes an app nobody checked.
 
-**Status: stage 4 in progress. This is not yet a runnable script end to end.**
+**Status: COMPLETE and FOLLOWED COLD at B61** (2026-09-05), in a real browser against a real store,
+start to finish. Eight beats. Every step below has been executed rather than written down — the
+corrections that pass produced are marked **⚑ found by following this script**, and there are four
+of them. Budget **20–25 minutes** for beats 1–8 at a walking pace, plus whatever the audience asks.
 
 ---
 
@@ -14,12 +17,16 @@ assembled at the end from memory is a script that describes an app nobody checke
 ```
 node -v                 # 24+ required — node:sqlite is unflagged there (D8)
 npm i
-npm run db:migrate
-npm run seed            # ~5m20s, ~750 MB, writes SEVEN DAYS of history (D39/B34)
-npm run dev             # server :8787 · simulator · Vite :5173
+npm start               # migrate · seed IF the store is empty · server :8787 · simulator · Vite :5173
 ```
 
-Open **http://localhost:5173**.
+`npm start` prints the URL when the port is actually listening, and prints a heartbeat every 15 s
+while it seeds. Open **http://localhost:5173**.
+
+**The individual steps still exist** — `npm run db:migrate`, `npm run seed`, `npm run dev` — and are
+what to reach for if something goes wrong. `npm start` is those three with an emptiness check in
+front of the seed, so **a second `npm start` never reseeds**: it comes up in about a second and says
+`12 ads already exist — not seeding`.
 
 **Seed once, well before the demo.** `SIM_BACKFILL_DAYS=5` is the wired lever if time is short; both
 depths exceed the 72 h settlement horizon, so nothing about settlement changes. A **7-day** store is
@@ -30,9 +37,13 @@ moment — a 1-day store cannot produce one.
 
 ```
 curl -s localhost:8787/api/health
-curl -s -o /dev/null -w '%{http_code}\n' localhost:8787/api/verify   # 200
-npm run agree                                                       # OK
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8787/api/verify   # 200 — takes ~11.5 s
+npm run agree                                                       # OK  — takes ~4.0 s
 ```
+
+**⚑ found by following this script:** both of those are seconds, not instants, and both are clean
+**while the emitter is running** — measured on the seven-day store at 1.59M events. Do not run them
+in front of an audience expecting a prompt back; run them before, and quote the numbers.
 
 ---
 
@@ -49,7 +60,7 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | 5 | **A late conversion restates a settled bucket** | **B41, B42, B43, B49, B50** | ✅ below — and now causable on demand |
 | 6 | **Walk a number back to its events** | **B51, B52, B53, B54, B55** | ✅ below — the verdict, the rewind, and one event end to end |
 | 7 | Configs are versioned; the swap is visible | **B48**, **B56** | ✅ — the boundary and the swap are in beat 4; **B56's component screen closes it, below beat 6** |
-| 8 | Kill everything and restart — the world is still there | B60 | — |
+| 8 | **Kill everything and restart — the world is still there** | **B61** | ✅ below — and the catch-up's duplicates are the point, not a wart |
 
 ---
 
@@ -287,11 +298,29 @@ takes an action, the world responds. Pausing `a_12` stops its events."*
 button appended one row to `decisions`; `applyDecision` folded it and wrote the projection. That is
 the one property this whole design is built to demonstrate, and `/api/verify` is how we check it."*
 
+**⚑ found by following this script:** after a lever lands, the console **re-selects the lever that
+is now legal** — pause an ad and the selection moves to `Resume`. That is the right affordance and
+it is a trap for a demo: if you Apply twice without looking, the second Apply is a *different*
+lever, and the banner will cheerfully tell you the ad is live again. **Read the Apply button's own
+label** — it says `Apply Pause to a_12` — rather than the button you clicked a moment ago.
+
+6. **THE REFRESH TEST — do this here, in front of them, and do not announce it as a test.** Hit
+   ⌘R / F5. The portfolio, the chart, the seven days of history, the decision log and the lever you
+   just pulled all come back, and the number keeps climbing from where it is now rather than from
+   zero. Measured: impressions `3,211 → 3,218` across the reload, same newest bucket, same 33
+   decisions.
+
+   **Say:** *"Nothing is in this browser. There is no `localStorage`, no IndexedDB, no service
+   worker — the only thing a refresh loses is which ads were selected. Cold start and a refresh are
+   the same four steps: snapshot, subscribe from its cursor, replay absolute rows, then live. There
+   is no separate resume path to get wrong, which is exactly why D30 chose absolute rows over
+   deltas — a delta replayed after a reconnect double-counts."*
+
 ### The guard, which is the interesting refusal (B46)
 
-6. **Lever `Set budget` on `a_12`.** The form shows a field labelled **`from_cents` (precondition)**,
+7. **Lever `Set budget` on `a_12`.** The form shows a field labelled **`from_cents` (precondition)**,
    pre-filled with the current value. **Change it to anything else** and Apply.
-7. **`✖ refused (409) · stale_precondition — set_budget expected from_cents 1, current is 9000`.**
+8. **`✖ refused (409) · stale_precondition — set_budget expected from_cents 1, current is 9000`.**
    The server's message, verbatim, with the current value in it.
 
    **Say:** *"That is a compare-and-swap. `from_cents` is not an annotation — it is an assertion
@@ -300,24 +329,24 @@ the one property this whole design is built to demonstrate, and `/api/verify` is
    implying a multi-actor story we cannot demonstrate. And we do not retry it. The 409 hands back
    the current value, so a helpful client could re-send and succeed — which would assert an intent
    nobody expressed."*
-8. **Nothing was written.** A refused lever consumes no `decision_seq`, opens no generation and
+9. **Nothing was written.** A refused lever consumes no `decision_seq`, opens no generation and
    leaves no log row. Check it: `curl -s localhost:8787/api/health` — `decision_seq` is unmoved.
-9. **Try `Resume` on a live ad.** `409 illegal_transition — an ad in 'live' does not admit 'resume'`.
+10. **Try `Resume` on a live ad.** `409 illegal_transition — an ad in 'live' does not admit 'resume'`.
    The hint beside the buttons said that would happen; the button submitted anyway, because the
    transition table lives in `fold.ts` and a copy of it in the form is a second thing to keep in
    step. The form is not the authority and does not pretend to be.
 
 ### The log, which is the authority (B47)
 
-10. **"Decision log — what produced this config".** Newest first — `#25 … a_12 pause — stop delivery
+11. **"Decision log — what produced this config".** Newest first — `#25 … a_12 pause — stop delivery
     | opened g_a_12_003 | "CTR collapsed against its peak…"`. Actor, rationale, `decision_seq`, and
     the generation each decision opened.
-11. **Run it against the store**, in a terminal beside the browser:
+12. **Run it against the store**, in a terminal beside the browser:
     ```
     sqlite3 data/loop.sqlite 'SELECT decision_seq, ad_id, action, rationale FROM decisions ORDER BY decision_seq DESC LIMIT 5'
     ```
     The same rows. The surface reverses fold order for reading and does nothing else to them.
-12. **Then `curl -s -o /dev/null -w "%{http_code}\n" localhost:8787/api/verify`** → `200`. It
+13. **Then `curl -s -o /dev/null -w "%{http_code}\n" localhost:8787/api/verify`** → `200`. It
     rebuilt `ads`, `config_generations`, `conversion_attribution` and `rollup_minute` from the two
     logs into shadow tables and diffed all four. **Measured after the three levers above: all four
     hash-matched at `decision_seq` 27, in 11.7 s.**
@@ -327,15 +356,15 @@ the one property this whole design is built to demonstrate, and `/api/verify` is
 
 ### The swap, and the boundary it draws (B48)
 
-13. **Lever `Swap component`, slot `video`, on `a_12`.** The picker offers the real library, grouped
+14. **Lever `Swap component`, slot `video`, on `a_12`.** The picker offers the real library, grouped
     by lineage: **`v_05 · Unboxing hook, recut · vl_04 v2`** sits directly under `v_04 · vl_04 v1`,
     its parent. That two-version lineage is in the seed on purpose (D3). Rationale: *"fatigue flag on
     vl_04 — try the recut before writing the ad off."* Apply.
-14. **A solid vertical rule with a ▼ appears on the chart**, labelled `a_12 g4`, at the instant of
+15. **A solid vertical rule with a ▼ appears on the chart**, labelled `a_12 g4`, at the instant of
     the swap — the third kind of rule on this canvas, and told apart from the settlement horizon
     (long-dashed) and a restatement hairline (fine-dotted) by dash pattern and glyph before colour
     is consulted at all.
-15. **Below the chart, the same boundary in words:**
+16. **Below the chart, the same boundary in words:**
     `▼ a_12 gen 4 at 2026-09-04T19:33:17Z · video v_04 → v_05 · decision #26 by human:nk: "fatigue
     flag on vl_04 — try the recut before writing the ad off"`
 
@@ -348,7 +377,7 @@ the one property this whole design is built to demonstrate, and `/api/verify` is
 **Say:** *"The obvious next question is whether any of that helped. There is a column for it, and
 the interesting thing about that column is how often it refuses to answer."*
 
-16. **The last column of the decision log: `score (±6 h, D70)`** — and note the header names the
+17. **The last column of the decision log: `score (±6 h, D70)`** — and note the header names the
     window, because after D71 it is a control and `(D70)` appears only while it is at the ratified
     value. On the seeded week every row reads
     **`no before-window`** — the twelve `create_ad`s because the ad did not exist, and the twelve
@@ -356,7 +385,7 @@ the interesting thing about that column is how often it refuses to answer."*
     *"P18 is built and it has nothing to score here, because the seeded week contains no mid-week
     lever pulls. That is a gap between built and demonstrable, and it is the same gap the horizon
     control exists to close for restatements."*
-17. **Pull a lever now** (beat 4, step 3) and the row reads **`scoring in N h · awaiting conversion
+18. **Pull a lever now** (beat 4, step 3) and the row reads **`scoring in N h · awaiting conversion
     settlement`**.
 
     **Say:** *"That is not an apology, it is the clearest thing on this screen. Without the guard the
@@ -364,7 +393,7 @@ the interesting thing about that column is how often it refuses to answer."*
     to accumulate late conversions than the after-window, so **every** decision would look worse
     than it was — with every number plausible and nothing erroring. So we withhold, and we say how
     long."*
-18. **Shorten the horizon** (the control above the chart) **and watch the withheld entries release.**
+19. **Shorten the horizon** (the control above the chart) **and watch the withheld entries release.**
     Measured on the seeded week: at 72 h, six entries read `scoring in 2 h`; swept to 2 h, **all six
     release**. That pairing is D19's own recommendation — *"pair with a shortened horizon in demo
     mode so a score can be produced live."*
@@ -392,13 +421,13 @@ the interesting thing about that column is how often it refuses to answer."*
     at D70's ±6 h the *same* row at the *same* instant still reads `scoring in 6 h`. The horizon was
     one minute in both columns, so **only the window released it** — which is exactly what the
     two-knob caption is there to make legible.
-19. **Where a score does appear**, it reads e.g. `▲ better · CPA $5.00 → $2.50 (−50.0%)`.
+20. **Where a score does appear**, it reads e.g. `▲ better · CPA $5.00 → $2.50 (−50.0%)`.
 
     **Say:** *"One metric, never both — CPA where both windows carry conversions, CTR otherwise —
     so nobody can pick whichever moved the way they hoped. And note the direction: CPA improving
     means it went **down**. Reading a negative delta as 'worse' would flip the verdict on half the
     log and read perfectly normally, which is why it is a tested property and not a convention."*
-20. **The `⚠ contaminated by #26` flag.** A second lever inside either window.
+21. **The `⚠ contaminated by #26` flag.** A second lever inside either window.
 
     **Say:** *"We do not correct for it. The alternative was to pin the windows to the ad's own
     generation boundaries, which is never contaminated by construction — but gives you two windows
@@ -596,9 +625,24 @@ claimed, so every step below is a click.
 
 ### The click, and the verdict (B53 / P12)
 
-23. **Click the ROAS figure in the headline.** The panel opens under it with the query in full,
-    then: **displayed** from `rollup_minute`, **recomputed** from raw `signals` with attribution
-    re-derived from zero, and the verdict.
+23. **Select ONE ad in the left rail and a window that has ENDED, then click the ROAS figure in the
+    headline.** The panel opens under it with the query in full, then: **displayed** from
+    `rollup_minute`, **recomputed** from raw `signals` with attribution re-derived from zero, and
+    the verdict.
+
+    **⚑ found by following this script — do not skip the sentence above.** Click ROAS on the default
+    view (all twelve ads, a window ending *now*) and the verdict reads **`NOT_COMPARABLE`**, not
+    `MATCH`. That is correct, and the panel explains it: the descriptor was signed at the snapshot's
+    `as_of_ingest_seq`, and by the time the recomputation finishes, more events have landed in the
+    window, so `rollup_minute` reflects a later log position than the recomputation answers. With
+    twelve ads emitting, seven events land inside a seven-second read and pressing *now* will simply
+    race again. **One ad, or a window in the past, and it reads `MATCH`** — both measured. Say it
+    out loud if it happens; it is the honest answer and it is the same mechanism as step 26.
+
+    **And it is not instant.** Measured: **0.6–1.4 s** for one ad over six hours, **6.5 s** for all
+    twelve, **7–10 s** in the browser on a live 24 h window. The panel shows *replaying the log…*
+    while it works. `replay()` must read every click and every conversion in the prefix regardless
+    of window, because a conversion's own `ts` can sit far outside the window it belongs to.
 
     Measured on the seeded week, `a_03` over six hours: **MATCH · displayed 10.20× · recomputed
     10.20×**, over 360 buckets and **10,481 raw rows**. Both count sets are shown side by side —
@@ -715,11 +759,88 @@ claimed, so every step below is a click.
 
 ---
 
+## Beat 8 — kill everything and restart, and the world is still there (B61)
+
+This is the strong version of the refresh test in beat 4, and it is the hard requirement the brief
+puts first: *"losing the world on reload is the one prototype shortcut we won't accept."* It takes
+about forty seconds and it is worth every one of them.
+
+32. **Say what you are about to do before you do it.** *"I am going to kill the server, the
+    simulator and the web server — everything except the file on disk — and start them again."*
+
+33. **Note the log position first**, so the claim is a number rather than an impression:
+
+    ```
+    curl -s localhost:8787/api/health
+    # {"status":"ok", … "log_position":{"ingest_seq":1592849,"decision_seq":33} … }
+    ```
+
+34. **Ctrl-C the `npm start` terminal.** One `[dev] SIGINT — stopping 3 processes`, then the ports
+    are released. Confirm it, because "it looked stopped" is not stopped:
+
+    ```
+    ss -ltn | grep -E ':8787|:5173'    # nothing
+    ```
+
+35. **`npm start` again.** It comes up in about a second — `12 ads already exist — not seeding` —
+    and the simulator logs its own recovery:
+
+    ```
+    [start] 12 ads already exist — not seeding (delete data/ to reset, U8)
+    [sim] handover: 13,494 backfilled click(s) awaiting a conversion — fetched once, not polled
+    [sim] world seed 'flawless-loop' · T0 2026-09-04T16:03:18.970Z
+    [sim] sent 150 · accepted 44 · dup 104/1 · rejected 1 · ingest_seq 1592893
+    ```
+
+36. **Point at that fourth line, because it is the beat.** The emitter re-derived **150 events** for
+    the seconds it was dead, and **104 of them were already in the store** and landed as
+    `duplicate_identical` — moving no number anywhere. Only the **44** it had genuinely never sent
+    were accepted.
+
+    **Say:** *"It holds no queue and no cursor. Every `event_id` is derived from `(seed, absolute
+    unix second, index)`, so a restarted emitter regenerates exactly the same events for the same
+    seconds and the ingest boundary recognises them. Restart safety is not a feature we built — it
+    is what keyed ids give you for free, and the duplicate counter is the proof it is really
+    happening rather than being skipped."*
+
+    **And say what it is not:** *"One conversion the live half had in flight is lost across this —
+    a live click's schedule is known only to the process that emitted it. The backfilled half, which
+    is most of what you have been watching convert, is re-derivable from the store and comes back.
+    That is a stated limit in the README, not a surprise."*
+
+37. **Reload the browser.** Twelve ads, seven days of history, all **33 decisions** including the
+    ones you pulled ten minutes ago, the paused ad still paused, and the newest bucket climbing
+    again. Measured: `33 of 33 decisions`, `5.8/s events`, live bucket at the current minute.
+
+    **Say:** *"The SQLite file is the world. The server opens it and serves; the simulator asks it
+    what is live and starts emitting again. Everything you did survived, because everything you did
+    was one row appended to a log."*
+
+38. **Close on `/api/verify`.** `200`, four projections rebuilt from the logs from zero and
+    hash-matched, after a restart and after every lever in this demo.
+
+    **Say:** *"That is the whole claim in one call: the two logs are the world, and everything else
+    on that screen is a projection that can be dropped and rebuilt to the byte."*
+
+---
+
 ## Notes for whoever runs this
 
 - **The simulator is a separate process** and holds no durable state (D40-A). Killing it stops
   emission; restarting it resumes without loss, and the re-emitted seconds land as
   `duplicate_identical`, which the ingest counters show.
+- **⚑ Run `npm start` twice before the demo**, on the store you are going to demo. The first run
+  seeds (five and a half minutes); the second proves it will not reseed, and warms nothing that
+  matters but your confidence.
+- **⚑ The restatement panel is empty on a short window and says so.** *"No settled bucket in this
+  window has moved. Widen the window to seven days."* That is not a failure — the seeded week's ten
+  restatements are days back. Widen to `7d` before you point at it, or fire `late_cascade` first.
+- **⚑ One server per store.** If a previous run is still holding the port, the new one exits on
+  `EADDRINUSE` and the runner tears the rest down — loudly, which is the good case. The bad case is
+  a *stale* server that kept the port while you thought you restarted: trace descriptors are signed
+  with a per-process key, so the page will read `invalid_signature` on its next click and look
+  broken for a reason nobody can find. `ss -ltn | grep :8787` between beat 8's steps 34 and 35 is
+  four seconds well spent.
 - **A conversion can land on a paused ad** and that is correct, not a bug — **D63**. Pause stops new
   delivery; a purchase already earned by an earlier click still settles. Say it before it happens
   rather than explaining it after.
