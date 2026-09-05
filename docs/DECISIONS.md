@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D71 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D73 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -136,6 +136,8 @@ level — and not a severity.
 | D69 | Who marks a scenario trigger consumed, and with what guarantee | **ACCEPTED — A** (serve-and-mark, at-most-once, with a stated flip condition to B) | 2026-09-05 |
 | D70 | The scoring window `w`: symmetric or generation-pinned | **ACCEPTED — A** (symmetric 6 h before/after, with any second lever inside it flagged as contaminated on the entry) | 2026-09-05 |
 | D71 | `w` is fixed at 6 h, so a lever pulled on camera cannot be scored for six hours | **ACCEPTED — B** (`?window_h=` beside `?horizon_h=`; D70's 6 h stays the default and the documented figure; the caption names the window each score was answered at) | 2026-09-05 |
+| D72 | `DEMO_SCRIPT.md` against the tested `DEMO.md` | **ACCEPTED — B** (15-minute subset alongside the full tested file; the ten reviewer questions live in the subset) | 2026-09-05 |
+| D73 | How much of phase 6's material goes *in* the README | **ACCEPTED — B** (front door + three appendices, each generated from the shipped artifact rather than retyped) | 2026-09-05 |
 
 ---
 
@@ -4400,3 +4402,144 @@ parameter cannot desynchronise anything — while leaving it fixed means the one
 explicitly asks for ("a stated before-window vs after-window heuristic") can be described but never
 shown. The default is the ratified 6 h and the caption says which window produced the number, so
 shortening it is an act of demonstration, not a quiet change of claim.
+
+---
+
+# PHASE 6 — PACKAGING (D72, D73)
+
+Two decisions `STATUS.md` recorded as owed before phase 6 could write a line. Both were put to Seno
+as a multiple-choice pass rather than in prose, so the "rationale in Seno's words" below is **the
+option text he selected, quoted exactly as it was presented and chosen** — there is no prose answer
+to quote, and inventing one would be worse than saying so.
+
+---
+
+## DECISION #72 — `DEMO_SCRIPT.md` against the `DEMO.md` that already exists
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-05 · **Relates to:** D50, B61, `PHASE_PROMPTS.md` § P6
+
+### Question
+
+P6 asks for a **`docs/DEMO_SCRIPT.md`, 15 minutes**, plus the ten hardest questions a reviewer could
+ask. What exists is `docs/DEMO.md`: eight beats, 20–25 minutes, **followed cold in a real browser at
+B61**, which is the pass that produced four corrections and left ⚑ marks in the file. The two
+disagree on both filename and length.
+
+### Options as presented
+
+**A) Rename `DEMO.md` → `DEMO_SCRIPT.md`, trim to 15 minutes, add the ten questions.**
+- Pros: one file; matches P6's filename exactly.
+- Cons: the trimmed beats lose the ⚑ findings that came from following it.
+- Forecloses: the record of the cold run. Reversal cost: git history only.
+
+**B) Keep `DEMO.md` as the full tested reference; write `DEMO_SCRIPT.md` as a 15-minute subset that
+points at it.** *(CHOSEN)*
+- Pros: two files, no loss, the tested artifact survives intact.
+- Cons: some duplication between them.
+- Forecloses: nothing. Reversal cost: delete one file.
+
+**C) Keep the name `DEMO.md`, add the questions, state the divergence from P6's filename.**
+- Pros: zero duplication.
+- Cons: a reviewer looking for the file P6 named does not find it.
+- Forecloses: nothing. Reversal cost: a rename.
+
+### Rationale — Seno's words
+
+Answered by selecting option B as presented. The option text, verbatim:
+
+> "Subset alongside DEMO.md. Keep DEMO.md as the full tested 20–25-min reference with its ⚑ findings
+> intact; write DEMO_SCRIPT.md as a 15-minute subset that points at it and carries the ten reviewer
+> questions. Two files, no loss, some duplication."
+
+### Consequences
+
+1. **`docs/DEMO.md` is not edited.** It is the tested artifact and its value is that it was followed
+   cold; editing it after the fact would quietly break that claim.
+2. **`docs/DEMO_SCRIPT.md` is a subset, not a rewrite.** Every beat it names exists in `DEMO.md`,
+   and it links there for the full version rather than restating the detail.
+3. **The ten questions live in `DEMO_SCRIPT.md` only**, sourced from `DECISIONS.md` with the
+   decision id on each answer so a reviewer can go read the entry.
+4. **The duplication is real and is accepted.** Where the two files disagree in future, `DEMO.md` is
+   the one that was tested and wins.
+
+### What it forecloses
+
+**Nothing.** Two files that can drift is the cost, and consequence 4 names which one is authoritative
+when they do.
+
+### How I'd defend this in review
+
+The one demo document that has actually been executed against a browser is worth more than the one
+that matches a filename in a prompt, so we kept the tested one intact and wrote the prompt's artifact
+on top of it rather than trimming evidence away to hit a word count.
+
+---
+
+## DECISION #73 — How much of phase 6's material goes *in* the README
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-05 · **Relates to:** D1, `PHASE_PROMPTS.md` § P6
+
+### Question
+
+P6's remaining sections are §4 (the DDL), §6 (three pros/cons tables), §7 (the late-conversion
+mechanism), §10 (the mock-data model with its shapes) and §12 (a 71-decision digest with what each
+forecloses). The README is already 957 lines and those five could roughly double it.
+
+### Options as presented
+
+**A) One long README** — everything inline, ~1,900 lines.
+- Pros: a reviewer reads exactly one file; nothing is a click away.
+- Cons: nobody finishes it; the graded material is buried in appendix bulk.
+- Forecloses: nothing. Reversal cost: low.
+
+**B) README as the front door, heavy material in linked appendices under `docs/`.** *(CHOSEN)*
+- Pros: every P6 section exists and is one click away; the README stays a document a reviewer
+  finishes.
+- Cons: three more files, and a new place for the schema and the parameters to drift from
+  `DESIGN.md` and `SIMULATOR.md`.
+- Forecloses: nothing. Reversal cost: low.
+
+**C) README carries §10 and §12 in summary only**, full material staying in `SIMULATOR.md` and
+`DECISIONS.md`, which are already written and already good.
+- Pros: smallest change; no new files; zero drift risk.
+- Cons: P6's *"show the shapes"* and *"each with what it forecloses"* are then satisfied by
+  reference rather than on the page.
+- Forecloses: nothing. Reversal cost: low.
+
+### Rationale — Seno's words
+
+Answered by selecting option B as presented. The option text, verbatim:
+
+> "Front door + appendices. README stays the readable front door; the heavy material (DDL, option
+> tables, mock-data shapes, decision digest) lands in linked appendices under docs/. Every P6 section
+> exists and is reachable in one click, and the README stays a document a reviewer finishes."
+
+### Consequences
+
+1. **Three appendices**: `docs/SCHEMA.md`, `docs/MOCK_DATA.md`, `docs/DECISION_DIGEST.md`.
+2. **Option B's stated cost is drift, and each appendix is written so it cannot drift into a second
+   opinion.** None of the three restates a design document:
+   - `SCHEMA.md` is the **as-built** schema, read out of `data/loop.sqlite` with `sqlite_master`.
+     `DESIGN.md` §2 is the *designed* DDL. Two artifacts, two sources, and the point of having both
+     is that they can be diffed.
+   - `MOCK_DATA.md` is the **measured** shape of the seeded world, queried out of the same store.
+     `SIMULATOR.md` §3–§13 is the *designed* model. Again: designed vs shipped, side by side.
+   - `DECISION_DIGEST.md` is one row per decision carrying **what it forecloses**, which
+     `DECISIONS.md`'s index table does not have; every row links back to the full entry.
+3. **§6's three option tables stay inline in the README**, because "keep the pros/cons table" is what
+   P6 asks for by name and the three tables are ~20 lines.
+4. **A summary of each appendix stays in the README** so a reviewer who never clicks still gets the
+   answer, and the link is for the evidence.
+
+### What it forecloses
+
+**Nothing structurally.** What it spends is three more files in a repo that already has ten, and the
+mitigation is consequence 2: an appendix that is measured from the running store cannot become a
+second opinion about the design, only evidence for or against it.
+
+### How I'd defend this in review
+
+The brief asks for design notes, not a manual, and a 1,900-line README is a manual — so the front
+door carries the argument and the appendices carry the evidence, with each appendix generated from
+the shipped artifact rather than retyped from the design docs, which turns the duplication risk into
+a checkable diff.
