@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D74 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D75 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -139,6 +139,7 @@ level — and not a severity.
 | D72 | `DEMO_SCRIPT.md` against the tested `DEMO.md` | **ACCEPTED — B** (15-minute subset alongside the full tested file; the ten reviewer questions live in the subset) | 2026-09-05 |
 | D73 | How much of phase 6's material goes *in* the README | **ACCEPTED — B** (front door + three appendices, each generated from the shipped artifact rather than retyped) | 2026-09-05 |
 | D74 | EWMA smoothing: keep it, trim it, or remove it | **ACCEPTED — B** (the chart's raw/EWMA toggle is deleted; the fatigue flag's internal EWMA stays — amends D20's "with a raw toggle" clause) | 2026-09-05 |
+| D75 | On-screen prose: what the surface states vs what the README explains | **ACCEPTED** (cut ~2,860 chars — 52% of the page's prose — keeping every fact a ratified decision requires on screen) | 2026-09-05 |
 
 ---
 
@@ -4626,3 +4627,98 @@ The brief does not ask for smoothing and grades honest presentation over sophist
 smoother that is off by default, invisible unless found, and nearly inert on the two metrics a
 strategist most wants smoothed was costing surface area for no demonstrated value — while the one
 place smoothing genuinely earns its keep, the fatigue heuristic, keeps it and keeps its stated lag.
+
+---
+
+## DECISION #75 — On-screen prose: what the surface states, and what the README explains
+
+**Status:** ACCEPTED · **Date:** 2026-09-05 · **Relates to:** D20, D33, D34, D65, D66, D67, D70, D71
+· **Amends:** the captions built by B37–B56, not the mechanisms under them
+
+### Question
+
+Seno walked the app and found it hard to read. **Measured in the DOM before changing anything:
+5,548 characters of explanatory prose across 20 blocks, out of 21,863 characters on the page — 25%
+of everything on screen is a paragraph explaining the design.** His example was the horizon caption,
+which is 284 characters of which about 60 are the fact.
+
+This is a `CLAUDE.md` §3 decision because *UI information architecture* is named in §3, and because
+several of those captions are **ratified consequences** that cannot simply be deleted: **D33**
+requires the maturity figure to carry the sample size it was measured from, **D71** consequence 3
+requires the caption to name the window each score was answered at, **D67** requires the chosen rung
+and the dropped ads on screen, **D34** requires the telemetry to sit under a heading naming it as
+transport, **D65** requires the resolved anchor beside the client's frame.
+
+### The rule taken
+
+> **The surface states the fact. The README explains the choice.**
+>
+> KEEP: what this number is, which parameter it was answered at, the sample it rests on, what the
+> gate did, which ads were dropped, and any sentence that changes how the number should be *read*.
+> CUT: why we built it this way, decision ids, § citations, and "because…" clauses — every one of
+> which is already in `README.md`, which is where a reviewer goes for the argument.
+
+### What that removes, block by block — measured, not estimated
+
+| # | Block | Was | Now | Disposition |
+|---|---|---|---|---|
+| 1 | Lateness horizon caption | 284 | ~60 | **Seno's example.** Keeps *"answering at 3d · shorten to cause a restatement live"*; drops D13/F2 and the essay |
+| 8 | Scoring window caption | 439 | ~140 | Keeps D71-3's requirement — the window each score was answered at — and the "shorten it" hint |
+| 9 | "Scoring and its four limits" | 828 | collapsed | **Not deleted — put behind a disclosure.** The four limits are honesty the brief grades; an 828-character wall is not how to deliver it |
+| 10 | "Every row above is a row of `decisions`…" | 402 | 0 | Pure rationale plus a shell command. README §"Check it yourself" carries both |
+| 12 | Scenario-table rationale | 360 | ~110 | Keeps the load-bearing sentence — *a scenario is not a lever* — drops the determinism essay |
+| 13 | Empty restatement timeline | 273 | ~95 | Keeps the state and the "widen to 7d" instruction; drops the arithmetic |
+| 14 | Reverse-join rationale | 293 | ~90 | Keeps *"pause an ad and a count here drops"*, which is a demo beat; drops §8 |
+| 15 | "used in N ads right now" | 392 | ~60 | Keeps the first sentence |
+| 18 | Telemetry scope | 400 | ~120 | Keeps the ring bound and the reset-on-restart caveat; drops the D16/D54 aside |
+
+**~2,860 characters removed — 52% of the page's prose, 13% of everything on screen — and not one
+ratified requirement with it.** Blocks 2–7, 11, 16, 17, 19 and 20 stay, several because a decision
+says they must.
+
+### Rationale — Seno's words
+
+> "Also there are a lot of information, written with small fonts, if possible try to minimize the
+> shown information as much as possible. Keep only the most important things, the requested by brif
+> or needed by demo. everything else is a noise."
+
+> "I tried to walk through the application and it seems to be very complex. Not sure if it is because
+> app is huge, or we show a lot of information, noise and etc..."
+
+and, on the horizon caption specifically:
+
+> "For example this line: answering at D13's 3d — the account horizon, and the one the write side
+> stamps restated_at against. F2: at this horizon a bucket that settles during a demo does not
+> exist, so the only restatements you can see are the ones the seeded week already carries. Shorten
+> it to cause one live. seems to be noise"
+
+### Consequences
+
+1. **No mechanism changes.** Every gate, every descriptor, every projection and every endpoint is
+   untouched. This is a change to what is *rendered*, and `npm test`, `/api/verify` and `npm run
+   agree` are unaffected by construction.
+2. **The four scoring limits move behind a `<details>`, not out of the product.** Collapsed by
+   default, open in one click; the summary names what is inside it.
+3. **`docs/DEMO.md` and `docs/DEMO_SCRIPT.md` narration that quoted a cut caption now says it out
+   loud instead.** That is the correct place for it: a presenter explaining the design is the demo,
+   and a paragraph on screen was doing the presenter's job badly.
+4. **Decision ids leave the surface almost entirely.** They stay in exactly two places where they
+   name a *ratified figure a reviewer might otherwise think we chose ad hoc* — D70's window and
+   D13's horizon default — and both are one token, not a sentence.
+5. **The section headings get bigger** (B65) rather than staying at 0.8 rem uppercase, so the page
+   reads as eight surfaces at a glance instead of one scroll.
+
+### What it forecloses
+
+**Reading the design off the screen without the README.** That was a real property and it is being
+spent deliberately: the app was carrying its own design notes inline, which made every surface
+denser than the thing it was explaining. The material is not lost — all of it is in `README.md` and
+`DECISIONS.md`, both of which a reviewer has — but a reviewer who *only* clicks around will now
+learn less about *why*, and correspondingly more about *what*. Reversal is cheap and per-caption.
+
+### How I'd defend this in review
+
+The brief grades whether the built part *"feels like a product"* and warns against gold-plating, and
+a product that renders its own architecture-decision records at 0.72 rem is neither a product nor a
+readable decision record. Every fact a ratified decision requires on screen is still on screen; what
+left is the argument for it, which now lives in the one place written to carry an argument.
