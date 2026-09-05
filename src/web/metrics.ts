@@ -42,6 +42,44 @@ export const METRIC_NOTES: Partial<Record<MetricKey, string>> = {
   roas: 'lags by cohort — conversions are backdated to their click’s minute',
 };
 
+/**
+ * **What the abbreviations stand for, and the division underneath each one.**
+ *
+ * The brief's user is an ad strategist, for whom `CTR` needs no expansion — but the brief's
+ * *reader* is not, and hard requirement #5 is that any number on screen can be walked back to the
+ * events beneath it. An unexpanded acronym is the first place that walk stops: you cannot check
+ * `ROAS` against the raw events if you do not know it is a ratio of value to spend.
+ *
+ * Keyed by `TraceMetric` — the SAME union `<Metric>` takes and the descriptor names — and total,
+ * so there is no `default` branch and an added metric is a compile error rather than a blank
+ * tooltip. `formula` is the arithmetic `src/shared/metrics.ts` actually performs, not a
+ * paraphrase of it: if the two ever disagree, this is the one that is wrong.
+ */
+export type MetricGloss = { readonly term: string; readonly formula: string };
+
+export const METRIC_GLOSSARY: Record<TraceMetric, MetricGloss> = {
+  impressions: { term: 'Impressions', formula: 'times an ad was served' },
+  clicks: { term: 'Clicks', formula: 'impressions that were clicked' },
+  spend: { term: 'Spend', formula: 'click costs + CPM and fees, which the brief keeps disjoint' },
+  conversions: { term: 'Conversions', formula: 'clicks that converted, credited to the click’s minute' },
+  value_cents: { term: 'Conversion value', formula: 'gross revenue attributed to those conversions' },
+  ctr: { term: 'Click-Through Rate', formula: 'clicks ÷ impressions' },
+  cpa: { term: 'Cost Per Acquisition', formula: 'total spend ÷ conversions' },
+  roas: { term: 'Return On Ad Spend', formula: 'conversion value ÷ total spend' },
+};
+
+/**
+ * The hover text for one metric: what it stands for, how it is computed, and — for the three that
+ * lag — `METRIC_NOTES`' cohort caveat on its own line. One function so the tooltip on a selector
+ * button and the tooltip on a headline figure cannot drift into saying different things.
+ */
+export function glossFor(metric: TraceMetric): string {
+  const { term, formula } = METRIC_GLOSSARY[metric];
+  const head = `${term} — ${formula}`;
+  const note = (METRIC_NOTES as Partial<Record<TraceMetric, string>>)[metric];
+  return note === undefined ? head : `${head}\n${note}`;
+}
+
 /** Thousands-separated integers. Counts are counts; nothing here rounds a count. */
 export function formatCount(n: number): string {
   return n.toLocaleString('en-US');

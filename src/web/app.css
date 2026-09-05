@@ -127,6 +127,25 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
 .metric__value { font-size: 1.45rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .metric__note { font-size: .72rem; color: var(--ink-muted); }
 
+/* **The gloss affordance — B63.** A dotted underline is the long-standing convention for "there is
+ * a definition behind this word", and it is the whole reason the tooltip is discoverable: a label
+ * carrying a `title` and a label carrying nothing render identically without it. `help` rather than
+ * `pointer` because hovering it does not navigate anywhere — the value below is the clickable
+ * thing, and the two affordances must not read as the same one. */
+.metric__label--gloss { text-decoration: underline dotted var(--border); text-underline-offset: 3px;
+                        cursor: help; }
+.metric__label--gloss:hover { text-decoration-color: var(--accent); color: var(--ink); }
+
+/* **The visible expansion — B63.** A tooltip is not a label: it does not exist on touch, it does
+ * not survive a screenshot, and hard requirement #5 says any number on screen can be walked back to
+ * its events — which starts with knowing what division produced it. So the three ratios are spelled
+ * out on the page, once, directly under the figures they belong to. */
+.glossary { font-size: .72rem; color: var(--ink-muted); margin: 0 0 .9rem; max-width: 60rem;
+            line-height: 1.5; }
+.glossary strong { color: var(--ink); font-weight: 600; }
+.glossary__formula { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; }
+.glossary__sep { color: var(--ink-muted); }
+
 .totals { border-collapse: collapse; font-size: .82rem; margin: .5rem 0 .75rem;
           font-variant-numeric: tabular-nums; }
 .totals th, .totals td { padding: .2rem .6rem .2rem 0; text-align: right; }

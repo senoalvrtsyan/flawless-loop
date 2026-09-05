@@ -26,7 +26,7 @@
 // performance metric in a way that could be read as one".
 
 import type { TraceDescriptor, TraceMetric } from '../shared/wire.ts';
-import { UNKNOWN, formatMetric } from './metrics.ts';
+import { UNKNOWN, formatMetric, glossFor } from './metrics.ts';
 
 export type MetricProps = {
   /**
@@ -61,7 +61,13 @@ export function Metric({ metric, value, descriptor, label, note, onDrill }: Metr
   const text = value === null ? UNKNOWN : formatMetric(metric, value);
   return (
     <div className="metric">
-      <span className="metric__label">{label}</span>
+      {/* **What the abbreviation stands for, on hover** — `glossFor` gives the expansion, the
+          division underneath it, and (for CTR/CPA/ROAS) the cohort caveat on a second line. The
+          dotted underline is the affordance: a label with no gloss would look identical without
+          it, and a tooltip nobody knows is there is not a label. */}
+      <span className="metric__label metric__label--gloss" title={glossFor(metric)}>
+        {label}
+      </span>
       {onDrill === undefined ? (
         <strong className="metric__value">{text}</strong>
       ) : (

@@ -39,8 +39,8 @@ import {
 } from './store.ts';
 import { subscribe } from './stream.ts';
 import { planChart, rungLabel } from './gate.ts';
-import { METRIC_LABELS } from './metrics.ts';
-import { isRatio, type MetricKey } from '../shared/metrics.ts';
+import { METRIC_GLOSSARY, METRIC_LABELS, glossFor } from './metrics.ts';
+import { RATIO_METRICS, type MetricKey } from '../shared/metrics.ts';
 import {
   METRIC_NOTES,
   combined,
@@ -622,7 +622,10 @@ export function App() {
                 aria-pressed={metric === key}
                 onClick={() => setMetric(key)}
                 // The three that lag are marked in the control itself, not only beside the number.
-                title={isRatio(key) ? METRIC_NOTES[key] : undefined}
+                // Every metric gets the gloss, not just the three that lag: the selector is where
+                // a reader meets `CPA` for the first time, and `isRatio` was gating the caveat
+                // rather than the definition.
+                title={glossFor(key)}
               >
                 {METRIC_LABELS[key]}
               </button>
@@ -822,6 +825,21 @@ export function App() {
             {/* **B53 / P12 — the walk-back, in place.** Directly under the figures rather than in a
                 modal: the number and the events beneath it belong on one screen, and a reviewer
                 comparing them should not have to remember what the page said. */}
+            {/* **The three abbreviations, expanded, on the page rather than only on hover.** A
+                tooltip is not a label: it does not exist on a touch device, it does not survive a
+                screenshot, and a reviewer reading `ROAS 2.4` cannot check it against the raw
+                events without knowing which division produced it. `formula` here is the same
+                string the hover text uses, from one map, so the two cannot drift. */}
+            <p className="glossary">
+              {RATIO_METRICS.map((key, i) => (
+                <span key={key}>
+                  {i > 0 ? <span className="glossary__sep"> · </span> : null}
+                  <strong>{METRIC_LABELS[key]}</strong> {METRIC_GLOSSARY[key].term}{' '}
+                  <span className="glossary__formula">({METRIC_GLOSSARY[key].formula})</span>
+                </span>
+              ))}
+            </p>
+
             <Drilldown descriptor={drilling} onClose={() => setDrilling(null)} />
 
             {/* **Held apart, never added in** (§14, and it bites exactly here): a provisional
