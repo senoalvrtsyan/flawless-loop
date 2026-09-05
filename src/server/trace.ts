@@ -39,7 +39,8 @@ const DISPLAYED_SQL = `
          COALESCE(SUM(value_cents), 0)             AS value_cents,
          COALESCE(SUM(provisional_conversions), 0) AS provisional_conversions,
          COALESCE(SUM(provisional_value_cents), 0) AS provisional_value_cents,
-         COUNT(*)                                  AS buckets
+         COUNT(*)                                  AS buckets,
+         COALESCE(MAX(max_ingest_seq), 0)          AS max_ingest_seq
     FROM rollup_minute
    WHERE ad_id = ? AND minute_start >= ? AND minute_start < ?`;
 
@@ -92,8 +93,27 @@ export type TraceResult = {
   displayed: number | null;
   /** From `replay()` over raw `signals` — the independent path. */
   recomputed: number | null;
-  /** The comparison, and the whole point of the surface. */
-  verdict: 'MATCH' | 'MISMATCH';
+  /**
+   * The comparison, and the whole point of the surface.
+   *
+   * **`NOT_COMPARABLE` is B54's correction, and it was found by running the rewind.** At an earlier
+   * `as_of` the recomputation answers a log PREFIX while `rollup_minute` still holds the head
+   * state — it has no `as_of`, because a projection is the fold of everything applied to it. So
+   * comparing them reports MISMATCH on a store that is perfectly correct, which is the false alarm
+   * this surface can least afford: the one screen built to prove agreement would cry wolf every
+   * time a reviewer used its other control.
+   *
+   * The test is exact rather than a heuristic. Every bucket carries `max_ingest_seq` (D31), so the
+   * rollup over a range reflects the log up to the MAX of those; a prefix at or beyond that point
+   * includes everything the rollup does and the two are comparable. Below it they are not, and the
+   * panel says so instead of pretending to a verdict.
+   */
+  verdict: 'MATCH' | 'MISMATCH' | 'NOT_COMPARABLE';
+  /**
+   * The highest `max_ingest_seq` among the buckets read — the log position the ROLLUP reflects.
+   * On screen beside `as_of`, so "not comparable" is a readable arithmetic fact and not a mood.
+   */
+  rollup_as_of: number;
   /** Both count sets, so a MISMATCH says WHICH term diverged rather than only that one did. */
   displayed_counts: ReplayCounts & { buckets: number };
   recomputed_counts: ReplayCounts;
@@ -201,6 +221,7 @@ export function trace(db: DatabaseSync, descriptor: TraceDescriptor): TraceResul
     let displayedCounts = ZERO;
     let buckets = 0;
     let recomputedCounts = ZERO;
+    let rollupAsOf = 0;
     const contributing: ReplayContribution[] = [];
 
     // Per ad, because `replay()` answers one ad at a time (I8/G30 makes the CLICK authoritative,
@@ -209,9 +230,10 @@ export function trace(db: DatabaseSync, descriptor: TraceDescriptor): TraceResul
     // combined CTR is SUM(clicks)/SUM(impressions), never a mean of per-ad CTRs.
     for (const ad_id of descriptor.ad_ids) {
       const row = displayedStmt.get(ad_id, descriptor.from, descriptor.to) as unknown as
-        ReplayCounts & { buckets: number };
+        ReplayCounts & { buckets: number; max_ingest_seq: number };
       displayedCounts = add(displayedCounts, row);
       buckets += row.buckets;
+      rollupAsOf = Math.max(rollupAsOf, row.max_ingest_seq);
 
       // `replayIn`, not `replay`: this whole function is already one read transaction, and the
       // rollup read above and this raw re-derivation must see the same instant.
@@ -232,8 +254,10 @@ export function trace(db: DatabaseSync, descriptor: TraceDescriptor): TraceResul
     // (2/4 and 3/6 are both 0.5), so comparing only the displayed metric would let a real
     // divergence through whenever it moved numerator and denominator together. The counts are
     // integers from two independent routes and there is no reason for them to differ at all.
-    const verdict =
-      agrees(displayed, recomputed) && countsAgree(displayedCounts, recomputedCounts)
+    const comparable = descriptor.as_of_ingest_seq >= rollupAsOf;
+    const verdict: TraceResult['verdict'] = !comparable
+      ? 'NOT_COMPARABLE'
+      : agrees(displayed, recomputed) && countsAgree(displayedCounts, recomputedCounts)
         ? 'MATCH'
         : 'MISMATCH';
 
@@ -258,6 +282,7 @@ export function trace(db: DatabaseSync, descriptor: TraceDescriptor): TraceResul
       displayed,
       recomputed,
       verdict,
+      rollup_as_of: rollupAsOf,
       displayed_counts: { ...displayedCounts, buckets },
       recomputed_counts: recomputedCounts,
       evidence,
@@ -300,7 +325,8 @@ function sliceWindow(
     let counts = ZERO;
     let any = false;
     for (const ad_id of d.ad_ids) {
-      const row = displayedStmt.get(ad_id, from, to) as unknown as ReplayCounts & { buckets: number };
+      const row = displayedStmt.get(ad_id, from, to) as unknown as
+        ReplayCounts & { buckets: number; max_ingest_seq: number };
       if (row.buckets > 0) any = true;
       counts = add(counts, row);
     }

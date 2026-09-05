@@ -334,7 +334,11 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
 .drill__verdict { font-size: .82rem; margin: .4rem 0; padding: .3rem .5rem; }
 .drill__verdict--pass { border-left: 3px solid var(--status-live); }
 .drill__verdict--fail { border-left: 3px double var(--state-restated); }
+/* NOT_COMPARABLE is neither a pass nor a failure and must not borrow either treatment — a dotted
+ * rule in the muted hue, with the word itself doing the work (D45's non-colour channel). */
+.drill__verdict--na { border-left: 3px dotted var(--ink-muted); }
 .drill__counts { font-variant-numeric: tabular-nums; }
+.drill__asof { margin: .4rem 0; }
 .drill__hint { font-size: .74rem; color: var(--ink-muted); }
 .drill__slices { list-style: none; display: flex; flex-wrap: wrap; gap: .25rem .75rem;
                  margin: .25rem 0 .5rem; padding: 0; font-size: .76rem; max-height: 9rem;

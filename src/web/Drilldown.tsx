@@ -1,4 +1,4 @@
-// The drill-down — B53 / P12. `DESIGN.md` §10.2.
+// The drill-down — B53 / P12, and **B54's `as_of` rewind**. `DESIGN.md` §10.2 and §10.3.
 //
 // This is D31's runtime backstop and the third of D34's three layers. The first two are compile
 // time (`Display` in `wire.ts`, `<Metric>`'s required descriptor); this one is the check that runs
@@ -18,9 +18,6 @@
 //   slices      — the window at the descriptor's own grain: the next click down, and the only
 //                 narrowings the server will accept (D46)
 //
-// **`as_of` is B54's**, and the endpoint already takes it — §10.3's rewind is the control, not the
-// mechanism, and it lands next.
-//
 // **The client does no arithmetic here.** Both figures are the server's, and the verdict is the
 // server's. A browser-side comparison would be the client checking a number it had been handed
 // against another number it had been handed, which proves nothing about either.
@@ -30,7 +27,7 @@ import type { TraceDescriptor, TraceEvidence } from '../shared/wire.ts';
 import type { TraceResult } from '../server/trace.ts';
 import { formatCents, formatMetric } from './metrics.ts';
 
-/** `POST /api/trace`. `from`/`to` narrow the window; the server re-signs what it hands back. */
+/** `POST /api/trace`. `from`/`to` narrow; `as_of_ingest_seq` rewinds (B54). Both re-sign server-side. */
 export async function fetchTrace(
   descriptor: TraceDescriptor,
   options: { from?: string; to?: string; as_of_ingest_seq?: number },
@@ -72,13 +69,25 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
   const [result, setResult] = useState<TraceResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /**
+   * **B54** — the log position to answer at, as typed. Held as a string rather than a number so an
+   * empty box is distinguishable from zero; `null` means "the descriptor's own", which is what the
+   * screen was showing.
+   */
+  const [asOf, setAsOf] = useState<string>('');
+  /** The answer at the descriptor's own `as_of`, kept so B54 can diff against it. */
+  const [baseline, setBaseline] = useState<TraceResult | null>(null);
+
   const run = useCallback(
-    (d: TraceDescriptor, options: { from?: string; to?: string }) => {
+    (d: TraceDescriptor, options: { from?: string; to?: string; as_of_ingest_seq?: number }, isBaseline: boolean) => {
       const controller = new AbortController();
       setPending(true);
       setError(null);
       fetchTrace(d, options, controller.signal)
-        .then(setResult)
+        .then((r) => {
+          setResult(r);
+          if (isBaseline) setBaseline(r);
+        })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           setResult(null);
@@ -90,15 +99,19 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
     [],
   );
 
-  // A new descriptor is a new question, and the panel re-asks it from scratch.
+  // A new descriptor is a new question: reset the rewind box and the baseline with it, or the
+  // "as of N, was M" line would be comparing two different windows.
   useEffect(() => {
     if (descriptor === null) return;
-    return run(descriptor, {});
+    setAsOf('');
+    setBaseline(null);
+    return run(descriptor, {}, true);
   }, [descriptor, run]);
 
   if (descriptor === null) return null;
 
   const metric = descriptor.metric;
+  const changed = diffAgainstBaseline(result, baseline);
 
   return (
     <section className="drill">
@@ -125,13 +138,31 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
         <p className="drill__query">{pending ? 'replaying the log…' : 'no answer yet'}</p>
       ) : (
         <>
-          <p className={`drill__verdict drill__verdict--${result.verdict === 'MATCH' ? 'pass' : 'fail'}`}>
+          <p
+            className={`drill__verdict drill__verdict--${
+              result.verdict === 'MATCH' ? 'pass' : result.verdict === 'MISMATCH' ? 'fail' : 'na'
+            }`}
+          >
             <strong>{result.verdict}</strong> · displayed{' '}
             <strong>{formatMetric(metric, result.displayed)}</strong> from{' '}
             <code>rollup_minute</code> ({result.displayed_counts.buckets} buckets) · recomputed{' '}
             <strong>{formatMetric(metric, result.recomputed)}</strong> from{' '}
             <strong>{result.evidence.length + result.evidence_omitted}</strong> raw{' '}
             <code>signals</code> rows, attribution re-derived from zero
+            {/* **The rewind's own honesty, and it was found by running it** (B54): the rollup has
+                no `as_of` — it is the fold of everything applied to it — so a recomputation over an
+                earlier prefix is not a check on it. Rewound, this surface shows the DIFFERENCE and
+                withholds the verdict, rather than reporting MISMATCH on a correct store. */}
+            {result.verdict === 'NOT_COMPARABLE' ? (
+              <>
+                {' '}— the recomputation is over the log up to ingest_seq{' '}
+                <strong>{result.descriptor.as_of_ingest_seq}</strong>, while these buckets reflect
+                the log up to <strong>{result.rollup_as_of}</strong>. A projection has no{' '}
+                <code>as_of</code>, so there is nothing here to agree or disagree with. Press{' '}
+                <em>now</em> for the check; the figures above are what the screen{' '}
+                <em>would have shown</em> at that position.
+              </>
+            ) : null}
           </p>
 
           {/* The counts, both sides, always — a ratio can agree while its terms do not (2/4 and 3/6
@@ -170,6 +201,69 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
             </tbody>
           </table>
 
+          {/* **B54 — §10.3.** The same descriptor at an earlier log position. The server re-signs
+              it, so the rewound answer is as much a server-issued question as the original. */}
+          <div className="controls drill__asof">
+            <div className="controls__group">
+              <span className="controls__label">as_of ingest_seq</span>
+              <input
+                type="number"
+                min={0}
+                value={asOf}
+                placeholder={String(descriptor.as_of_ingest_seq)}
+                onChange={(e) => setAsOf(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={pending || asOf.trim() === ''}
+                onClick={() => run(descriptor, { as_of_ingest_seq: Number(asOf) }, false)}
+              >
+                rewind
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  setAsOf('');
+                  run(descriptor, {}, true);
+                }}
+              >
+                now
+              </button>
+              <span className="drill__hint">
+                the log prefix this number reflects. Rewind past a late arrival and the figure
+                becomes what it was before that arrival landed — the difference is named below.
+              </span>
+            </div>
+          </div>
+
+          {changed === null ? null : changed.length === 0 ? (
+            <p className="drill__query">
+              nothing arrived between ingest_seq {result.descriptor.as_of_ingest_seq} and{' '}
+              {baseline?.descriptor.as_of_ingest_seq} that this number depends on — the figure is
+              unchanged, which is itself the answer
+            </p>
+          ) : (
+            <>
+              <p className="drill__query">
+                <strong>{changed.length}</strong> event
+                {changed.length === 1 ? '' : 's'} account for the difference between{' '}
+                <strong>{formatMetric(metric, result.displayed)}</strong> at ingest_seq{' '}
+                {result.descriptor.as_of_ingest_seq} and{' '}
+                <strong>{formatMetric(metric, baseline?.displayed ?? null)}</strong> at{' '}
+                {baseline?.descriptor.as_of_ingest_seq} — each with its own lateness
+              </p>
+              <ul className="boundaries">
+                {changed.slice(0, 12).map((e) => (
+                  <li key={e.event_id} className="boundaries__item boundaries__item--sweep">
+                    <code>{e.event_id}</code> · {e.kind} · ts <code>{e.ts}</code> · arrived{' '}
+                    <code>{e.received_at}</code> · <strong>{lateness(e)} late</strong> · credited to{' '}
+                    <code>{e.credited_minute}</code> · seq {e.ingest_seq}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
           {result.slices.length === 0 ? null : (
             <>
@@ -188,7 +282,7 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
                     <button
                       type="button"
                       className="metric__cell"
-                      onClick={() => run(descriptor, { from: slice.from, to: slice.to })}
+                      onClick={() => run(descriptor, { from: slice.from, to: slice.to }, false)}
                     >
                       <code>{slice.from}</code> {formatMetric(metric, slice.value)}
                     </button>
@@ -244,3 +338,29 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
   );
 }
 
+/**
+ * The events the baseline answer had and this one does not, or the reverse — **B54's "the
+ * difference is exactly these `event_id`s"**.
+ *
+ * `null` when there is nothing to compare (no rewind has been run). Computed from the two evidence
+ * lists rather than asked of the server, and that is legitimate: both lists are the server's own
+ * answers, and this is set arithmetic on identifiers, not a performance number. Nothing here
+ * produces a figure, which is why it is not a D34 violation.
+ *
+ * **The cap is honest about itself.** If either list was truncated the diff can only be partial,
+ * and the caller says so through `evidence_omitted`; a diff of two capped lists that pretended to
+ * be complete would be the one number on this surface nobody could check.
+ */
+function diffAgainstBaseline(
+  result: TraceResult | null,
+  baseline: TraceResult | null,
+): TraceEvidence[] | null {
+  if (result === null || baseline === null) return null;
+  if (result.descriptor.as_of_ingest_seq === baseline.descriptor.as_of_ingest_seq) return null;
+  const here = new Set(result.evidence.map((e) => e.event_id));
+  const there = new Set(baseline.evidence.map((e) => e.event_id));
+  return [
+    ...baseline.evidence.filter((e) => !here.has(e.event_id)),
+    ...result.evidence.filter((e) => !there.has(e.event_id)),
+  ];
+}
