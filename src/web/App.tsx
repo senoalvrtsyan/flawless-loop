@@ -51,10 +51,9 @@ import {
   fetchTotals,
   formatCents,
   formatCount,
-  formatCtr,
-  formatRoas,
   perAd,
 } from './metrics.ts';
+import { Metric, MetricCell } from './Metric.tsx';
 import { Portfolio } from './Portfolio.tsx';
 import { Chart } from './Chart.tsx';
 import { Maturity } from './Maturity.tsx';
@@ -295,7 +294,7 @@ export function App() {
     // builds the parameter conditionally instead of joining a possibly-empty set.
     const url =
       `/api/snapshot?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` +
-      `&horizon_h=${horizonH}` +
+      `&horizon_h=${horizonH}&granularity_s=${grainRef.current}` +
       (selected === null ? '' : `&ads=${encodeURIComponent([...selected].join(','))}`);
 
     setLink('connecting');
@@ -427,6 +426,21 @@ export function App() {
   viewRef.current = state.phase === 'ready' ? state.store.window : null;
 
   /**
+   * **B51 / D46 — the grain the descriptors must be issued at.**
+   *
+   * `plan.granularity_s` is the rung the GATE picked, which is known only after the data has been
+   * seen, so it cannot be a dependency of the fetch that produced the data. A ref written during
+   * render, exactly like `viewRef` above: the snapshot asks at whatever the last render drew at,
+   * and the 5-second totals refresh corrects it if the gate has since coarsened.
+   *
+   * The window between the two is not swept under the rug. A descriptor at the wrong grain does
+   * not produce a wrong number — `POST /api/trace` refuses the narrowing outright (`narrows()`) —
+   * so the failure mode of this ref being one tick stale is a drill-down that says why, not a
+   * figure that quietly answers a different question.
+   */
+  const grainRef = useRef<number>(60);
+
+  /**
    * **B38 / D66 — re-ask the server for the totals of the window on screen.**
    *
    * A 5-second THROTTLE, not a debounce: the stream moves the cursor up to four times a second, and
@@ -443,7 +457,7 @@ export function App() {
     const id = setInterval(() => {
       const view = viewRef.current;
       if (view === null) return;
-      fetchTotals(view, selected, controller.signal, horizonH)
+      fetchTotals(view, selected, controller.signal, horizonH, grainRef.current)
         .then((response) => {
           setTotals(response);
           setTotalsFresh(true);
@@ -514,6 +528,9 @@ export function App() {
    * the kind of split that goes wrong silently later.
    */
   const plan = planChart(viewRows, store.window, charted, metric, granularity);
+  // Written during render (see `grainRef`): the next snapshot and the next totals refresh ask for
+  // descriptors at the rung this chart is actually drawn at.
+  grainRef.current = plan.granularity_s;
   // B42's counts, over the rows that are actually charted. Selection, not arithmetic: `state` and
   // `restated_at` were both derived (B21, and B49 at a swept horizon); this only tallies them.
   const inView = viewRows.filter((row) => chartedIds.has(row.ad_id));
@@ -718,41 +735,52 @@ export function App() {
           <p>Totals not read yet.</p>
         ) : (
           <>
+            {/* **B52 — every one of these renders through `<Metric>`, which will not compile
+                without a server-issued descriptor.** The values are the server's, verbatim; the
+                descriptors are the queries that produced them, and clicking one opens the
+                walk-back (B53). Spend's sub-line keeps its two disjoint parts (L79-80) as the
+                note, so the figure and its decomposition stay one thought. */}
             <div className="metrics">
-              <div className="metric">
-                <span className="metric__label">Impressions</span>
-                <strong className="metric__value">{formatCount(total.impressions)}</strong>
-              </div>
-              <div className="metric">
-                <span className="metric__label">Clicks</span>
-                <strong className="metric__value">{formatCount(total.clicks)}</strong>
-              </div>
-              <div className="metric">
-                <span className="metric__label">Spend</span>
-                <strong className="metric__value">{formatCents(total.spend_total_cents)}</strong>
-                {/* L79-80: click costs and non-click charges are disjoint and total spend is their
-                    sum — computed at read, never stored as a third column. */}
-                <span className="metric__note">
-                  {formatCents(total.click_cost_cents)} clicks + {formatCents(total.spend_cents)} CPM/fees
-                </span>
-              </div>
-              <div className="metric">
-                <span className="metric__label">CTR</span>
-                <strong className="metric__value">{formatCtr(total.ctr)}</strong>
-                <span className="metric__note">{METRIC_NOTES.ctr}</span>
-              </div>
-              <div className="metric">
-                <span className="metric__label">CPA</span>
-                <strong className="metric__value">
-                  {total.cpa_cents === null ? '—' : formatCents(total.cpa_cents)}
-                </strong>
-                <span className="metric__note">{METRIC_NOTES.cpa}</span>
-              </div>
-              <div className="metric">
-                <span className="metric__label">ROAS</span>
-                <strong className="metric__value">{formatRoas(total.roas)}</strong>
-                <span className="metric__note">{METRIC_NOTES.roas}</span>
-              </div>
+              <Metric
+                metric="impressions"
+                label="Impressions"
+                value={total.impressions}
+                descriptor={total.descriptors.impressions}
+              />
+              <Metric
+                metric="clicks"
+                label="Clicks"
+                value={total.clicks}
+                descriptor={total.descriptors.clicks}
+              />
+              <Metric
+                metric="spend"
+                label="Spend"
+                value={total.spend_total_cents}
+                descriptor={total.descriptors.spend}
+                note={`${formatCents(total.click_cost_cents)} clicks + ${formatCents(total.spend_cents)} CPM/fees`}
+              />
+              <Metric
+                metric="ctr"
+                label="CTR"
+                value={total.ctr}
+                descriptor={total.descriptors.ctr}
+                note={METRIC_NOTES.ctr}
+              />
+              <Metric
+                metric="cpa"
+                label="CPA"
+                value={total.cpa_cents}
+                descriptor={total.descriptors.cpa}
+                note={METRIC_NOTES.cpa}
+              />
+              <Metric
+                metric="roas"
+                label="ROAS"
+                value={total.roas}
+                descriptor={total.descriptors.roas}
+                note={METRIC_NOTES.roas}
+              />
             </div>
 
             {/* **Held apart, never added in** (§14, and it bites exactly here): a provisional
@@ -785,16 +813,19 @@ export function App() {
                 </tr>
               </thead>
               <tbody>
+                {/* Same gate, same descriptors, one scope narrower: a per-ad row's descriptors
+                    name that ad alone, so drilling `a_03`'s CPA re-asks `a_03`'s question and not
+                    the selection's. */}
                 {perAd(totals.totals).map((row) => (
                   <tr key={row.ad_id}>
                     <td><code>{row.ad_id}</code></td>
-                    <td>{formatCount(row.impressions)}</td>
-                    <td>{formatCount(row.clicks)}</td>
-                    <td>{formatCents(row.spend_total_cents)}</td>
-                    <td>{formatCtr(row.ctr)}</td>
-                    <td>{row.cpa_cents === null ? '—' : formatCents(row.cpa_cents)}</td>
-                    <td>{formatRoas(row.roas)}</td>
-                    <td>{formatCount(row.conversions)}</td>
+                    <MetricCell metric="impressions" value={row.impressions} descriptor={row.descriptors.impressions} />
+                    <MetricCell metric="clicks" value={row.clicks} descriptor={row.descriptors.clicks} />
+                    <MetricCell metric="spend" value={row.spend_total_cents} descriptor={row.descriptors.spend} />
+                    <MetricCell metric="ctr" value={row.ctr} descriptor={row.descriptors.ctr} />
+                    <MetricCell metric="cpa" value={row.cpa_cents} descriptor={row.descriptors.cpa} />
+                    <MetricCell metric="roas" value={row.roas} descriptor={row.descriptors.roas} />
+                    <MetricCell metric="conversions" value={row.conversions} descriptor={row.descriptors.conversions} />
                   </tr>
                 ))}
               </tbody>

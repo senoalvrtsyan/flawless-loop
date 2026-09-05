@@ -19,6 +19,7 @@ import type { SweepResult } from '../server/sweep.ts';
 import type { DecisionScore } from '../server/scoring.ts';
 import type { FatigueReport } from '../server/fatigue-flag.ts';
 import type { MetricKey } from '../shared/metrics.ts';
+import type { TraceMetric } from '../shared/wire.ts';
 
 export const METRIC_LABELS: Record<MetricKey, string> = {
   impressions: 'Impressions',
@@ -66,15 +67,28 @@ export function formatRoas(value: number | null): string {
   return value === null ? UNKNOWN : `${value.toFixed(2)}×`;
 }
 
-/** One value for one metric, formatted in that metric's own unit. */
-export function formatMetric(metric: MetricKey, value: number | null): string {
+/**
+ * One value for one metric, formatted in that metric's own unit.
+ *
+ * **B51 widens this from `MetricKey` to `TraceMetric`.** `conversions` and `value_cents` are on
+ * §10.1's metric union but have no chart control, so before B52 nothing needed to format them.
+ * They are performance numbers all the same, and D34's gate is *"every performance number renders
+ * through the descriptor-taking component"* — so they have to have a unit here rather than a
+ * hand-formatted escape route beside the table.
+ *
+ * No `default`: the union is closed, so a seventh metric is a compile error here rather than an
+ * `undefined` on screen.
+ */
+export function formatMetric(metric: TraceMetric, value: number | null): string {
   if (value === null) return UNKNOWN;
   switch (metric) {
     case 'impressions':
     case 'clicks':
+    case 'conversions':
       return formatCount(value);
     case 'spend':
     case 'cpa':
+    case 'value_cents':
       return formatCents(value);
     case 'ctr':
       return formatCtr(value);
@@ -106,10 +120,19 @@ export async function fetchTotals(
   signal: AbortSignal,
   /** **B49** — the horizon this read is answered at, in hours. Absent means D13's 72 h. */
   horizonH?: number,
+  /**
+   * **B51 / D46** — the grain the chart is actually drawn at, so the descriptors this response
+   * carries name the question the screen is asking. It is `plan.granularity_s` (the rung D20's
+   * gate PICKED), not the granularity control's value: the gate may coarsen after seeing the data,
+   * and a descriptor issued at the control's minute while the chart draws hours describes a
+   * different question. `POST /api/trace` refuses the mismatch rather than answering it.
+   */
+  granularityS?: number,
 ): Promise<TotalsResponse> {
   const url =
     `/api/snapshot?include=totals&from=${encodeURIComponent(window.from)}&to=${encodeURIComponent(window.to)}` +
     (horizonH === undefined ? '' : `&horizon_h=${horizonH}`) +
+    (granularityS === undefined ? '' : `&granularity_s=${granularityS}`) +
     (ads === null ? '' : `&ads=${encodeURIComponent([...ads].join(','))}`);
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`totals: ${res.status} ${res.statusText}`);

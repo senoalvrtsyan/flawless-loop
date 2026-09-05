@@ -305,3 +305,15 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
 .score--better { color: var(--status-live); }
 .score--worse { color: var(--state-restated); }
 .log__contaminated { color: var(--status-paused); font-size: .74rem; white-space: nowrap; }
+
+/* B52 — `<Metric>`'s drillable figure. A performance number that can be walked back LOOKS like it
+ * can: the affordance is the claim. Deliberately not a link colour — the underline is dotted, the
+ * same "there is more underneath this" treatment the boundaries list uses, so it does not read as
+ * navigation away from the page. */
+.metric__value--drill { font: inherit; font-size: inherit; font-weight: inherit; color: inherit;
+                        background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+                        border-bottom: 1px dotted var(--ink-muted); }
+.metric__value--drill:hover, .metric__cell:hover { border-bottom-color: var(--accent);
+                                                   color: var(--accent); }
+.metric__cell { font: inherit; color: inherit; background: none; border: 0; padding: 0;
+                cursor: pointer; border-bottom: 1px dotted var(--ink-muted); }
