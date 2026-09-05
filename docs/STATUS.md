@@ -3,98 +3,102 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **PHASE 5 CLOSED, 69 / 69 chunks · PHASE 6 (P6, packaging) IS OPEN**
+**Last updated:** 2026-09-05 · **PHASE 5 CLOSED, 69 / 69 chunks · PHASE 6 (P6, packaging) IS CLOSED**
 
 ---
 
 ## If you are reading this cold
 
-**PHASE 5 IS CLOSED. PHASE 6 (PACKAGING, `PHASE_PROMPTS.md` § P6) IS THE LAST GATE AND IT IS OPEN.**
+**EVERY PHASE IS CLOSED. PHASE 6 (PACKAGING) WAS THE LAST GATE AND IT IS DONE.**
 
-All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are closed, and the app is
-finished. `tsc` clean, `npx vite build` clean, **172 tests**, tree clean.
-
-**Do not confuse the two packagings.** `BUILD_PLAN.md` stage 7 (B57–B62) was the *build plan's*
-packaging and is done. `PHASE_PROMPTS.md` § **P6** is the *phase gate's* packaging and is a
-**superset** of it — six of its fourteen README sections are missing or partial, and it asks for a
-`docs/DEMO_SCRIPT.md` with ten reviewer questions that does not exist. **See
-[Phase 6 — the gap, precisely](#phase-6-the-gap) below before writing anything.**
+All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are closed, and all fourteen
+`PHASE_PROMPTS.md` § P6 README sections plus `docs/DEMO_SCRIPT.md` are written. `tsc` clean,
+`npx vite build` clean, **172 tests**, **0 broken links** across every markdown file, tree clean.
 
 1. **`npm start`** — migrate, seed if empty, run everything, print the URL. First run ~5m20s.
-2. **`README.md`** is the front door and is written for a reviewer, not for you. It carries the
-   design notes, `SCOPE.md` §2–§4 verbatim, the misbehaviour table, 28 named limits, the extensions
-   register, the life of one event with real ids, and the four ways to check the numbers.
-3. **`docs/DEMO.md`** is the walkthrough — eight beats, followed cold at B61 in a real browser,
-   20–25 minutes.
-4. **`docs/DECISIONS.md`**'s index table is the one-line-each view of D1–D71.
+2. **`README.md`** is the front door, ~1,540 lines, written for a reviewer. Framing, the three-way
+   split, the storage model, the persistence boundary, aggregation with its three option tables,
+   `SCOPE.md` §2–§4 verbatim, late conversions end to end, the misbehaviour table, 28 named limits,
+   the extensions register, the life of one event with real ids, signal-from-noise, the mock data
+   model, the decision log, what I'd build next, and four ways to check the numbers.
+3. **Three appendices carry the evidence** (**D73**): `docs/SCHEMA.md` (as-built schema, read from
+   the store), `docs/MOCK_DATA.md` (the designed curves plotted against what came out), and
+   `docs/DECISION_DIGEST.md` (all 77 rows, each with what it forecloses).
+4. **`docs/DEMO.md`** is the tested walkthrough — eight beats, followed cold in a browser at B61,
+   20–25 minutes. **`docs/DEMO_SCRIPT.md`** is the 15-minute subset plus the ten reviewer questions
+   (**D72** — where the two disagree, `DEMO.md` was the one that was tested and it wins).
+5. **`docs/DECISIONS.md`**'s index table is the one-line-each view of D1–**D73**.
 
 **What to be careful about, in one list:** `data/loop.sqlite` is the seven-day store and reseeding
 it costs 5m20s and 750 MB, so read it and use a scratch `DB_PATH` for anything that writes · run
 **one server per store** (descriptors are signed per-process) · `npx vite build`, not just `tsc`,
 catches a server import leaking into the client bundle · nothing writes a projection except
 `apply()` (**D7**) · `BUILD_PLAN.md` §14 holds ~95 traps that will not fail loudly, each written the
-day it was found.
+day it was found · `SCOPE.md` §2–§4 is README-verbatim and byte-checked by `src/shared/docs.test.ts`.
 
-**Carry-over items from the build** are in [What is owed](#what-is-owed) below — none of them block
-phase 6, and the largest (`B33a`, the fault split) is a plan edit that is Seno's call.
+**Carry-over items from the build** are in [What is owed](#what-is-owed) below — none of them ever
+blocked phase 6, and the largest (`B33a`, the fault split) is a plan edit that is Seno's call. All
+of them are now also stated in the README's "what I'd do differently", so they are disclosed rather
+than merely recorded.
 
 ---
 
 <a id="phase-6-the-gap"></a>
 
-## Phase 6 — the gap, precisely
+## Phase 6 — CLOSED
 
-`PHASE_PROMPTS.md` § P6 asks for a fourteen-section README and a `docs/DEMO_SCRIPT.md`. Stage 7 built
-a README with eight of those fourteen and a `docs/DEMO.md`. **This table is the whole of phase 6's
-remaining work** — it was produced by reading P6 against the file, not from memory.
+The gap table that lived here is resolved. Kept as the record of what was owed and what closed it,
+because a list that only shows what remains loses the account of what was paid.
 
-| P6 § | Asked for | State |
+| P6 § | Asked for | Closed by |
 |---|---|---|
-| 1 | What this is, and how to run it in one command | ✅ **done** — header + `## Run it` |
-| 2 | **Framing — how I read the brief and what I think the product actually is** | ❌ **missing.** Nothing in the README says what we think the product *is*. Source: `SCOPE.md` §1, D1, D4, D26 |
-| 3 | Scope verbatim from `SCOPE.md` | ✅ **done** — byte-checked by `src/shared/docs.test.ts` |
-| 4 | Storage model — table / log / derived / cached, **including the schema** | ⚠️ **partial.** The four-category table is there; **the DDL is not.** Source: `DESIGN.md` §2, 11 `CREATE TABLE`s |
-| 5 | The persistence boundary and its defence | ✅ **done** |
-| 6 | Aggregation strategy — **keep the pros/cons table** | ⚠️ **partial.** The prose and the choices are there; **D9's, D10's and D29's option tables are not.** Source: `DESIGN.md` §4 |
-| 7 | **Late-arriving conversions end to end**, then the misbehaviour table | ⚠️ **partial.** The misbehaviour table is verbatim; **the end-to-end walkthrough is not.** Source: `DESIGN.md` §5 (§5.1–§5.6). Note the README's *life of one event* is a worked example of this, not a substitute for the mechanism |
-| 8 | The life of one event, real ids from a real run | ✅ **done** — `c4804d05ed499439`, every id resolves |
-| 9 | **Separating signal from noise — the heuristic and its stated limits** | ❌ **missing as a section.** The pieces exist and are scattered: D20's gate, D33's maturity curve, §19's fatigue flag, D19/D70/D71's scoring. Source: `SIMULATOR.md` §19, `DESIGN.md` §4.5 |
-| 10 | **Mock data model — fatigue curve, diurnal rhythm, noise model, lag distribution. Show the shapes.** | ❌ **missing entirely, and it is hard requirement #7** (*"the mock data is a design artifact"*). This is the single biggest gap. Source: `SIMULATOR.md` §3–§13 and §21's measured parameter appendix |
-| 11 | Extensions and corrections to the brief — the push-back, not buried | ✅ **done** — E1–E15, I1–I20, §H |
-| 12 | **Decision log — the `DECISIONS.md` digest, each with what it forecloses** | ❌ **missing.** 71 decisions; `DECISIONS.md`'s index table is the digest source but *forecloses* lives in the per-decision entries |
-| 13 | **What I'd build next, and what I'd do differently with another week** | ❌ **missing.** Sources: `SCOPE.md` §4's cut line (ordered cheapest-first, which is literally "what I'd build next"), and `STATUS.md`'s owed list for "differently" |
-| 14 | How I worked with AI tooling — pointer to the process artifact | ✅ **done** — `## AI process artifact` |
-| — | **`docs/DEMO_SCRIPT.md`** — a **15-minute** walkthrough, plus **the ten hardest questions a reviewer could ask**, each answered in one or two sentences from `DECISIONS.md` | ❌ **missing.** `docs/DEMO.md` exists, is eight beats and **20–25 minutes**, and was followed cold in a browser at B61. It has no questions section and a different filename |
+| 1 | Run it in one command | ✅ was already done (B57) |
+| 2 | Framing | ✅ `7559c7e` — a ledger with a viewport, not a dashboard; D27 as the product problem; where the brief's own framing misleads |
+| 3 | Scope verbatim | ✅ was already done, byte-checked |
+| 4 | Storage model **including the schema** | ✅ `7559c7e` + **`docs/SCHEMA.md`** — as-built DDL read from the store, ten indexes with the query each serves, and a parsed diff against `DESIGN.md` §2 (one table: `sim_run`, plus five dropped comments) |
+| 5 | The persistence boundary | ✅ was already done |
+| 6 | Aggregation, **keep the pros/cons table** | ✅ `7559c7e` — D9, D10 and D29's option tables restored inline |
+| 7 | Late conversions end to end | ✅ `7559c7e` — the mechanism in six steps; the life of one event stays its worked example |
+| 8 | The life of one event | ✅ was already done |
+| 9 | Separating signal from noise | ✅ `6557eac` — three mechanisms kept distinct, the gate that stops, the flag with its five limits, and the admission that the thresholds are calibrated against our own simulator |
+| 10 | Mock data model, **show the shapes** | ✅ `6557eac` + **`docs/MOCK_DATA.md`** — six designed-vs-measured shapes with every query shown |
+| 11 | Extensions / push-back | ✅ was already done |
+| 12 | Decision digest with what each forecloses | ✅ `6557eac` + **`docs/DECISION_DIGEST.md`** — 77 rows, 48 foreclosing nothing, 22 that cost something gathered in its §4 |
+| 13 | What I'd build next | ✅ `6557eac` — the cut line as an ordered queue, plus four process findings |
+| 14 | AI process artifact pointer | ✅ was already done |
+| — | `docs/DEMO_SCRIPT.md`, 15 min + ten questions | ✅ `f33ab40` |
 
-### The two decisions phase 6 owes before it writes a line
+**The two decisions phase 6 owed were answered before anything was built on them** — `eebec52`:
 
-Both are `CLAUDE.md` §3 decisions — they have defensible alternatives and they change what gets
-built. **Neither should be taken by the model.**
+- **D72** — `DEMO_SCRIPT.md` is a **15-minute subset alongside** the tested `DEMO.md`, not a trim of
+  it, so the cold run's four ⚑ corrections survive where they are. `DEMO.md` wins on disagreement.
+- **D73** — README stays the **front door**; the heavy material lands in three appendices, each
+  **generated from the shipped artifact** (the store, the store, `DECISIONS.md`) rather than retyped
+  from a design document — so the duplication option B was warned about is a checkable diff instead
+  of a second opinion.
 
-**A — `DEMO_SCRIPT.md` against the `DEMO.md` that exists.** P6 names a 15-minute script; we have a
-tested 20–25-minute one. Options: (a) rename `DEMO.md` → `DEMO_SCRIPT.md`, trim to 15 minutes, add
-the ten questions — one file, but the trimmed beats lose the ⚑ findings that came from following it;
-(b) keep `DEMO.md` as the full tested reference and write `DEMO_SCRIPT.md` as a 15-minute subset that
-points at it — two files, no loss, some duplication; (c) keep the name `DEMO.md`, add the questions,
-and state the divergence from P6's filename.
+Both were answered as a multiple-choice pass, so their entries quote the selected option text
+verbatim and **say that is what they are doing** rather than inventing prose in Seno's voice.
 
-**B — how much of this goes *in* the README.** It is already 957 lines. Sections 4, 6, 7, 10 and 12
-are the heavy ones — the DDL, three option tables, the late-conversion mechanism, the mock-data
-shapes and a 71-row decision digest could roughly double it. Options: (a) one long README, because a
-reviewer reads one file; (b) README as the front door with linked appendices under `docs/`;
-(c) README carries §10 and §12 in *summary* with the full material staying in `SIMULATOR.md` and
-`DECISIONS.md`, which are already written and already good.
+### What phase 6 measured, and where it disagreed with the design
 
-### What phase 6 must not do
+Everything in `MOCK_DATA.md` is a query over `source='backfill'` — the frozen 1,582,985-event seeded
+population — so it is reproducible. Three findings are worth carrying forward:
 
-- **No new numbers.** P6 says *"pull real numbers and real ids from an actual run. Nothing
-  invented."* Every figure in `SIMULATOR.md` §21 was measured; quote those rather than recomputing,
-  and if you do recompute, say which store.
-- **`data/loop.sqlite` is the seven-day store.** Read it; use a scratch `DB_PATH` for anything that
-  writes. Reseeding costs 5m20s and 750 MB.
-- **`SCOPE.md` §2–§4 is README-verbatim and byte-checked.** If phase 6 moves scope, the block moves
-  with it and `src/shared/docs.test.ts` will say so.
-- **The app is finished.** Phase 6 writes documents. If it wants to change code, that is a decision.
+1. **The diurnal curve, the fatigue curve, the overdispersion signature and `p_fast` all check out.**
+   Median absolute deviation on the diurnal is 0.06; `p_fast` reads 0.30 / 0.52 / 0.71 against a
+   designed 0.30 / 0.45 / 0.65.
+2. **`SIMULATOR.md` §11.2's designed *medians* are not recoverable from the data, and that is a
+   property of the statistic rather than a defect.** Between 1 h and 3 h the empirical lag CDF is
+   nearly flat, and warm's designed 3.3 h median sits on that flat stretch — so n = 191 puts the
+   empirical median at 0.72 h. **No parameter is wrong.** §11.2's table is not amended; `MOCK_DATA.md`
+   explains why it should be read as a CDF.
+3. **The seeded past-72 h tail is right-censored at `T0`** — 47% of backfilled clicks fall in the last
+   three days — so it reads 0–0.7% against a designed 2.3–4.6%. B35's handover is what re-derives
+   them live, and the store's earliest *live* event has a `ts` from before `T0`, which proves it.
+
+**Nothing in phase 6 changed code, and nothing in it changed a design document.** It wrote seven
+files and edited two (`README.md`, `DECISIONS.md`).
 
 ---
 
@@ -197,6 +201,10 @@ exports for sessions 9, 10 and 11 are now curated captures (**B62**).
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
 | `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. **And §H: contradictions in our OWN design docs** — H1 the recovery half-life, H2 `spend`'s missing fee parameter, H3 novelty's slot composition, **H4 (B51) §10.1's `spend_cents` against the code's `spend`, in a SIGNED payload**. |
+| `docs/SCHEMA.md` | **Phase 6.** The as-built schema, read from `data/loop.sqlite` with `sqlite_master`: four-category answer with measured row counts, ten indexes with the query each serves, the DDL verbatim, the pragmas, and a parsed diff against `DESIGN.md` §2. |
+| `docs/MOCK_DATA.md` | **Phase 6.** The mock data model **measured** — diurnal, fatigue, novelty, overdispersion, pacing and the lag CDF, designed curve against shipped world, every query shown. The three findings above live here in full. |
+| `docs/DECISION_DIGEST.md` | **Phase 6.** All 77 rows (D1–D73, T1, F1–F4, D35p) reduced to **what each forecloses** — the column `DECISIONS.md`'s index table does not carry. |
+| `docs/DEMO_SCRIPT.md` | **Phase 6.** The 15-minute subset of `DEMO.md` (**D72**) plus the ten hardest reviewer questions, each answered in 1–2 sentences with its decision id. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
 | `docs/DECISIONS.md` | Ratified only — **D1–D63, T1, F1–F4, U8–U9** — nothing deferred: D44/D45 were answered at the B36 gate. **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
 | ~~`docs/CHEATSHEET.md`~~ | **DROPPED** by Seno at the B36 gate, 2026-09-04, and deleted. Not owed at any gate. `DECISIONS.md`'s index table is the one-line-each view now, and it cannot go stale. Recover with `git show e989336:docs/CHEATSHEET.md`. |
