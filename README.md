@@ -6,7 +6,7 @@ credited to the creative that earned them and visibly restate the numbers they l
 levers change what the world does next.
 
 Built to the brief in [`docs/BRIEF.md`](docs/BRIEF.md). Every design choice is recorded, with its
-alternatives and what it forecloses, in [`docs/DECISIONS.md`](docs/DECISIONS.md) — 71 ratified
+alternatives and what it forecloses, in [`docs/DECISIONS.md`](docs/DECISIONS.md) — 73 ratified
 decisions, referenced from here as **D*n***.
 
 ---
@@ -16,21 +16,59 @@ decisions, referenced from here as **D*n***.
 ```
 nvm use            # Node 24+ — `node:sqlite` is unflagged there, and that is the floor
 npm i
-npm start
+npm start          # then open http://localhost:5173
 ```
 
-`npm start` migrates the store, **seeds a seven-day world if and only if the store is empty**, and
-starts three processes: the API server on **:8787**, the simulator, and Vite serving the client on
-**:5173**. It prints the URL when the port is actually listening.
+That is the one command. **Read the box before you run it** — the first run is slow, and the reason
+is not a bug.
 
-**The first run takes about five and a half minutes**, and prints progress throughout. That is the
-seed: it generates ~1.6M events through the real rate model — diurnal curves, fatigue accrual,
-pacing, a lag mixture — sorts them by arrival, and writes them through the same `ingest()` the live
-emitter uses. Measured at B34: **249 s generate · 0.3 s sort · 70 s write · ~750 MB on disk.** The
-cost is the *model*, not the database. `SIM_BACKFILL_DAYS=5` is the wired lever if you want it
-shorter; `SIM_SEED=…` forks a different world.
+> **⚠ The first run takes ~5m20s and writes ~750 MB. There is no store in this repo.**
+>
+> `.gitignore` excludes `*.sqlite`, so a fresh clone ships **no data** — the world does not exist
+> until you build it. `npm start` migrates, sees an empty store, and **seeds seven days of history**:
+> ~1.6M events generated through the real rate model — diurnal curves, fatigue accrual, budget
+> pacing, a conversion-lag mixture — sorted by arrival and written through the same `ingest()` the
+> live emitter uses. Measured at B34: **249 s generate · 0.3 s sort · 70 s write · ~750 MB on disk.**
+> **The cost is the model, not the database.**
+>
+> **It is not hung.** The 249-second generate phase produces no output of its own, so `npm start`
+> prints a heartbeat every 15 seconds through it. If you see nothing at all for 20+ seconds, that is
+> a problem; a heartbeat is not.
+>
+> **Every subsequent `npm start` skips the seed entirely** and comes up in about a second
+> (`12 ads already exist — not seeding`). You pay this once.
 
-Every subsequent `npm start` skips the seed and comes up in about a second.
+### If you don't want to wait — and the honest answer about that
+
+**There is one wired lever, and it helps less than you would hope.** Measured on this machine, on a
+scratch store, rather than extrapolated:
+
+| | Wall clock | On disk | Events |
+|---|---|---|---|
+| `npm start` (default, 7 days) | **5m20s** | 749 MB | ~1.6M |
+| `SIM_BACKFILL_DAYS=5 npm start` | **4m13s** | 587 MB | 1.26M |
+
+**That is 67 seconds and 162 MB — about 21%.** It is not the difference between waiting and not
+waiting, because the cost is dominated by *generating* the events through the real rate model
+(201.8 s of the 253 s at five days), and that model runs per simulated second no matter how the
+history is sliced.
+
+**So the real answer is: seed once, before you need it.** `npm start`, walk away, come back. Every
+later run is instant, both demo scripts assume a store that already exists, and nothing about the app
+is more pleasant on a smaller one.
+
+Take the five-day store if you are genuinely tight on disk or time. It still exceeds the 72-hour
+settlement horizon, so **every demo moment survives** — the gate, the fatigue collapse, the
+restatement of an already-*settled* bucket, the traceability walk-back, the refresh and the restart.
+
+**Do not go below four days.** The horizon is 72 hours, so a shorter store has no bucket old enough
+to have been declared final — and *"a period you thought was closed moved"* is the flagship path.
+One- and two-day stores were used throughout the build for testing and cannot produce that moment.
+
+### The rest of the commands
+
+`npm start` runs three processes — the API server on **:8787**, the simulator, and Vite serving the
+client on **:5173** — and prints the URL when the port is actually listening.
 
 | Command | What it does |
 |---|---|
@@ -40,10 +78,60 @@ Every subsequent `npm start` skips the seed and comes up in about a second.
 | `npm run agree` | Re-derive every rollup bucket from the raw log and diff it (P14) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npx vite build` | Bundle the client — the check that no server module leaked into it |
+| `SIM_SEED=… npm start` | Fork a different world. Seeding-time only, by design (**D60**) |
 
-Two endpoints are worth knowing before you click anything: `GET /api/health` (log position) and
-`GET /api/verify` (rebuild every projection from the logs and hash-compare). See
-[**Check it yourself**](#check-it-yourself).
+**Two things worth knowing before you click anything.** `GET /api/health` gives the log position;
+`GET /api/verify` rebuilds every projection from the logs and hash-compares. Both are described in
+[**Check it yourself**](#check-it-yourself). And **run one server per store** — a second one on the
+same file exits rather than competing.
+
+---
+
+## Contents
+
+Grouped by what the brief asks for. **If you read four things:**
+[framing](#framing--how-i-read-the-brief-and-what-i-think-the-product-is) ·
+[late-arriving conversions](#late-arriving-conversions-end-to-end) ·
+[the life of one event](#the-life-of-one-event) ·
+[the mock data model](#the-mock-data-model).
+
+**Framing and scope**
+- [Framing — how I read the brief, and what I think the product is](#framing--how-i-read-the-brief-and-what-i-think-the-product-is)
+- [The three surfaces](#the-three-surfaces)
+- [Scope — what is real, what is sketched, what is cut](#scope--what-is-real-what-is-sketched-what-is-cut) — verbatim from `SCOPE.md`, byte-checked
+  ([what's real](#2-whats-real) · [what's sketched](#3-whats-sketched-and-in-what-form) · [what's cut](#4-whats-cut))
+
+**Design notes** — [all of them](#design-notes)
+- [The three-way split — configs, signals and levers](#the-three-way-split--configs-signals-and-levers)
+- [The storage model, and the schema](#the-storage-model-and-the-schema) → full DDL in [`docs/SCHEMA.md`](docs/SCHEMA.md)
+- [The persistence boundary](#the-persistence-boundary)
+- [Aggregation strategy](#aggregation-strategy) — with D9, D10 and D29's option tables
+- [The consequence a strategist actually feels — D27](#the-consequence-a-strategist-actually-feels--d27)
+
+**The stream, and what it does wrong**
+- [Late-arriving conversions, end to end](#late-arriving-conversions-end-to-end) — the flagship path, in six steps
+- [Stream misbehaviours](#stream-misbehaviours) — tolerated / degrades / breaks
+- [Named limits](#named-limits) — 28 of them, in four groups
+- [Separating signal from noise](#separating-signal-from-noise) — the gate, the maturity indicator, one heuristic and its five limits
+
+**The evidence**
+- [The life of one event](#the-life-of-one-event) — emission → stored fact → aggregate → pixel, real ids
+- [The mock data model](#the-mock-data-model) → the shapes, measured, in [`docs/MOCK_DATA.md`](docs/MOCK_DATA.md)
+- [Component performance across swaps](#component-performance-across-swaps)
+- [Component versioning: copy-on-write](#component-versioning-copy-on-write)
+- [**Check it yourself**](#check-it-yourself) — four ways to prove the numbers agree
+
+**Decisions and push-back**
+- [Extensions to the brief's contracts](#extensions-to-the-briefs-contracts) — the push-back, deliberately not buried
+- [The decision log](#the-decision-log) → all 77 rows with what each forecloses, in [`docs/DECISION_DIGEST.md`](docs/DECISION_DIGEST.md)
+- [What I'd build next, and what I'd do differently](#what-id-build-next-and-what-id-do-differently)
+
+**Getting around**
+- [Repository map](#repository-map) · [AI process artifact](#ai-process-artifact)
+
+**Beyond this file:** [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) is the 15-minute walkthrough plus
+the ten hardest questions a reviewer could ask; [`docs/DEMO.md`](docs/DEMO.md) is the full 20–25
+minute version that was followed cold in a browser; [`docs/BRIEF.md`](docs/BRIEF.md) is the brief.
 
 ---
 
@@ -1517,7 +1605,7 @@ never been shown live, only delivery going to zero and back, and this file does 
 |---|---|
 | `docs/BRIEF.md` | The brief. The source of truth, read rather than recalled. |
 | `docs/BRIEF_GAPS.md` | 52 audit findings (G01–G52) against the brief, the extensions register (E1–E15, I1–I20), and §H — contradictions found in **our own** design documents. |
-| `docs/DECISIONS.md` | D1–D71, each with its options, what was chosen, the rationale in the human's words, its consequences, and **what it forecloses**. The index table at the top is the one-line-each view. |
+| `docs/DECISIONS.md` | D1–D73, each with its options, what was chosen, the rationale in the human's words, its consequences, and **what it forecloses**. The index table at the top is the one-line-each view. |
 | `docs/SCOPE.md` | What is real, what is sketched, what is cut, ordered cheapest-to-reinstate-first. §2–§4 is the block copied into this file. |
 | `docs/DESIGN.md` | The data model, the DDL, the persistence boundary, late conversions end to end, the fold, the reverse join, traceability. |
 | `docs/SCHEMA.md` | The **as-built** schema, read out of the running store with `sqlite_master` — every table, every index with the query it serves, and a diff against what `DESIGN.md` designed. One table apart. |
