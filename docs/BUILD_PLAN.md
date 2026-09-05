@@ -426,6 +426,25 @@ remaining work is phase 6 and it is tabulated in `docs/STATUS.md` § "Phase 6 �
 
 ---
 
+## 10a — Post-plan chunks
+
+**Added after the plan closed**, at Seno's request during the phase 6 wrap-up. They are numbered
+past B62 and kept in their own section so §10's *"69 of 69"* stays true of the plan as approved:
+these were never in it. Both are UI-only, and neither touches a projection, the wire, or a
+ratified constant.
+
+| ✔ | # | Chunk | Files | Verification | Owes |
+|---|---|---|---|---|---|
+| [x] | **B63** | **Expand `CTR` / `CPA` / `ROAS`** — what each stands for and the division underneath it, both visibly on the page and as a hover title on every metric label and selector button | `src/web/metrics.ts`, `Metric.tsx`, `App.tsx`, `app.css` | In the browser: hover any metric label and the selector buttons — expansion, formula, and for the three that lag the cohort caveat on a second line. The visible line under the headline figures reads all three. `METRIC_GLOSSARY` is total over `TraceMetric`, so an added metric is a compile error | **HR5** — a number you cannot name is a number you cannot walk back |
+| [x] | **B64** | **Strong separators between the page's eight sections** — a 2 px `--rule` above each `h2.section`, headings to full ink | `src/web/app.css` | In the browser: eight rules, and the two boundaries that carry meaning are legible — action console vs scenario console, and every performance number vs D34's telemetry | — |
+
+> ### ▶ Demo checkpoint 7a — *"a stranger can name what they are looking at"*
+>
+> A reviewer who has never seen an ad platform can read every headline figure's name, and can tell
+> at a glance that the page is eight surfaces rather than one long scroll.
+
+---
+
 ## 11 — Scope coverage
 
 Every `SCOPE.md` P item, and the chunks that close it. Nothing in scope is orphaned; no chunk is
