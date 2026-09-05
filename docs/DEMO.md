@@ -386,6 +386,12 @@ the interesting thing about that column is how often it refuses to answer."*
     **The honest limit, said out loud:** *"The floor is fifteen minutes, so the fastest score I can
     produce is window plus horizon — about sixteen minutes. If you want one live, I pull the lever
     at the start of the session and we come back to it."*
+
+    **Measured end to end**, server + emitter, `set_budget` on `a_03` at 04:09:59 — at 04:25 the row
+    reads **`▼ worse · CTR 2.76% → 1.63% (−41.1%)`** over 145 impressions before and 123 after, and
+    at D70's ±6 h the *same* row at the *same* instant still reads `scoring in 6 h`. The horizon was
+    one minute in both columns, so **only the window released it** — which is exactly what the
+    two-knob caption is there to make legible.
 19. **Where a score does appear**, it reads e.g. `▲ better · CPA $5.00 → $2.50 (−50.0%)`.
 
     **Say:** *"One metric, never both — CPA where both windows carry conversions, CTR otherwise —

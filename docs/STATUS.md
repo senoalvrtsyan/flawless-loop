@@ -1148,6 +1148,20 @@ and the chunk count stays 63 / 69.
 - **The floor is a stated limit.** Fastest possible on-camera score is window + horizon ≈ **16
   minutes**. A demo starts that clock early; it cannot score a lever inside one beat.
 
+**And it was demonstrated live, which is the whole reason D71 exists.** Server + emitter on the
+`g13` scratch store, two `set_budget` levers on `a_03`:
+
+| decision | at ±15 min, 1 min horizon | at D70's ±6 h |
+|---|---|---|
+| `d71_live_score` (03:53:10) | released at 04:09 — `no_evidence`, *"the before-window has no CTR to compare"* (the emitter had run only 80 s before it) | `settling`, ready in **6 h** |
+| `d71_live_score_2` (04:09:59) | **SCORED at 04:25** — `▼ worse · CTR 2.76% → 1.63% (−41.1%)`, 145 impressions before / 123 after | `settling`, ready in **6 h** |
+
+**Sixteen minutes from lever to number, against six hours.** Both rows read `settling` at the
+ratified window at the same instant, and the horizon was already one minute in **both** columns — so
+**only the window released it**. That is the contrast the two-knob caption exists to make legible.
+The `g13` scratch store now carries two extra decisions (`decision_seq` 28, 29) and ~35 minutes of
+live emission.
+
 
 ### What stage 6 built, in one paragraph each
 
