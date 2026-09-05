@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D70 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D71 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -135,6 +135,7 @@ level — and not a severity.
 | D68 | Do we reinstate `SCOPE.md` §4 cut #1, decision scoring | **ACCEPTED — B** (one chunk `B50a` at the end of stage 5, conditional on stage 5 landing without the stop clause firing; condition MET at the stage-5 close; the `w` sub-question is answered by **D70**) | 2026-09-04 |
 | D69 | Who marks a scenario trigger consumed, and with what guarantee | **ACCEPTED — A** (serve-and-mark, at-most-once, with a stated flip condition to B) | 2026-09-05 |
 | D70 | The scoring window `w`: symmetric or generation-pinned | **ACCEPTED — A** (symmetric 6 h before/after, with any second lever inside it flagged as contaminated on the entry) | 2026-09-05 |
+| D71 | `w` is fixed at 6 h, so a lever pulled on camera cannot be scored for six hours | **ACCEPTED — B** (`?window_h=` beside `?horizon_h=`; D70's 6 h stays the default and the documented figure; the caption names the window each score was answered at) | 2026-09-05 |
 
 ---
 
@@ -4314,3 +4315,88 @@ statistical sophistication (L147). The honest failure of a symmetric window is c
 build detects it and prints it next to the number rather than engineering it away — which is the
 same posture the fatigue flag and the maturity indicator already take, and it keeps the heuristic
 something a reader can check by hand.
+
+---
+
+## DECISION #71 — Making a score producible live: `w` as a read parameter
+
+**Status:** ACCEPTED — **option B** (`?window_h=`, 6 h default) · **Date:** 2026-09-05 ·
+**Blocked:** nothing; **decides** whether P18 shows a number on camera · **Relates to:** D70, D68,
+D19, D13, **F2**, **B49/P16** · Raised at the stage-6 (`G16`) report
+
+### Question
+
+**D70** fixed `w` at a symmetric 6 h. A lever pulled during a demo therefore cannot be scored for
+six hours **regardless of the horizon** — B49's `?horizon_h=` releases the *settlement* withholding
+but not the window itself. And the seeded week has nothing to score instead: its 24 decisions are 12
+`create_ad` and 12 `launch`, and both have a structurally empty before-window, because before
+`launch` the ad is `draft` and `SIMULATOR.md` §3 gives a draft ad λ = 0. **Measured at `B50a`: zero
+decisions score on the seeded store, at any horizon.**
+
+This is verbatim the situation **F2** named for the lateness horizon, and F2's answer was that
+shortening it is a **build item** (P16), not a toggle.
+
+### Options as presented
+
+**A) Leave `w` fixed at 6 h.** P18 is demonstrated by its withheld state, its two bias traps and its
+four limits, rather than by a number.
+- Pros: zero work; the ratified figure stays the only figure on screen.
+- Cons: the one chunk taken back off the cut line (D68) shows nothing.
+- Forecloses: a live score in the demo. Reversal cost: low.
+
+**B) Make `w` a read parameter, `?window_h=`, defaulting to D70's 6 h.** *(CHOSEN)*
+- Pros: the shape B49 already established; `scoring.ts` already threads the horizon, so it is ~15
+  lines. Pull a lever, shorten the window, watch a score appear. 6 h stays the ratified default and
+  the documented figure.
+- Cons: a second knob on one surface, and a reviewer could read a 15-minute score as the claim.
+- Forecloses: nothing. Reversal cost: low.
+
+**C) Seed two or three mid-week levers on the next reseed.**
+- Pros: the only option that produces a score on frame one, with a full 6 h either side.
+- Cons: 5m20s and 750 MB, and **it only fixes seeded history** — a lever pulled on camera still
+  waits six hours. Reversal cost: one reseed.
+
+**My recommendation was B**, on the grounds that the precedent and the argument are already ratified
+for the horizon and that B is the only option which makes the *live* path demonstrable.
+
+### Rationale — Seno's words
+
+> "D71 — B. Add ?window_h= beside ?horizon_h=, D70's 6 h staying the default and the documented
+> figure, with the caption naming the window each score was answered at. The precedent and the
+> argument are already ratified for the horizon, and it's the only option that makes a lever pulled
+> on camera scoreable."
+
+### Consequences
+
+1. **`GET /api/scores` takes `?window_h=`**, bounded and **refused rather than clamped**, exactly as
+   `?horizon_h=` is — a silently adjusted window puts a figure on screen nobody asked for.
+2. **6 h remains the ratified default and the documented figure.** `SCORING_WINDOW_MS` stays the
+   constant; the parameter shifts a *read*, and absent it every existing caller is unchanged.
+3. **The caption must name the window each score was answered at** — Seno's condition, and it is the
+   half that keeps this honest. A score at 15 minutes and a score at 6 hours are different claims,
+   and the surface says which one it is making, the way `Horizon.tsx` already does for the horizon.
+4. **Nothing is stored, and nothing may be.** A score is a function of (the decision log, the
+   rollups, the horizon, the window, the read clock) and four of those five move. `BUILD_PLAN.md`
+   §14 already carries "a score must not be stored"; this adds a fifth moving input to the same rule.
+5. **The contamination rule follows the window.** A second lever inside a *shortened* window is a
+   different set from a second lever inside 6 h, so contamination is recomputed per read too — the
+   flag describes the window that was asked for, not the ratified one.
+6. **`w` and the horizon are independent knobs and both are needed**, which the surface has to make
+   legible rather than leaving as trivia: the horizon governs *when a score is allowed to be shown*
+   (both windows past settlement), the window governs *what it is measured over*. Shortening only
+   one of them still yields nothing.
+
+### What it forecloses
+
+**Nothing.** It is the same shape as B49 and reverts by deleting a parameter. What it *spends* is
+one more control on a surface that already carries a horizon control — which is why consequence 3
+is a condition of the ratification rather than a nicety.
+
+### How I'd defend this in review
+
+The identical question was already answered for the lateness horizon, and for a reason that applies
+here unchanged: a score is derived at read time and stored nowhere, so making its window a read
+parameter cannot desynchronise anything — while leaving it fixed means the one heuristic the brief
+explicitly asks for ("a stated before-window vs after-window heuristic") can be described but never
+shown. The default is the ratified 6 h and the caption says which window produced the number, so
+shortening it is an act of demonstration, not a quiet change of claim.
