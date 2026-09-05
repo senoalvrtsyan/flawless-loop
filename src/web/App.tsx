@@ -517,7 +517,7 @@ export function App() {
   }
 
   const { store, cursor, ads, generations, decisions } = state;
-  const latest = latestBucket(store);
+  const latest = latestBucket(store, selected);
   // "All" resolved to a concrete list, in the portfolio's own order, so the chart's series order
   // and the list's row order are the same thing and a colour means one ad in both.
   const charted = selected === null ? ads : ads.filter((ad) => selected.has(ad.ad_id));
@@ -837,7 +837,23 @@ export function App() {
             <Maturity data={totals.maturity} />
 
             {/* Per ad, so the portfolio is comparable rather than only aggregated. Same envelope,
-                same read transaction — these rows sum to the headline above by construction. */}
+                same read transaction — these rows sum to the headline above by construction.
+
+                **B70 — and that construction is exactly why it is suppressed at one ad.** The
+                headline is the total over the SELECTED ads; the table is those ads one per row. At
+                a selection of one they are the same six numbers, printed twice, each with its own
+                clickable drill-down — so a reviewer gets two affordances that open the same panel
+                and one of them is redundant. Above one ad the table earns its place by being a
+                comparison; at one ad it is a restatement, and the headline says it better: bigger
+                type, the cohort notes, and the conversions line directly above. Which ad is in
+                scope is already on screen twice — the portfolio selection on the left and the
+                `Charting` count in the controls.
+
+                The condition is the SELECTION, not the row count: with every ad selected but only
+                one delivering in this window the table still renders, because then the headline is
+                a portfolio total that happens to equal one ad's numbers and the row is the only
+                thing naming which ad that is. */}
+            {selected !== null && selected.size === 1 ? null : (
             <table className="totals">
               <thead>
                 <tr>
@@ -863,6 +879,7 @@ export function App() {
                 ))}
               </tbody>
             </table>
+            )}
 
             <p className="telemetry">
               totals over {totals.query.from} → {totals.query.to} · {total.buckets} buckets · as of

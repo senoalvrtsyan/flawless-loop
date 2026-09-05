@@ -444,6 +444,8 @@ ratified constant.
 | [x] | **B68** | **The headline figures become an even grid**, and the duplicated 66-char cohort clause becomes `lags by cohort` with the sentence kept in the hover | `app.css`, `metrics.ts`, `App.tsx` | All six figures on one row at 1500 px; ROAS no longer stranded | — |
 | [x] | **B69** | **The decision log renders its 8 most recent rows**, with `show all` | `DecisionLog.tsx` | It was **4,239 px — more than half the page** — and 24 of 25 rows were seeded `create_ad`/`launch` setup | — |
 
+| [x] | **B70** | **Two duplications on the Signal surface.** (a) At a selection of **one ad** the per-ad table is one row identical to the headline — same six numbers, each with its own drill-down — so it is suppressed; above one ad it is a comparison and stays. (b) `latestBucket()` scanned the whole store while its caption said *"newest bucket **in view**"*, so selecting `a_01` could report `a_12`'s bucket | `App.tsx`, `store.ts` | In the browser: all 12 → table, 12 rows · **1 selected → no table** · 2 selected → table, 2 rows. With `a_01` alone selected the caption now names `a_01`, frozen at the minute it was paused | — |
+
 > ### ▶ Demo checkpoint 7a — *"a stranger can name what they are looking at"*
 >
 > A reviewer who has never seen an ad platform can read every headline figure's name, and can tell

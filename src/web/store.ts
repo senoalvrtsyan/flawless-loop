@@ -117,9 +117,21 @@ export function applyRows(store: BucketStore, incoming: readonly BucketRow[]): B
  * in the same minute. Selection, not aggregation: it picks one server-computed row and computes
  * nothing (D46).
  */
-export function latestBucket(store: BucketStore): BucketRow | null {
+export function latestBucket(
+  store: BucketStore,
+  /**
+   * **The ads currently charted, or `null` for all — B70.** The caption this feeds says *"newest
+   * bucket **in view**"*, and the store holds every ad the stream sends regardless of what is
+   * selected. Unscoped, selecting `a_01` alone could report `a_12`'s bucket — a true statement
+   * about the store and a false one about the view, on a line whose whole job is to say what the
+   * screen is showing. Liveness of the *stream* is not lost by scoping this: it is the raw tail's
+   * telemetry block, where D34 put it.
+   */
+  ads: ReadonlySet<string> | null = null,
+): BucketRow | null {
   let best: BucketRow | null = null;
   for (const row of store.rows.values()) {
+    if (ads !== null && !ads.has(row.ad_id)) continue;
     if (best === null) best = row;
     else if (row.minute_start > best.minute_start) best = row;
     else if (row.minute_start === best.minute_start && row.ad_id > best.ad_id) best = row;
