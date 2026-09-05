@@ -997,6 +997,201 @@ heuristic: at exactly 1586705 it returns to `MATCH`.
 
 ---
 
+## Separating signal from noise
+
+The brief asks for this by name, and immediately constrains how to answer it: *"We are **not**
+evaluating … statistical/ML sophistication. A well-chosen heuristic, honestly presented with its
+limits, beats an opaque model."* So there is no model here. There are **three mechanisms, kept
+visibly distinct because they answer three different questions**, and one heuristic with its limits
+printed next to it on the screen.
+
+| Mechanism | The question it answers | What it does when the answer is bad |
+|---|---|---|
+| **The statistical gate** (**D20**) | *Is there enough data for this to be a ratio at all?* | Coarsens the granularity; then **stops** and shows counts instead of a ratio |
+| **The maturity indicator** (**D33**) | *Is the data for this bucket still arriving?* | Labels the point with how complete it is, and the sample size that claim rests on |
+| **Settlement state** (**D13**) | *Have we asserted this period is final — and did it move anyway?* | Marks the bucket `live`, `settled` or `restated` |
+
+A young cohort trips all three, for three different reasons, and the surface says which. That
+separation is the actual answer to the question: *"noisy"*, *"incomplete"* and *"revised"* are not
+the same problem, and a single confidence blob over the top of them would hide which one you are
+looking at.
+
+### The gate: a fixed bar, adaptive granularity, and then it stops
+
+- **CTR:** ≥ 500 impressions per plotted point (relative standard error ≈ 30% at p ≈ 2%).
+- **CPA and ROAS:** ≥ 10 **conversions** per plotted point (RSE of a count of 10 ≈ 32%).
+- **Ladder:** minute → 5 min → 15 min → hour, **and stop.** If the hourly point still fails the bar,
+  **the ratio is not drawn** and the counts are shown in its place with the reason stated.
+- **Smoothing:** EWMA, 15-minute half-life, with a raw toggle.
+
+The stop is the part worth defending. A chart that says *"not enough conversions yet — here are the
+counts"* is honest; one that has quietly widened into a single bar covering the whole window is not,
+because it looks like an answer. Across a multi-ad selection the ladder resolves to the **coarsest
+rung the selection needs**, per-point suppression applies at >50% of non-empty points, and **the ads
+dropped from a point are named on screen** (**D67**). The chosen rung and the gated count are always
+visible, never inferred.
+
+Two things the gate deliberately does **not** do, both foreclosed by D20 and both stated rather than
+hidden: no confidence intervals (the brief disclaims that sophistication) and no sub-minute ratios
+(nothing needs them).
+
+### The maturity indicator: a histogram of our own data, not a forecast
+
+Per window, from the **empirical attribution-lag CDF measured over settled cohorts only** — collect
+`received_at − click.ts` for resolved conversions, evaluate at the bucket's age. It is **global, not
+segmented**: at twelve ads a per-channel curve would itself be noise, and that limit is named rather
+than left as an absence.
+
+It is **always displayed with the sample size it was measured from** — *"68% mature · measured over
+1,432 settled conversions"* — so it reads as an observation about our own store rather than a
+prediction. The label additionally discloses how many of those were **seeded** rather than observed,
+because a figure resting on backfill should say so. The fixed cold-start curve (50% @ 1 h, 80% @ 6 h,
+95% @ 24 h) is the documented fallback and never fires with seven days of history.
+
+### The one new heuristic: the fatigue flag
+
+> Flag a `(lineage × audience)` pair as **fatiguing** when its EWMA CTR over the trailing 6 h has
+> fallen **≥ 25%** below that pair's **peak** trailing-6 h EWMA CTR, counting only points that clear
+> the impression gate, with **≥ 3 qualifying points in each window**.
+
+That is the whole thing. It is a threshold on a smoothed ratio, and it is chosen rather than fitted.
+Its limits are on the surface next to it, not only here:
+
+- **It cannot separate fatigue from an audience-quality shift or a platform delivery change.** This
+  is the honest one, and it is honest *by construction*: the simulator's two AR(1) demand processes
+  (§ [mock data](#the-mock-data-model)) mean a sustained channel-level dip and a genuine burnout look
+  identical for the first few hours — because they do in reality.
+- **It lags by roughly the EWMA half-life.** A collapse is flagged 15–30 minutes after it starts.
+- **It fires late on low-volume ads, precisely because the gate suppresses their points.** `a_09`
+  could burn out completely and never accumulate three qualifying points. **The ads most likely to
+  be fatigued are the ones we are slowest to flag** — the honest failure mode, stated rather than
+  hidden.
+- **It measures the pair, not the ad.** An ad with a fresh video and a burned headline shows a
+  partial signal, and the surface attributes it to the slot.
+- **It is a display flag, not a recommendation.** No `system:fatigue_rule` decision is ever appended;
+  that actor and the approval flow are a stated scope cut. The flag informs a human who pulls the
+  lever. Nothing pulls it automatically.
+
+### And one honest admission about all of it
+
+Every threshold above — 500, 10, 25%, 6 h, three points, a 15-minute half-life — is a **judgement
+calibrated against our own simulator**, not a result. `SIMULATOR.md` §18 is the evidence they were
+chosen so both branches actually fire in the seeded data, which makes them *demonstrable*; it does
+not make them *right* for a real platform. What is defensible is the shape: a fixed bar, a ladder
+that terminates, a completeness figure carrying its own sample size, and one flag that says what it
+cannot tell apart.
+
+---
+
+<a id="the-mock-data-model"></a>
+
+## The mock data model
+
+The brief says the mock stream is *"under your control, so it's tempting to make it polite. Don't."*
+It is treated here as a design artifact in its own right: the simulator is a **model of a market**,
+not a fixture generator, and it runs in a separate process that never opens the store (**D32**).
+
+**The shapes — designed curves plotted against what actually came out of the seven-day store — are
+in [`docs/MOCK_DATA.md`](docs/MOCK_DATA.md).** The model itself is
+[`docs/SIMULATOR.md`](docs/SIMULATOR.md), with every constant in its §21 appendix. This is the
+summary and the four results that matter.
+
+### The rate equation
+
+```
+lambda(ad, t) = base_impr_per_day / 86400
+              x d_channel(h_local)      -- diurnal, per channel, America/New_York
+              x w_dow(weekday)          -- day of week
+              x rho_pacing(ad, t)       -- budget as a throttle, never a cliff
+              x m_channel(t) x m_ad(t)  -- two autocorrelated demand factors
+
+N ~ NegBinomial(mean = lambda, alpha = 8)      -- per ad, per second
+```
+
+Multiplicative rather than additive, because variance should scale with level. **Fatigue and novelty
+are deliberately absent from this equation** (**D56**): they change what an impression is *worth*,
+never how many *arrive*, so they enter `p_ctr` and nothing else. Having them in both places would
+charge fatigue twice, as `φ²` on clicks.
+
+### Four results, from the shipped store
+
+**1 — The diurnal curve is recovered, and the two channels are visibly different days.** Median
+absolute deviation between designed `d_c(h)` and measured impressions-per-local-hour is **0.06** on
+both `meta_feed` (peaks 13:00) and `tiktok_feed` (peaks 20:00–21:00). The channel modulates the
+*shape* of the day, not just its level — which is what makes the gate's granularity ladder step
+during the day rather than sit on one rung.
+
+**2 — Fatigue is the centre of the model, and it is visible in three ways at once.** Fatigue accrues
+to the **`(component lineage × audience)` pair** (**D35**), frequency-driven —
+`φ(f) = 0.25 + 0.75·exp(−0.35·f)` where `f` is cumulative impressions over the *served* pool:
+
+| Observation | Evidence in the store |
+|---|---|
+| The curve is real and steep | `a_01` falls from **4.467% to 0.464%** CTR in seven days — **9.6×** — with impressions *rising* throughout |
+| The same video is burned on one audience and fresh on another **simultaneously** | `a_12` runs the *same lineage* on `cold_us` and falls only **1.5×** over the same week. One video, two audiences, two trajectories; only the component's history explains it |
+| A recut is not a new creative | A fresh lineage entering `rt_us` on day 6 (`a_08`) still opens at ~4.2%, so the audience is not exhausted — **`vl_04` is.** Its recut (`a_05`, v2) opens at **0.830%**, a fifth of that |
+
+That third row is the one worth pausing on: it makes **D3**'s copy-on-write decision — which ships
+as prose because no editor was built — into an observable fact. Frequency accrues by *lineage*, so
+v2 inherits v1's exhaustion minus a ratified partial reset. A re-edit is not new to someone who has
+seen the original eighteen times.
+
+Choosing **frequency** rather than calendar decay is what makes this work: calendar decay would keep
+burning a *paused* ad, quietly breaking the pause demo, and it would sever the link that makes
+`set_budget` a fatigue lever — double the budget and you burn the creative twice as fast.
+
+**3 — The noise has the right signature, and the autocorrelation is doing the work.** Var/mean over
+per-minute impression counts climbs with the level — **0.96 → 1.32 → 1.59 → 2.10 → 3.72** across
+ad-hours grouped by λ. Summing 60 independent per-second draws would give only **1.007 → 1.121**. The
+**3× excess is `m_channel` and `m_ad`**, whose 45- and 20-minute time constants mean minutes inside
+an hour are correlated rather than independent. That is exactly what **D37** said two AR(1) processes
+would buy, and it is why the fatigue flag's *"cannot separate this from a platform delivery change"*
+limit is honest rather than decorative.
+
+Uniform jitter on a smooth curve was rejected for a stated reason: it is detectable in one glance,
+because the mean is a visible spline and the residuals have no volume dependence, no persistence and
+no source.
+
+**4 — The conversion lag has two components and they are kept apart.** Purchase lag
+(`click.ts → conversion.ts`, the human decided later) is a mixture — `Exponential(mean 12 min)` with
+probability `p_fast`, otherwise `LogNormal(median 14 h, σ 1.1)`. Reporting lag
+(`conversion.ts → received_at`, the platform told us later) is `LogNormal(median 90 s)` with a 2%
+straggler. Collapsing them, in Seno's words at ratification, *"would make our own transport look like
+it's hours behind — that field has to describe us, not the buyer."*
+
+`p_fast` is a property of audience temperature (0.65 retargeting / 0.45 warm / 0.30 cold), so the
+mixture weight carries domain meaning rather than being a fitted knob — **and it is recovered from
+the data**: measured P(lag ≤ 1 h) reads **0.30 / 0.52 / 0.71** against designed `p_fast` of
+**0.30 / 0.45 / 0.65**.
+
+### What the measurement found that the design did not say
+
+Two things, both in `MOCK_DATA.md` in full, because a model artifact that only reports agreement is
+not evidence of anything:
+
+- **The median is a bad statistic for this lag distribution.** Between 1 h and 3 h the empirical CDF
+  is nearly flat — the gap between the fast component finishing and the slow one starting — and
+  `SIMULATOR.md` §11.2's designed warm median of 3.3 h sits right on that flat stretch, so a sample
+  of 191 puts the empirical median at 0.72 h. Nothing is wrong with the parameter; the 50th
+  percentile simply is not identified where the density is near zero. It is the argument for showing
+  a CDF rather than three medians.
+- **The seeded past-72 h tail reads low (0–0.7% against a designed 2.3–4.6%) because it is
+  right-censored, not because it is wrong.** The seeded population stops hard at `T0`, and **47% of
+  its clicks fall in the last three days**, so their long-lag conversions could not have been written
+  by the seeder. They were not lost — the live emitter re-derives them from
+  `hash(seed, 'conv_lag', click_id)` and delivers them as the demo runs, which is why the store's
+  earliest *live* event has a `ts` from **before** `T0`.
+
+### What this model does not model
+
+Named because an unnamed simplification reads as an oversight: audience overlap and fatigue bleed ·
+auction competition as an agent (only its statistical shadow) · frequency capping · seasonality
+beyond day-of-week · view-through conversions · per-audience timezone · creative-level delivery
+optimisation · CVR fatigue · fatigue as a *delivery* effect rather than a click-through one
+(**D56**). The full table with what each would change is `SIMULATOR.md` §20.
+
+---
+
 ## Component performance across swaps
 
 The Workbench is sketched (D1), and one read-only screen is backed by the live reverse join. The
@@ -1192,6 +1387,130 @@ the display path to itself. `/api/verify` goes the other way and rebuilds *throu
 
 ---
 
+## The decision log
+
+**Seventy-three ratified decisions, D1–D73.** Every one carries the options as they were presented,
+what was chosen, **the rationale in the human's words, quoted rather than paraphrased**, the
+consequences, what it forecloses, and a one-line *"how I'd defend this in review"*.
+
+- **[`docs/DECISIONS.md`](docs/DECISIONS.md)** — the full entries, with an index table at the top.
+- **[`docs/DECISION_DIGEST.md`](docs/DECISION_DIGEST.md)** — all 77 rows (73 decisions, one triage
+  pass, four follow-ups, one parameter ratification) reduced to **what each one forecloses**, which
+  is the column the index table does not carry.
+
+The single most useful number in that digest: **48 of the 77 foreclose nothing at all.** That is not
+padding, it is the claim — the design keeps its expensive choices few and everything else reversible,
+and the only way to show that rather than assert it is to enumerate the cheap ones too. The 22 that
+*do* cost something are gathered in the digest's §4 as the answer to *"what did you give up?"*.
+
+### The fifteen the rest are built on
+
+| # | Chosen | What it bought | What it forecloses |
+|---|---|---|---|
+| **D1** | Signal deep, decision loop plain, Workbench sketched | Depth where the brief says it looks hardest | A demoed Workbench: component-level performance, variant comparison, a versioning editor. **Expensive to reverse** |
+| **D26** | The slice, with an ordered cut line | A scope that can grow and cannot shrink | The human-in-the-loop approval flow, `clone_ad`, relaunch — all additive on top of this spine |
+| **D5** | `create_ad` + `launch` added to the lever set | The fold gets an origin, so *"config is derivable"* is true | Nothing, in the keep-it direction |
+| **D7** | Log authoritative, projections rebuildable, **one writer** | *"Drop every projection, replay, get identical numbers"* as a runnable check | Nothing — projections are disposable by construction |
+| **D8** | SQLite on the server, `node:sqlite`, no new dependency | Survives a process kill, not just a refresh | Client-side persistence, **on principle**: it passes the refresh test and fails the premise |
+| **D9** | Hybrid — raw forever **and** minute rollups | The drill-down and the agreement test are possible at all | Nothing. Rollups-only forecloses the graded criterion |
+| **D10** | Ratios derived at read, counts stored | *"CTR over any window"* right with no special case | Nothing. Storing ratios is a correctness bug in a performance costume |
+| **D29** | Counts maintained at ingest, same transaction | **Restatement stops being a feature** — a late event is just an old bucket | Nothing. A sweep would make the agreement test race its own writer |
+| **D27-B** | A conversion lands in **its click's minute** | Real cohort ratios, and the brief's own sentence about rewritten periods made literal | Recognition-time as a pre-aggregated view |
+| **D14** | Credit the generation live at the **click's** `ts` | A swap cannot collect a windfall for its predecessor's click | The tempting shortcut that silently rewards the wrong creative |
+| **D13** | 72 h horizon, displayed, adjustable, arrivals past it counted separately | Three honest bucket states instead of one silent one | Past-horizon events in headline numbers — mitigated by displaying them |
+| **D30** | Absolute bucket rows on the wire, not deltas | Reconnect is idempotent; restatement is not a special frame | Client-side aggregation, deliberately: otherwise the traceability check compares the client to itself |
+| **D20** | Fixed bar, ladder that **stops**, counts instead of a ratio | A chart that refuses to draw a number it cannot support | Sub-minute ratios and confidence intervals |
+| **D32** | Simulator in its own process, over HTTP, never opens the store | One owner of `ingest_seq`; killing the simulator is a supported operation | Nothing — both directions sit behind one `ingest()` |
+| **D35** | Fatigue accrues to `(lineage × audience)` | A burned video arrives pre-fatigued in a *new* ad on the same audience | Nothing — the coarser keys are the same decision with less resolution |
+
+### How the decisions were actually taken
+
+The working method is in [`CLAUDE.md`](CLAUDE.md), and one rule did most of the work: **the model does
+not make design decisions, it surfaces them.** Anything with a defensible alternative — data model,
+storage, aggregation, transport, attribution windows, scope, a library, an event semantic — was
+written up with its options, its recommendation, what it forecloses and its reversal cost, and
+answered by a human. Their answer is quoted verbatim and never paraphrased, because *a decision the
+human cannot defend is worth less than a worse decision they can*.
+
+Two consequences are visible in the register. Decisions were **batched** (3–6 at a time) so they could
+be answered in one pass. And several were **taken back**: D49 held a cut line twice rather than
+spending it, D59 amended a ratified constant mid-build when measurement contradicted it, and D68
+reinstated a cut once the build had earned the slack. Where a decision was delegated to the model, it
+says so and says who delegated it (**F1**).
+
+---
+
+## What I'd build next, and what I'd do differently
+
+### Next — the cut line, in order, cheapest first
+
+`SCOPE.md` §4 is written as an **ordered reinstate-first list**, so this section is not a wish list;
+it is the top of a queue that already exists and is already costed. The numbering is deliberately
+not closed up after #1 was taken back, because these numbers are cited from the code
+(`SCOPE.md §4 cut #3` appears in `fold.ts`) and renumbering would silently repoint them.
+
+| | What | Why it is next, and what it costs |
+|---|---|---|
+| ~~#1~~ | ~~Decision scoring~~ | **Already taken back.** It read rollups that already existed, which is why it was cheapest — and why the surplus bought it (**D68**, built as `B50a`, window settled by **D70/D71**) |
+| **#2** | **Data-health panel as a designed surface** | The counters already exist and are already rendered plainly — orphans, conflicts, rejects, clamps, past-horizon arrivals. What is cut is the *panel*: one place that says how much of what is on screen you should believe. It is the next thing I would build because it is the only cut item that makes the honesty machinery **legible** rather than merely present |
+| **#3** | `archive` lever | One decision variant reaching a terminal state. Cheap because `archived` was kept in the type on purpose (**F1**) |
+| **#4** | `variant_group_id` + sibling comparison view | The field is free; the view is not, and with the Workbench sketched there is no surface for it to live on |
+| **#5** | `clone_ad` | Needs #4 plus a builder flow the sketched Workbench does not have |
+| **#6** | Human-in-the-loop approval (`Recommendation`, `system:fatigue_rule`, approval UI) | The most product-like moment in the brief, and cut on the stated ground that it proves nothing about the event path Signal is graded on. It is **not** cheap and it is **not** where I would go next, despite being the most demo-friendly item on this list |
+| **#7–#9** | Versioning as a built flow · compaction · multi-currency, campaigns, conversion kinds, retraction | Each is designed in prose with what it forecloses, and each buys realism at the cost of a graded criterion elsewhere |
+
+If I had one more feature rather than one more week, it would be **#2 and nothing else.** Everything
+this design does well is about honesty under uncertainty, and right now that honesty is distributed
+across a dozen small affordances that a reviewer has to find one at a time.
+
+### Differently — the four things the build actually taught me
+
+These are not the cut items. They are the places where the process, not the scope, cost something.
+
+**1 — I would have opened a browser far earlier.** Stages 4, 5 and 6 were built and verified
+headlessly, and the first time anyone clicked any of it was the final demo rehearsal (`B61`). It
+produced **four corrections in one sitting**. Every one of them was invisible to `tsc`, to 172 tests
+and to `/api/verify`, because they were about what a person sees. Headless verification proved the
+numbers and could not prove the product, and I knew that and did it anyway because the numbers were
+where the risk felt like it was.
+
+**2 — I would instrument the simulator's clamps from day one.** Two parameters did nothing for an
+entire phase and nobody noticed, because plausible output is not the same as correct output:
+`κ = 200` on clicks had **exactly zero** effect (a BetaBinomial's overdispersion enters through
+`(N−1)/(κ+1)`, and per-tick `N` was 0–3), and `κ = 60` on conversions was inert for the same reason
+(**D57**, **D62**). Worse, `ρ_catchup`'s 1.6 ceiling had the whole portfolio **pinned to the clamp**
+and running 1.19–1.47× its stated baseline, and the design document of the day described pacing as
+*"inert"* — it was not inert, it was pinned, and only printing the clamp showed the difference
+(**D59**). A simulator whose output looks reasonable is the easiest thing in this repo to be wrong
+about. Every clamp, every draw, should print its own occupancy from the first chunk.
+
+**3 — I would measure the seeded distributions against their designed shapes as a build step, not at
+packaging time.** [`docs/MOCK_DATA.md`](docs/MOCK_DATA.md) exists because P6 asked for the shapes,
+and writing it surfaced two things worth knowing much earlier — that the lag distribution's median is
+not identified where its CDF is flat, and that the seeded tail is **right-censored at `T0`** with 47%
+of its clicks in the final three days. Neither is a bug. Both would have changed how I talked about
+those numbers for the previous two phases.
+
+**4 — I would split the fault injector before shipping it, not propose it and leave it.** `B33a` —
+separating malformed payloads (0.1%) from dual click-ids (0.05%) — is designed, costed at ~90 lines,
+and **undone**, because it needs to re-run `validate()` over retained `payload_json` and therefore
+reads the store, which `src/sim` may not do (**D32**). The right answer is a `npm run faults` script
+in the shape `scripts/agree.ts` already established. It is the only piece of designed work in this
+repo that is neither built nor formally cut, and leaving something in that state is the habit I would
+change.
+
+### Also honestly outstanding, and none of it a defect
+
+`ad_id`-known is **not** validated at ingest (adding it would make an unseeded store reject every
+simulator event — it needs a plan row or a decision to drop it, and it is named in the limits above
+and in a comment in `ingest.ts`) · `projection_meta` is deliberately unwritten, because using it to
+skip the `/api/verify` rebuild would make `verify.ts` a second writer of a projection · two rules
+shipped under a group approval without their own decision entries and are recorded in `STATUS.md` so
+a later reader does not mistake them for ratified design · the pacing taper's **gradual slide** has
+never been shown live, only delivery going to zero and back, and this file does not claim otherwise.
+
+---
+
 ## Repository map
 
 | Path | What is in it |
@@ -1201,9 +1520,13 @@ the display path to itself. `/api/verify` goes the other way and rebuilds *throu
 | `docs/DECISIONS.md` | D1–D71, each with its options, what was chosen, the rationale in the human's words, its consequences, and **what it forecloses**. The index table at the top is the one-line-each view. |
 | `docs/SCOPE.md` | What is real, what is sketched, what is cut, ordered cheapest-to-reinstate-first. §2–§4 is the block copied into this file. |
 | `docs/DESIGN.md` | The data model, the DDL, the persistence boundary, late conversions end to end, the fold, the reverse join, traceability. |
+| `docs/SCHEMA.md` | The **as-built** schema, read out of the running store with `sqlite_master` — every table, every index with the query it serves, and a diff against what `DESIGN.md` designed. One table apart. |
 | `docs/SIMULATOR.md` | The mock data as a design artifact: the rate equation, diurnal and day-of-week shape, fatigue and novelty, pacing, the lag mixture, noise, injected misbehaviours, determinism, and a measured parameter appendix. |
+| `docs/MOCK_DATA.md` | The same model **measured**: the designed curves plotted against what came out of the seven-day store — diurnal, fatigue, novelty, overdispersion, pacing, the lag CDF — with every query shown. |
 | `docs/BUILD_PLAN.md` | 69 chunks with per-chunk verification, plus §14 — the ~90 traps that will not fail loudly, each written the day it was found. |
+| `docs/DECISION_DIGEST.md` | All 77 rows reduced to **what each one forecloses**. 48 foreclose nothing; the 22 that cost something are gathered at the end. |
 | `docs/DEMO.md` | The walkthrough. Eight beats, followable cold. |
+| `docs/DEMO_SCRIPT.md` | The 15-minute version, plus the ten hardest questions a reviewer could ask, each answered from `DECISIONS.md`. |
 | `docs/STATUS.md` | Written to resume the repo cold with no memory of the conversation. |
 | `docs/ai-sessions/` | The AI process artifact — one capture per phase plus one per implementation session. |
 | `src/server/` | HTTP, ingest, `apply()` (**the only projection writer**), fold, attribution, settlement, snapshot, SSE, verify, trace, scoring. |
