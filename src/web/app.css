@@ -317,3 +317,25 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
                                                    color: var(--accent); }
 .metric__cell { font: inherit; color: inherit; background: none; border: 0; padding: 0;
                 cursor: pointer; border-bottom: 1px dotted var(--ink-muted); }
+
+/* B53's drill-down. Deliberately inside the page, under the figure it explains — a modal would
+ * hide the number the panel exists to be compared against. The left border is solid and in the
+ * accent hue: this is neither a config change (▼, generation) nor a settlement flip (dashed), it
+ * is a proof, and the third treatment says so without a legend. */
+.drill { border-left: 3px solid var(--accent); background: var(--surface); padding: .5rem .75rem;
+         margin: .6rem 0 1rem; }
+.drill__head { display: flex; align-items: baseline; gap: .75rem; }
+.drill__title { font-size: .9rem; margin: 0 0 .3rem; }
+.drill__close { font: inherit; font-size: .78rem; background: none; border: 1px solid var(--border);
+                cursor: pointer; padding: 0 .4rem; margin-left: auto; }
+.drill__query { font-size: .76rem; color: var(--ink-muted); margin: .25rem 0; }
+/* The verdict carries a WORD as well as a colour — MATCH / MISMATCH is the text, so the surface
+ * is readable in greyscale and by anyone who does not see the two hues apart (D45). */
+.drill__verdict { font-size: .82rem; margin: .4rem 0; padding: .3rem .5rem; }
+.drill__verdict--pass { border-left: 3px solid var(--status-live); }
+.drill__verdict--fail { border-left: 3px double var(--state-restated); }
+.drill__counts { font-variant-numeric: tabular-nums; }
+.drill__hint { font-size: .74rem; color: var(--ink-muted); }
+.drill__slices { list-style: none; display: flex; flex-wrap: wrap; gap: .25rem .75rem;
+                 margin: .25rem 0 .5rem; padding: 0; font-size: .76rem; max-height: 9rem;
+                 overflow-y: auto; }

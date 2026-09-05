@@ -51,9 +51,23 @@ export type ReplayCounts = {
   provisional_value_cents: number;
 };
 
+/** One contributing event, as `replay()` saw it. `kind` rides along so a CALLER can prioritise. */
+export type ReplayContribution = { event_id: string; ingest_seq: number; kind: string };
+
 export type ReplayResult = {
   descriptor: ReplayDescriptor;
   counts: ReplayCounts;
+  /**
+   * The contributing events with their kind — **added at B53**, and the reason is a measured trap.
+   *
+   * B53's evidence list is capped, and the events are in log order, so on a 6-hour window of `a_03`
+   * the first 400 of 10,481 contributors were all impressions and **not one conversion appeared**.
+   * The panel then showed a ROAS above a list containing nothing that produced any revenue. Every
+   * number was right; the evidence was useless. That is the same failure as G14's newest-first
+   * sweep sample, and the fix is the same: the caller fills the sample with the interesting rows
+   * first, which it can only do if it knows what kind each row is without re-reading all of them.
+   */
+  contributing: ReplayContribution[];
   /**
    * Every event that contributed, in `ingest_seq` order — the evidence half of §10.2. A number
    * with no list of the events under it is a claim; with the list it is a walk-back.
@@ -96,9 +110,27 @@ const zero = (): ReplayCounts => ({
  * reader needs no lock to get a stable snapshot (B07).
  */
 export function replay(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayResult {
+  return readTx(db, () => replayIn(db, descriptor));
+}
+
+/**
+ * The same recomputation, **without opening a transaction** — for a caller that already holds one.
+ *
+ * Split out at B53 because `trace()` reads the ROLLUP and then replays RAW, and those two reads
+ * must see one instant or a conversion landing between them reports a MISMATCH that is a race
+ * rather than a divergence. `readTx` does not nest (`db.ts` says so, and SQLite has no nested
+ * transactions), so the transaction has to belong to the outer caller.
+ *
+ * **The requirement is stated, not enforced.** Called outside a transaction each SELECT gets its
+ * own implicit one, so a concurrent ingest can land between them and the answer is a mix of two
+ * instants — which is exactly the failure `replay()` exists to be free of, and it does not throw.
+ * `replay()` above is the safe entry point and remains what every other caller uses; this one is
+ * for a caller that has already done the guarding.
+ */
+export function replayIn(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayResult {
   const { ad_id, from, to, as_of_ingest_seq } = descriptor;
 
-  return readTx(db, () => {
+  {
     // Every event for this ad within the prefix. `ix_signals_ad_time` serves the ordering; the
     // window is NOT applied in SQL, because a conversion's own `ts_effective` may sit far outside
     // the window it belongs to — filtering here would drop exactly the events the design exists to
@@ -135,7 +167,7 @@ export function replay(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayRe
     }
 
     const counts = zero();
-    const contributing: { ingest_seq: number; event_id: string }[] = [];
+    const contributing: ReplayContribution[] = [];
     const inWindow = (minute: string): boolean => minute >= from && minute < to;
 
     for (const row of own) {
@@ -155,7 +187,7 @@ export function replay(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayRe
         case 'conversion':
           throw new Error('replay: a conversion reached the own-events loop');
       }
-      contributing.push(row);
+      contributing.push({ event_id: row.event_id, ingest_seq: row.ingest_seq, kind: row.kind });
     }
 
     for (const row of conversions) {
@@ -171,7 +203,7 @@ export function replay(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayRe
         if (!inWindow(minute)) continue;
         counts.provisional_conversions += 1;
         counts.provisional_value_cents += row.value_cents ?? 0;
-        contributing.push(row);
+        contributing.push({ event_id: row.event_id, ingest_seq: row.ingest_seq, kind: row.kind });
         continue;
       }
 
@@ -181,7 +213,7 @@ export function replay(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayRe
       if (!inWindow(minute)) continue;
       counts.conversions += 1;
       counts.value_cents += row.value_cents ?? 0;
-      contributing.push(row);
+      contributing.push({ event_id: row.event_id, ingest_seq: row.ingest_seq, kind: row.kind });
     }
 
     // Both loops append, so the list is in two runs; §10.2 promises log order, which is also the
@@ -190,7 +222,8 @@ export function replay(db: DatabaseSync, descriptor: ReplayDescriptor): ReplayRe
     return {
       descriptor,
       counts,
+      contributing,
       contributing_event_ids: contributing.map((row) => row.event_id),
     };
-  });
+  }
 }

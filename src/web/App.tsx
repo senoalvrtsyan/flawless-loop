@@ -25,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // them across the boundary until then beats moving an approved file in a chunk about the client.
 import type { AdRow, GenerationRow, Snapshot, TotalsResponse } from '../server/snapshot.ts';
 import type { RestatementEntry } from '../server/restatements.ts';
-import type { TailFrame } from '../shared/wire.ts';
+import type { TailFrame, TraceDescriptor } from '../shared/wire.ts';
 import type { FatigueReport } from '../server/fatigue-flag.ts';
 import type { ComponentRow } from '../server/components.ts';
 import type { Decision } from '../shared/decisions.ts';
@@ -53,6 +53,7 @@ import {
   formatCount,
   perAd,
 } from './metrics.ts';
+import { Drilldown } from './Drilldown.tsx';
 import { Metric, MetricCell } from './Metric.tsx';
 import { Portfolio } from './Portfolio.tsx';
 import { Chart } from './Chart.tsx';
@@ -238,6 +239,15 @@ export function App() {
     });
   }, []);
   /** Bumped to force step 1 again — a `resnapshot`, per §3.1's "the client returns to step 1". */
+  /**
+   * **B53 / P12** — the descriptor currently being walked back, or `null` when the panel is closed.
+   *
+   * The DESCRIPTOR is the state, not a value and not an "open" boolean: the panel's whole job is to
+   * re-ask one question, so what it is showing IS which question was clicked. Clicking a second
+   * number replaces it, which is why `Drilldown` keys its fetch on the descriptor.
+   */
+  const [drilling, setDrilling] = useState<TraceDescriptor | null>(null);
+
   const [generation, setGeneration] = useState(0);
 
   const resnapshot = useCallback((reason: string) => {
@@ -746,12 +756,14 @@ export function App() {
                 label="Impressions"
                 value={total.impressions}
                 descriptor={total.descriptors.impressions}
+                onDrill={setDrilling}
               />
               <Metric
                 metric="clicks"
                 label="Clicks"
                 value={total.clicks}
                 descriptor={total.descriptors.clicks}
+                onDrill={setDrilling}
               />
               <Metric
                 metric="spend"
@@ -766,6 +778,7 @@ export function App() {
                 value={total.ctr}
                 descriptor={total.descriptors.ctr}
                 note={METRIC_NOTES.ctr}
+                onDrill={setDrilling}
               />
               <Metric
                 metric="cpa"
@@ -773,6 +786,7 @@ export function App() {
                 value={total.cpa_cents}
                 descriptor={total.descriptors.cpa}
                 note={METRIC_NOTES.cpa}
+                onDrill={setDrilling}
               />
               <Metric
                 metric="roas"
@@ -780,8 +794,14 @@ export function App() {
                 value={total.roas}
                 descriptor={total.descriptors.roas}
                 note={METRIC_NOTES.roas}
+                onDrill={setDrilling}
               />
             </div>
+
+            {/* **B53 / P12 — the walk-back, in place.** Directly under the figures rather than in a
+                modal: the number and the events beneath it belong on one screen, and a reviewer
+                comparing them should not have to remember what the page said. */}
+            <Drilldown descriptor={drilling} onClose={() => setDrilling(null)} />
 
             {/* **Held apart, never added in** (§14, and it bites exactly here): a provisional
                 conversion is an orphan whose click has not arrived, so its ad is a guess and its
@@ -819,13 +839,13 @@ export function App() {
                 {perAd(totals.totals).map((row) => (
                   <tr key={row.ad_id}>
                     <td><code>{row.ad_id}</code></td>
-                    <MetricCell metric="impressions" value={row.impressions} descriptor={row.descriptors.impressions} />
-                    <MetricCell metric="clicks" value={row.clicks} descriptor={row.descriptors.clicks} />
-                    <MetricCell metric="spend" value={row.spend_total_cents} descriptor={row.descriptors.spend} />
-                    <MetricCell metric="ctr" value={row.ctr} descriptor={row.descriptors.ctr} />
-                    <MetricCell metric="cpa" value={row.cpa_cents} descriptor={row.descriptors.cpa} />
-                    <MetricCell metric="roas" value={row.roas} descriptor={row.descriptors.roas} />
-                    <MetricCell metric="conversions" value={row.conversions} descriptor={row.descriptors.conversions} />
+                    <MetricCell metric="impressions" value={row.impressions} descriptor={row.descriptors.impressions} onDrill={setDrilling} />
+                    <MetricCell metric="clicks" value={row.clicks} descriptor={row.descriptors.clicks} onDrill={setDrilling} />
+                    <MetricCell metric="spend" value={row.spend_total_cents} descriptor={row.descriptors.spend} onDrill={setDrilling} />
+                    <MetricCell metric="ctr" value={row.ctr} descriptor={row.descriptors.ctr} onDrill={setDrilling} />
+                    <MetricCell metric="cpa" value={row.cpa_cents} descriptor={row.descriptors.cpa} onDrill={setDrilling} />
+                    <MetricCell metric="roas" value={row.roas} descriptor={row.descriptors.roas} onDrill={setDrilling} />
+                    <MetricCell metric="conversions" value={row.conversions} descriptor={row.descriptors.conversions} onDrill={setDrilling} />
                   </tr>
                 ))}
               </tbody>

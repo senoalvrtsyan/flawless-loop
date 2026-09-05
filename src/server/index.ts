@@ -22,6 +22,7 @@ import { listComponents, type ComponentRow } from './components.ts';
 import { HORIZON_CHOICES_H, sweep, type SweepResult } from './sweep.ts';
 import { listScenarios, postScenario, type ScenarioResult, type ScenarioRow } from './sim-scenario.ts';
 import { scoreDecisions, type DecisionScore } from './scoring.ts';
+import { parseTraceRequest, trace, type TraceResult } from './trace.ts';
 import { HORIZON_MS } from '../shared/config.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -287,6 +288,43 @@ const routes: readonly Route[] = [
       // Never returns: the response becomes a long-lived SSE stream (DESIGN §3.1 steps 2-4).
       // B10a added resume — the cursor is `max(?cursor=N, Last-Event-ID)` per D47.
       stream.subscribe(req, res, url);
+    },
+  },
+  {
+    method: 'POST',
+    /**
+     * **B53 / P12 — the drill-down** (`DESIGN.md` §10.2). *"Can you trace any number on screen back
+     * to the raw events beneath it — and do they agree?"*
+     *
+     * POST rather than GET because the body is a signed descriptor — a query object, not a set of
+     * parameters, and one that must arrive byte-identical to how it was issued or the HMAC fails.
+     *
+     * **Read-only** (D7): it reads `rollup_minute` by the display path and raw `signals` by
+     * `replay()`, and compares them. It writes nothing, so it is safe to hit repeatedly in front of
+     * a reviewer, including while the simulator is running.
+     *
+     * 200 for MATCH **and** for MISMATCH: a divergence is a successful answer to the question this
+     * endpoint was asked, and the verdict is in the body. A 4xx here means the REQUEST was wrong —
+     * an unissued descriptor, or a narrowing at the wrong grain (D46).
+     */
+    path: '/api/trace',
+    handler: async (req, res) => {
+      const body = await readBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { error: 'malformed_json' });
+        return;
+      }
+      const request = parseTraceRequest(parsed);
+      if (!request.ok) {
+        sendJson(res, request.status, { error: request.error, message: request.message });
+        return;
+      }
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const result: TraceResult = trace(db, request.descriptor);
+      sendJson(res, 200, result);
     },
   },
   {
