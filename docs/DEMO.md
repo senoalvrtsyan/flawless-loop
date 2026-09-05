@@ -845,6 +845,28 @@ about forty seconds and it is worth every one of them.
   with a per-process key, so the page will read `invalid_signature` on its next click and look
   broken for a reason nobody can find. `ss -ltn | grep :8787` between beat 8's steps 34 and 35 is
   four seconds well spent.
+- **⚑ A drill-down over the whole portfolio takes seconds, and it is not stalled.** Measured on the
+  seven-day store: **1,504 ms for one ad over one hour, 7,004 ms for twelve.** The cost is not the
+  window — `replayIn()` reads every event for the ad over the whole log prefix, because a
+  conversion's own `ts_effective` may sit far outside the window it is credited to and filtering in
+  SQL would drop exactly the events D27-B exists to place correctly — so it is roughly linear in
+  **ads**, not in window width. **Narrow to one ad before you click**, and let the panel's
+  *"replaying the log…"* line do the explaining. Since **B71** a metric switch clears the panel
+  first, so you will never again see the previous metric's rows under the new metric's title.
+- **⚑ Clicking a number in a window that contains `now` gives `NOT_COMPARABLE`, not `MATCH`.** That
+  is correct and it is one of the better lines in the demo — a projection has no `as_of`, so there
+  is nothing for a recomputation over an earlier prefix to agree with. **Do not treat it as a
+  failure to work around**: say what it means, then click an older minute slice for the `MATCH`.
+- **⚑ Charting a paused ad on its own** puts the flat run hard against the right edge, where it is
+  easy to miss. Select a live ad alongside it: the contrast is the point, and one line going flat
+  next to eleven that do not is the picture worth showing.
+- **⚑ The restart's duplicate line only appears if you restart within about a minute** — **D61**
+  ratified a 60-second catch-up window on purpose. Restart eight minutes later and you get
+  `dup 0/0` and a gap in the series, which is a different (and less interesting) true statement.
+  Do beat 8 briskly.
+- **Do not call out generation-marker positions as misplaced.** They have looked wrong twice and
+  measured correct to the second both times. If one looks off, open the trace rather than narrating
+  a doubt you cannot settle on camera.
 - **A conversion can land on a paused ad** and that is correct, not a bug — **D63**. Pause stops new
   delivery; a purchase already earned by an earlier click still settles. Say it before it happens
   rather than explaining it after.

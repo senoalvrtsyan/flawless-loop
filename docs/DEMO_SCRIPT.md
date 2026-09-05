@@ -43,6 +43,13 @@ npm run agree                                                       # OK  — ta
 **One server per store**, and check the ports are free before restarting. Open
 **http://localhost:5173**.
 
+**Four things that look like faults and are not** — the full list is in `DEMO.md`:
+a drill-down takes **1.5 s for one ad and 7 s for twelve** (it re-derives from raw over the whole
+log prefix, so narrow to one ad before clicking) · a window containing `now` correctly answers
+**`NOT_COMPARABLE`**, so click an older minute slice for the `MATCH` · the restart's duplicate line
+needs a restart **inside 60 s** (D61) · never call a generation marker misplaced on camera, they
+have measured correct every time.
+
 ---
 
 ## The fifteen minutes
