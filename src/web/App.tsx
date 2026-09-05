@@ -62,6 +62,7 @@ import { Maturity } from './Maturity.tsx';
 import { Timeline } from './Timeline.tsx';
 import { Tail } from './Tail.tsx';
 import { FatigueFlag } from './FatigueFlag.tsx';
+import { Components } from './Components.tsx';
 import { Console, fetchComponents } from './Console.tsx';
 import { DecisionLog } from './DecisionLog.tsx';
 import { boundariesIn } from './generations.ts';
@@ -908,6 +909,14 @@ export function App() {
         {/* B43 — §5.6's timeline. Below the chart, because an entry explains a mark on it. */}
         <h2 className="section">Restatements — settled buckets that moved</h2>
         <Timeline entries={entries} />
+
+        {/* **B56 / P15 — the Workbench's one screen.** Below the decision log and above fatigue,
+            because it is the join between the two: the log says which levers moved config, this
+            says what that config is currently made of, and the fatigue flag below reads the same
+            component pairs. `generation` is the SAME counter that re-runs §3.1, so a lever pulled
+            in the console above lands here in the same pass as everywhere else. */}
+        <h2 className="section">Workbench — the component library, and what is using it (§8)</h2>
+        <Components generation={generation} />
 
         {/* B45 — §19's one heuristic, with its four limits underneath it rather than in the
             README only. Above the tail, below the numbers it interprets. */}

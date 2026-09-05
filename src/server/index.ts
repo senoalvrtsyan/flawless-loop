@@ -18,7 +18,7 @@ import { fatigueReport, type FatigueReport } from './fatigue-flag.ts';
 import { createStream } from './stream.ts';
 import { createTail } from './tail.ts';
 import { listDecisions, postDecision, type PostResult } from './decisions.ts';
-import { listComponents, type ComponentRow } from './components.ts';
+import { componentUsage, listComponents, type ComponentRow, type LineageUsage } from './components.ts';
 import { HORIZON_CHOICES_H, sweep, type SweepResult } from './sweep.ts';
 import { listScenarios, postScenario, type ScenarioResult, type ScenarioRow } from './sim-scenario.ts';
 import { scoreDecisions, type DecisionScore } from './scoring.ts';
@@ -142,6 +142,23 @@ const routes: readonly Route[] = [
     handler: (_req, res) => {
       // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
       const body: { components: ComponentRow[] } = { components: listComponents(db) };
+      sendJson(res, 200, body);
+    },
+  },
+  {
+    method: 'GET',
+    /**
+     * **B56 / P15 — the Workbench's one read-only screen** (`DESIGN.md` §8, D1).
+     *
+     * `/api/components` above is the swap picker's flat candidate list; this is the same table
+     * joined against `ads`. Two endpoints rather than one payload with an optional join, because
+     * the picker is asked for on every page load and never changes, while this one is a read of
+     * the FOLD and changes every time a lever is pulled.
+     */
+    path: '/api/components/usage',
+    handler: (_req, res) => {
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const body: { lineages: LineageUsage[] } = { lineages: componentUsage(db) };
       sendJson(res, 200, body);
     },
   },
