@@ -26,6 +26,8 @@ import { HORIZON_MS } from '../shared/config.ts';
 import { bucketState, type SettlementState } from './settlement.ts';
 import { ZERO_COUNTS, addCounts, derive, type MetricCounts, type MetricSet } from '../shared/metrics.ts';
 import { maturityFor, type Maturity } from './maturity.ts';
+import { issue } from './descriptor.ts';
+import type { TraceDescriptor, TraceMetric } from '../shared/wire.ts';
 import { listDecisions } from './decisions.ts';
 import type { Decision } from '../shared/decisions.ts';
 import type { BucketKey } from './apply.ts';
@@ -80,6 +82,17 @@ export type SnapshotQuery = {
   to: string;
   ads: string[] | null;
   horizon_ms: number;
+  /**
+   * **B51 adds `granularity_s`** — the grain the caller will draw at, echoed into every descriptor
+   * this response issues (`?granularity_s=`, default 60).
+   *
+   * It is on the QUERY and not a server setting for the same reason `horizon_ms` is: it describes
+   * the question, not the store. D46 consequence 3 requires that a client re-bucketing to display
+   * granularity forward the server's descriptor unmodified — so the server has to be told which
+   * grain that is, or the descriptor names a question the chart is not asking. `POST /api/trace`
+   * then refuses any narrowing that is not a whole grain of THIS value (`descriptor.ts`).
+   */
+  granularity_s: number;
 };
 
 /**
@@ -188,7 +201,21 @@ export type Snapshot = {
  * is `SUM(clicks) / SUM(impressions)`, which is correct because the terms aggregate even though the
  * ratio does not (D10). It is not a mean of per-ad CTRs, and it must never be built as one.
  */
-export type MetricTotals = MetricSet & { ad_id: string | null };
+export type MetricTotals = MetricSet & {
+  ad_id: string | null;
+  /**
+   * **B51 / D34 — one signed descriptor per metric on this row.**
+   *
+   * The value and the query that produced it travel together, which is what §10.1 means by *"the
+   * descriptor rides on every metric value the server sends"*. `<Metric>` (B52) takes both and
+   * will not render without the second, so a number invented in the browser has nothing to pass.
+   *
+   * Eight entries per row, thirteen rows on the seeded portfolio: 104 HMACs per read, measured at
+   * well under a millisecond in total. Cheap enough that the alternative — issuing on demand from
+   * a second endpoint — would buy nothing but a round trip and a way for the two to disagree.
+   */
+  descriptors: Record<TraceMetric, TraceDescriptor>;
+};
 
 /**
  * The response to `?include=totals` — **D66's cheap read**, and the reason it exists is measured:
@@ -312,9 +339,28 @@ export function parseSnapshotQuery(params: URLSearchParams): ParsedQuery {
     horizon_ms = hours * 3_600_000;
   }
 
+  // **B51 / D46.** The grain the caller will draw at, echoed into every descriptor this response
+  // issues. Absent means the minute — D9's base grain and the store's own — so every existing
+  // caller is unchanged. Constrained to whole minutes up to a day and refused rather than clamped,
+  // for the same reason `horizon_h` is: a silently adjusted grain would put a descriptor on the
+  // wire naming a question the caller did not ask, and `POST /api/trace` would then refuse the
+  // caller's own narrowings with an arithmetic error they cannot see the cause of.
+  const rawGranularity = params.get('granularity_s');
+  let granularity_s = 60;
+  if (rawGranularity !== null) {
+    const seconds = Number(rawGranularity);
+    if (!Number.isInteger(seconds) || seconds < 60 || seconds > 86_400 || seconds % 60 !== 0) {
+      return {
+        ok: false,
+        error: `granularity_s: '${rawGranularity}' must be a whole number of minutes, 60..86400`,
+      };
+    }
+    granularity_s = seconds;
+  }
+
   return {
     ok: true,
-    query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads, horizon_ms },
+    query: { from: floorToMinute(fromMs), to: ceilToMinute(toMs), ads, horizon_ms, granularity_s },
     totalsOnly: rawInclude === 'totals',
   };
 }
@@ -498,7 +544,41 @@ type SummedRow = MetricCounts & { buckets: number; ad_id?: string };
  * counts first, division last, which is the only order that is correct at more than one
  * granularity (D10).
  */
-function readTotals(db: DatabaseSync, query: SnapshotQuery): MetricTotals[] {
+/**
+ * **B51** — the eight descriptors for one totals row.
+ *
+ * `ad_ids` is the row's own scope: one ad for a per-ad row, the whole selection for the combined
+ * one. That is what makes the drill-down check the number it was clicked on rather than a
+ * differently-scoped one that happens to be nearby — the combined CPA and `a_03`'s CPA are two
+ * questions, and the descriptor is the query.
+ */
+function descriptorsFor(
+  query: SnapshotQuery,
+  ad_ids: readonly string[],
+  as_of_ingest_seq: number,
+): Record<TraceMetric, TraceDescriptor> {
+  const of = (metric: TraceMetric): TraceDescriptor =>
+    issue({
+      metric,
+      ad_ids,
+      from: query.from,
+      to: query.to,
+      granularity_s: query.granularity_s,
+      as_of_ingest_seq,
+    });
+  return {
+    impressions: of('impressions'),
+    clicks: of('clicks'),
+    spend: of('spend'),
+    ctr: of('ctr'),
+    cpa: of('cpa'),
+    roas: of('roas'),
+    conversions: of('conversions'),
+    value_cents: of('value_cents'),
+  };
+}
+
+function readTotals(db: DatabaseSync, query: SnapshotQuery, as_of_ingest_seq: number): MetricTotals[] {
   const rows: SummedRow[] =
     query.ads === null
       ? (db.prepare(TOTALS_ALL_ADS).all(query.from, query.to) as unknown as SummedRow[])
@@ -526,14 +606,32 @@ function readTotals(db: DatabaseSync, query: SnapshotQuery): MetricTotals[] {
       provisional_conversions: row.provisional_conversions ?? 0,
       provisional_value_cents: row.provisional_value_cents ?? 0,
     };
-    perAd.push({ ad_id: row.ad_id ?? null, ...derive(counts, row.buckets ?? 0) });
+    const ad_id = row.ad_id ?? null;
+    perAd.push({
+      ad_id,
+      ...derive(counts, row.buckets ?? 0),
+      // A per-ad row's descriptors are scoped to that ad alone; `ad_id === null` cannot occur here
+      // (the grouped and per-ad reads both name one), and the combined row is built below.
+      descriptors: descriptorsFor(query, ad_id === null ? [] : [ad_id], as_of_ingest_seq),
+    });
     combined = addCounts(combined, counts);
     buckets += row.buckets ?? 0;
   }
 
   // The combined row last, so `totals[totals.length - 1]` is never the answer a caller wants by
   // accident — it is found by `ad_id === null`, which cannot be confused with an ad.
-  return [...perAd, { ad_id: null, ...derive(combined, buckets) }];
+  // The combined row's scope is the SELECTION — every ad it summed. `query.ads === null` means the
+  // whole portfolio, and the ids are taken from the rows that were actually read rather than from
+  // an `ads` query, so the descriptor names exactly what the number covers.
+  const scope = perAd.map((row) => row.ad_id).filter((id): id is string => id !== null);
+  return [
+    ...perAd,
+    {
+      ad_id: null,
+      ...derive(combined, buckets),
+      descriptors: descriptorsFor(query, scope, as_of_ingest_seq),
+    },
+  ];
 }
 
 /**
@@ -548,7 +646,12 @@ export function totalsOnly(db: DatabaseSync, query: SnapshotQuery): TotalsRespon
   return readTx(db, () => {
     const seq = logPosition.get() as { seq: number };
     const at = new Date().toISOString();
-    return { query, totals: readTotals(db, query), maturity: maturityFor(db, query, at), as_of_ingest_seq: seq.seq };
+    return {
+      query,
+      totals: readTotals(db, query, seq.seq),
+      maturity: maturityFor(db, query, at),
+      as_of_ingest_seq: seq.seq,
+    };
   });
 }
 
@@ -592,7 +695,7 @@ export function snapshot(db: DatabaseSync, query: SnapshotQuery): Snapshot {
       buckets: withState(buckets, new Date().toISOString(), query.horizon_ms),
       // Same transaction, same predicate, same instant as the buckets above — so "sum the rows
       // yourself and compare" is a check on the arithmetic and never a race.
-      totals: readTotals(db, query),
+      totals: readTotals(db, query, seq.seq),
       maturity: maturityFor(db, query, new Date().toISOString(), query.horizon_ms),
       as_of_ingest_seq: seq.seq,
     };

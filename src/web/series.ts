@@ -43,11 +43,25 @@ export type CountPoints = {
  * the minute; hours derive from minutes"), and it stays inside **D10**: counts aggregate, the
  * division comes after. Nothing here divides.
  *
- * ** D46 LANDS ON THIS FUNCTION AT B51. ** Once the server issues a `TraceDescriptor`, this
- * aggregation must use the descriptor's own `granularity_s` rather than the viewport's — otherwise
- * the drill-down replays a different question from the one the number answers, and it can pass by
- * coincidence (`BUILD_PLAN.md` §14). Today there is no descriptor to disagree with, which is why
- * the viewport's granularity is the honest input; at B51 that changes and this comment is the hook.
+ * ** D46 LANDED AT B51, AND NOT WHERE THIS COMMENT EXPECTED IT. ** The rule is consequence 3's:
+ * the client may re-bucket to display granularity, but *"it must re-bucket to the descriptor's own
+ * `granularity_s` — re-bucketing to a different one while forwarding the descriptor asks the
+ * drill-down a question the number does not answer"*, and it can pass by coincidence
+ * (`BUILD_PLAN.md` §14).
+ *
+ * **The argument here cannot be the descriptor, and the reason is the gate.** `planChart` calls
+ * this function once per rung of D20's ladder to DECIDE which rung to draw at (`gate.ts`), and
+ * those calls are hypothetical — three of the four are thrown away. A descriptor cannot be issued
+ * for a granularity nobody has chosen yet, and issuing four would be signing three questions no
+ * number will ever be attached to.
+ *
+ * So the binding is enforced where the question is actually asked — at the trace boundary, on the
+ * server, in arithmetic: `descriptor.ts`'s `narrows()` refuses any drill-down range that is not
+ * exactly one grain of the descriptor's own `granularity_s`, starting on a boundary of its window.
+ * A client that draws at the hour while holding a minute descriptor gets a **400 with the reason**,
+ * never a re-summed number to compare. `App.tsx` asks for descriptors at `plan.granularity_s` —
+ * the rung the gate actually picked — which is what makes the two agree in the normal case; this
+ * check is what makes a disagreement loud rather than plausible.
  *
  * **Missing buckets are ZERO, not a gap — inside the ad's life, and `null` before it (D64).** A bucket
  * exists if and only if an event landed in it, so an absent minute inside a live ad's span is a

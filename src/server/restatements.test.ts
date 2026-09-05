@@ -44,6 +44,9 @@ const WINDOW = {
   // B49: the query now carries the horizon it was resolved at, and `restatements()` defaults to
   // it. These fixtures assert at D13's 72 h; the sweep test below passes its own explicitly.
   horizon_ms: HORIZON_MS,
+  // B51: descriptors are issued at the caller's display grain; `restatements()` does not read it,
+  // and the minute is what `parseSnapshotQuery` defaults to.
+  granularity_s: 60,
 };
 
 function world(t: { after: (fn: () => void) => void }): DatabaseSync {
@@ -163,6 +166,7 @@ test('a window that excludes the bucket excludes the entry — the window is the
     to: new Date(Date.UTC(2026, 8, 6, 0, 0)).toISOString(),
     ads: null,
     horizon_ms: HORIZON_MS,
+    granularity_s: 60,
   };
   assert.equal(restatements(db, sep5).length, 0);
   assert.equal(restatements(db, WINDOW).length, 1);
