@@ -1743,3 +1743,39 @@ visible in output rather than asserted in a comment.
 **Not resolved here:** whether the headline slot should carry novelty at all. §7.1 argues the
 headline wears out *"just slower than video"*, and the symmetric argument would give it a novelty
 window too. §8 does not make that argument and we did not make it for them.
+
+---
+
+### H4 — `DESIGN.md` §10.1's metric union and the code's `MetricKey` name the same metrics differently · **CORRECTED IN CODE, DOCUMENT OWES A LINE**
+
+**What §10.1 says.** The `TraceDescriptor` sketch, written in Phase 2:
+
+```ts
+metric: "impressions" | "clicks" | "spend_cents" | "conversions" | "value_cents"
+      | "ctr" | "cpa" | "roas";
+```
+
+**What the code has said since B38.** `src/shared/metrics.ts`:
+
+```ts
+export type MetricKey = 'impressions' | 'clicks' | 'spend' | 'ctr' | 'cpa' | 'roas';
+```
+
+**Why it is a problem rather than a typo.** The descriptor is **signed** (B51), so the metric name
+is part of the bytes an HMAC covers. Two names for one metric across a signed payload does not fail
+at the boundary that produced it — it fails at the boundary that consumes it, as a descriptor that
+will not verify, and the diagnosis a reader reaches for first is "the key is wrong" rather than
+"the metric is spelled two ways". The six controls on the Signal surface were built from
+`MetricKey` at B38, so the divergence had already been live for eighteen chunks.
+
+**What we did — the code's name wins, and the union widens.** `TraceMetric` in `src/shared/wire.ts`
+is `MetricKey | 'conversions' | 'value_cents'`: `spend` keeps the code's spelling (renaming it
+would touch six controls, the gate, the chart and the totals for a cosmetic gain), and §10.1's two
+extra members are added, because they are performance numbers the headline displays and D34's gate
+is *every* performance number, not the six with a chart control. `formatMetric` widened with it.
+
+**Where it shows up in code.** `src/shared/wire.ts` (`TraceMetric`, with this entry cited),
+`src/web/metrics.ts` (`formatMetric`), `src/server/trace.ts` (`valueOf`).
+
+**Owed:** one line in `DESIGN.md` §10.1 correcting `spend_cents` to `spend`. Not done as a drive-by
+(`CLAUDE.md` §5); it belongs to the next chunk that opens §10.

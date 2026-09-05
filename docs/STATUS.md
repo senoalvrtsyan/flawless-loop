@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **Phase 5 · STAGE 5 IS CLOSED, AND `B50a` LANDED · 57 / 69 chunks**
+**Last updated:** 2026-09-05 · **Phase 5 · STAGE 6 IS CLOSED · 63 / 69 chunks**
 
 ---
 
@@ -97,7 +97,7 @@ in one place and extended in two** by Phase 3 — read it *with* the "What Phase
 | File | What it is |
 |---|---|
 | `docs/BRIEF.md` | The brief. Source of truth. Read it, never recall it. |
-| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. **And §H (new, B25/B26): contradictions in our OWN design docs** — H1 the recovery half-life, H2 `spend`'s missing fee parameter. |
+| `docs/BRIEF_GAPS.md` | Audit register: 52 findings (G01–G52), six passes, 12 blocking each tagged FIX/SPECIFY/NAME. **Plus the extensions section** (E1–**E15**, I1–**I20**) — the assembly source for the README's extensions section. **And §H: contradictions in our OWN design docs** — H1 the recovery half-life, H2 `spend`'s missing fee parameter, H3 novelty's slot composition, **H4 (B51) §10.1's `spend_cents` against the code's `spend`, in a SIGNED payload**. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
 | `docs/DECISIONS.md` | Ratified only — **D1–D63, T1, F1–F4, U8–U9** — nothing deferred: D44/D45 were answered at the B36 gate. **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
 | ~~`docs/CHEATSHEET.md`~~ | **DROPPED** by Seno at the B36 gate, 2026-09-04, and deleted. Not owed at any gate. `DECISIONS.md`'s index table is the one-line-each view now, and it cannot go stale. Recover with `git show e989336:docs/CHEATSHEET.md`. |
@@ -470,8 +470,8 @@ is open.**
 
 | | |
 |---|---|
-| **Current stage** | **Stage 5 · the decision loop (B46–B50) is NEXT.** Stages 0–4 are CLOSED; stage 4 closed with B45 and the whole Signal surface is built. |
-| **Last completed chunk** | **B45**, closing stage 4. Two batches: **G12b** = B44+B45 and **G12a** `912042d` = B41+B42+B43, behind **G11** `baf18c2` (B38a+B38+B39+B40) and **D65–D67** `96e727d`. |
+| **Current stage** | **Stage 7 · packaging (B57–B62) is NEXT.** Stages 0–6 are CLOSED. The traceability spine and the Workbench screen landed as one batch, **G16**. |
+| **Last completed chunk** | **B56**, closing stage 6 — **G16 = B51+B52+B53+B54+B55+B56**, six chunks in one batch at Seno's instruction (*"stage 6 in 1 batch"*), which is one past D48's five-chunk cap and inside the same stage. Six commits, per chunk. **The stop clause did not fire** — no decision was needed, nothing revealed the design wrong, nothing wanted a dependency (`node:crypto` is a built-in, named not asked). Behind it: **B50a** `64baeda`, **D69/D70** `9ecf8bd`, **B49+B50** `6f36400`. Older: **B45**, closing stage 4. Two batches: **G12b** = B44+B45 and **G12a** `912042d` = B41+B42+B43, behind **G11** `baf18c2` (B38a+B38+B39+B40) and **D65–D67** `96e727d`. |
 | **Next gate** | **Stage 5, B46–B50 — the decision loop.** B46 the action console, B47 the decision log surface, B48 generation/diff display, **B49 the horizon sweep (P16)** and **B50 the scenario controls (P17)**. **B49 and B50 are the two remaining single-gated chunks** per §13. **And the stage-4 → 5 seam owes D49's one named question, unanswered as of this line: *"do we reinstate `SCOPE.md` §4 cut #1, decision scoring?"*** — that is `SCOPE.md`'s list, not `BUILD_PLAN.md` §12's, and they number differently. |
 | **Stage 4's gates** | ~~**B36**~~ · ~~**B37**~~ (both single-gated) · ~~**G11** B38a+B38+B39+B40~~ · ~~**G12a** B41+B42+B43~~ · ~~**G12b** B44+B45~~ — **all closed. Stage 4 is done.** |
 | **G12, for the record** | Seno widened the gate again mid-stage: *"carry on through the end of stage 4, B41 → B45, in one or two batches rather than gates of 3–5 … announce the batch in a line, build it, report once."* Run as 3 + 2, which is still inside D48's five-chunk cap, so nothing needed amending. **Neither batch stopped mid-build** — the first time since G7 that a group has not hit the stop clause. |
@@ -480,8 +480,11 @@ is open.**
 | **G9, for the record** | B32+B33. **It stopped mid-build TWICE under D48** — once before the first line for **D58**, once after B32 built and ran for **D59**. That is the stop clause firing on its two distinct triggers: a decision (§3) and *"the chunk reveals the design was wrong"*. Both were caught by measuring rather than trusting: D58 by pricing the divergence before writing the code, D59 by comparing delivered volume against §2.3's own column. |
 | **G7, for the record** | B25+B26+B27, *"the rate equation becomes real"*. It **stopped mid-build at B26** under D48, because B27 could not write `p_ctr` until **D56** was answered; re-announced and finished after the answer. **That is D48's stop clause working as designed** — the first time it fired. |
 | **Stage 2's six gates** | ~~**G1** B12–B14~~ · ~~**G2** B15–B17~~ · ~~**G3** B18+B19~~ · ~~**G4** B20~~ · ~~**G5** B20a+B21–B23~~ · ~~**G6** B24~~ — **all six closed.** |
+| **Chunks ticked** | **63 / 69** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, B38a, B39–B50, **B50a**, **B51–B56**) |
+| **Stage 6's gate** | ~~**G16** B51+B52+B53+B54+B55+B56~~ — closed. **Stage 6 is done.** |
+| **Remaining** | **B57–B62, stage 7 (packaging)** — six chunks. Nothing before them is open. |
 | **In flight** | nothing |
-| **Chunks ticked** | **51 / 68** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, **B38a**, B39–B45) — 68 because **B20a**, **B31a/b**, **B35a** and now **B38a** were added and **B10 was split into B10a/B10b** |
+| **Chunks ticked (older line, superseded)** | **51 / 68** (B01–B09, B10a, B10b, B11–B20, B20a, B21–B30, B31a, B31b, B32–B35, B35a, B36–B38, **B38a**, B39–B45) — 68 because **B20a**, **B31a/b**, **B35a** and now **B38a** were added and **B10 was split into B10a/B10b** |
 | **Cut line status** | nothing cut |
 | **Plan edits, cont.** | **B38a added** (2026-09-04, at the G11 announcement): **D65** was ratified before any code and no numbered chunk owned the rolling viewport it created; folding it into B38 would have put two concerns in one chunk. Lettered, not renumbered — `B39`–`B62` are cited by id across four documents. |
 | **Plan edits, cont.** | **B31 split into B31a/B31b** (2026-09-04, Seno's call): B31 was ~240 diff lines across four files, and B09 at ~230 is what prompted the B10 split. Its verify column already named two separable checks. B31a is the shared account-local clock + `GET /api/sim/world`; B31b is the poll and emission gating. **65 chunks now.** |
@@ -896,19 +899,37 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 - ~~**The scenario-consumption ASSUMPTION**~~ — **RATIFIED as D69** (2026-09-05), with the flip
   condition recorded. The README's named-limits section owes one line: triggers are delivered at
   most once, and a dropped poll response loses one — press the button again.
+- ~~**D69 blocks `B50a`**~~ — answered; `B50a` is built (`64baeda`).
 
-- **D69 IS OWED AND IT BLOCKS `B50a`** — the D68 sub-question Seno has not answered: symmetric
-  6-hour before/after window, or pinned to the decision's own generation boundaries? See the
-  Next-action block and D68's entry. **Stage 5 landed clean, so `B50a` is due and this is the only
-  thing standing in front of it.**
-- **The scenario-consumption ASSUMPTION needs sign-off** before the README's limits section (B50).
-  See the table in the Next-action block; the analysis is in `src/server/sim-world.ts`.
-- **THE BROWSER, still, and there is more of it now.** Stages 4 and 5 were verified headlessly
-  against the real store through the shipped client modules and the real endpoints; `vite build` is
-  clean. **Nobody has clicked any of it.** Uneyeballed: the action console's form and outcome
-  banner, the ▼ generation markers and their label stacking, the horizon control and its sweep
-  caption, the scenario console, and **B42's greyscale check — which now has THREE vertical rules
-  and a ▼ to keep distinct**, not one.
+**Owed by stage 6 (`G16`), none of it blocking B57:**
+
+- **`DESIGN.md` §10.1 says `spend_cents` where the code says `spend`, in a SIGNED payload.**
+  Registered as **`BRIEF_GAPS.md` §H4** with the full reasoning. The code's name won; the document
+  owes one line. Not done as a drive-by (`CLAUDE.md` §5) — it belongs to the next chunk that opens
+  §10.
+- **Descriptors do not survive a server restart** (per-process HMAC key; `TRACE_KEY` overrides).
+  Deliberate — every descriptor is re-issued on the next `/api/snapshot`, which a refresh runs — but
+  it is **a README limit**: a page left open across a restart reads `invalid_signature` on its next
+  click until it is refreshed. The message says so; the README should too.
+- **The drill-down's evidence list is capped at 400 and its slice list at 200**, with the omitted
+  counts always on screen. The **re-sum is over everything**; only the list truncates. A README line,
+  and the reason `evidence_omitted` is on the wire rather than inferred.
+- **`POST /api/trace` costs ~0.6–1.3 s on the seven-day store.** `replay()` reads every click and
+  every conversion in the prefix regardless of window — it must, because a conversion's own `ts` can
+  sit far outside the window it belongs to (B23). Fine for a click; **it is not a per-tick path and
+  must never become one.** Worth a README line beside the `agree` sweep's timing.
+- **Nobody has clicked any of stage 6 either** — see THE BROWSER below, which now covers three
+  stages' worth of surfaces.
+- **THE BROWSER, still, and stage 6 adds the largest surfaces yet.** Stages 4, 5 and 6 were verified
+  headlessly against the real store through the shipped client modules and the real endpoints;
+  `vite build` is clean and every server response above was read as JSON. **Nobody has clicked any
+  of it.** Uneyeballed: the action console's form and outcome banner, the ▼ generation markers and
+  their label stacking, the horizon control and its sweep caption, the scenario console, **B42's
+  greyscale check — now THREE vertical rules and a ▼**, and now also **the drill-down panel** (its
+  three verdict treatments, the counts table, the `as_of` row, the slice chips, the 400-row evidence
+  table), **the eight-step event trace** (whose step 5 and step 8 are the ones that will look
+  cramped), and **the component library's nested version lists**. The drill-down and the trace are
+  the two densest things on the page and neither has been seen.
 
 - **THE BROWSER, still.** G13 was verified the same way stage 4 was — headlessly, against the real
   store, through the shipped client modules (`generations.ts`, `decisions.ts`) and the real
@@ -922,7 +943,10 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
   `-Impl-8.md`. Unchanged by this batch.
 
 - **`docs/CHEATSHEET.md` is DROPPED and deleted** (Seno, 2026-09-04). Nothing is owed for it at any gate. `DECISIONS.md`'s index table is the revise-from view.
-- **`docs/DEMO.md` does not exist yet and is owed from the B36 group onward** (D50). Every stage-4
+- **`docs/DEMO.md` — beats 1–6 are written, and beat 7 is closed by B56** (D50). Beat 8 (kill
+  everything and restart) is B60's. B61 remains the final ordered pass, not a write-from-nothing
+  chunk.
+- ~~**`docs/DEMO.md` does not exist yet**~~ (D50). Every stage-4
   and stage-5 group appends its walkthrough steps as it lands **and says so in its report** — a
   running document nobody reports on is a running document that quietly stops. B61 is then the final
   ordered pass, not a write-from-nothing chunk.
@@ -1096,20 +1120,69 @@ version gap is the first thing to check.
 
 ## Next action
 
-**D69 AND D70 ARE RATIFIED AND RECORDED (`9ecf8bd`), AND `B50a` IS BUILT.** The plan is 69 chunks.
-Stage 5 is closed; **stage 6 (B51–B55, the traceability spine) is next.**
+**STAGE 6 IS CLOSED. `G16` = B51+B52+B53+B54+B55+B56, six chunks, six commits, one batch.** The
+plan is 69 chunks and **63 are ticked**. `tsc` clean, `vite build` clean, **169 tests**, tree clean.
+Everything below was measured against a copy of the seven-day store; `data/loop.sqlite` is untouched
+and has not been reseeded.
 
-**D69** — scenario triggers are **serve-and-mark, at-most-once**, with Seno's flip condition
-recorded: the emitter's `scenario_id` idempotence makes an ack *purely additive*, so if a dropped
-poll ever loses a trigger on camera, the ack simply becomes the mark and nothing that consumes a
-trigger changes. **D70** — `w` is a **symmetric 6 h before/after window**, with any second lever
-inside it flagged as contaminated on the entry rather than normalised away.
+**Stage 7 (packaging, B57–B62) is next, and nothing blocks it.**
 
-**`SCOPE.md` §4 cut #1 is struck through in place, NOT renumbered.** The remaining eight keep their
-numbers because those numbers are cited from code (`fold.ts` says `cut #3`, `components.ts` says
-`cut #7`) and closing the list up would silently repoint every citation at a different cut. Scoring
-now sits in §2 as **P18**. §2–§4 is README-verbatim, but the README does not exist yet, so the
-`SCOPE.md` edit discharges the whole obligation.
+### What stage 6 built, in one paragraph each
+
+**B51 — the descriptor.** Every metric the server sends now carries §10.1's `TraceDescriptor`:
+metric, ads, window, grain, placement rule, log position, HMAC. Eight per totals row, thirteen rows,
+so 104 signatures per read and no measurable cost. `node:crypto` is a **built-in** — same family as
+D8's `node:sqlite` — so no dependency moved; named here rather than asked as a §3 decision.
+`Signature` is a branded string with exactly one producer, and that producer is server-side.
+
+**B52 — the quarantine is a compile error.** Every performance number on the page renders through
+`<Metric>`, whose props require a descriptor. A tail-summed number has no third argument that
+typechecks; a cast compiles and is the line a reviewer greps for, which is D34's own standard.
+`formatMetric` widened from `MetricKey` to `TraceMetric` — `conversions` has no chart control but is
+a performance number, and a hand-formatted cell beside the table would be the ungated second route.
+
+**B53 — the drill-down, and it disagrees when it should.** `POST /api/trace` verifies the HMAC,
+reads the number back from `rollup_minute`, recomputes it from raw `signals` with `replay()`, and
+puts the verdict on screen. `a_03` over six hours: **MATCH**, 10.20× both sides, all eight counts
+identical, 10,481 raw rows. Add 7 impressions to one rollup row by hand → **MISMATCH on the counts
+with ROAS unmoved**, which is why both are compared and why the counts are compared exactly.
+
+**B54 — the rewind, and the defect it exposed.** `a_01`'s 20:01 minute reads 0 conversions at
+ingest_seq 1587167, 3 at 1587170, 6 at 1587173; the difference between the last two is **exactly
+three named `event_id`s** whose `value_cents` sum to 13,752 = 47,701 − 33,949. **Running it showed
+the verdict reading MISMATCH on a correct store**, because a rollup has no `as_of`. `NOT_COMPARABLE`
+now covers that, tested exactly against `MAX(max_ingest_seq)` — and at exactly 1587173 the verdict
+returns to MATCH, so the boundary is right rather than merely conservative.
+
+**B55 — one event, end to end.** §10.4's eight steps as a screen you paste an id into, each step
+naming its table. Verified on five shapes: the 168 h late cascade conversion (credited to its
+click's minute under `g_a_01_002`, bucket restated 6×), a duplicate (two deliveries, one canonical
+row), a rejected delivery (no `signals` row, and the trace says so), an orphan (held at its own
+minute, excluded from CPA/ROAS), and a clock-skewed event rendering as *"30 s EARLY (clamped, I10)"*.
+Step 6 is the only step with no table, and the screen says why.
+
+**B56 — the Workbench screen.** §8's reverse join, computed by scanning `ads`. On the seeded store:
+*"Product demo, 30s — recut, tighter open · 2 versions, live in 3 ads"*, v1 in `a_01` and `a_12`, v2
+in `a_05` — §8's own example, from the store. **Pause `a_01` and it reads live 2 / paused 1**, v1
+splitting into live=1 paused=1; resume and it returns. `/api/verify` 200 after both.
+
+### The three things stage 6 found by measuring rather than by reading
+
+1. **The evidence list in log order showed no conversions.** The first 400 of 10,481 contributors
+   were all impressions, so a ROAS sat above a list containing nothing that earned any revenue.
+   Identical in shape to G14's newest-first sweep sample. Conversions fill the sample first now.
+2. **The rewind cried wolf** (above). Found by using the control, not by reading the code.
+3. **A stale server kept the port** while a "new" one failed to bind, so old descriptors kept
+   verifying and the per-process key looked broken-in-the-safe-direction. Confirmed properly
+   afterwards: a descriptor issued before a restart reads `invalid_signature`, with the cause and
+   the fix in the message.
+
+### One implementation reading, flagged rather than inherited
+
+**`POST /api/trace` narrows and rewinds by RE-SIGNING, never by mutating.** The client never holds a
+descriptor the server did not issue, which is D34's whole mechanism, and it means the response's
+descriptor is itself clickable without a second protocol. The alternative — signing a descriptor per
+chart point — is 1,440 signatures per series and was rejected on cost, not on principle.
 
 ### `B50a` is built and correct, and it has nothing to show on the seeded data
 

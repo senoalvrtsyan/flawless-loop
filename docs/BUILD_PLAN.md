@@ -382,12 +382,12 @@ surfaces on top of it, plus D1's one read-only Workbench screen.
 
 | ☐ | # | Goal | Files | Verify by hand | Spec | Flags |
 |---|---|---|---|---|---|---|
-| [ ] | **B51** | `TraceDescriptor` issuance: every metric the server sends carries a signed descriptor — the query, not the answer. HMAC via `node:crypto` | `src/server/descriptor.ts`, `src/shared/wire.ts` | Every number in the snapshot payload has one; tamper with a descriptor and the trace endpoint rejects it | D§10.1 | **HR5** |
-| [ ] | **B52** | The `<Metric>` component: rendering a performance number **requires** a server-issued descriptor, so tail data cannot produce one | `src/web/Metric.tsx` | Try to render a number without a descriptor and watch `tsc` reject it — the quarantine is compile-time, not convention | D§11 (D34) | **HR5** |
-| [ ] | **B53** | **P12** — drill-down: click any number → `POST /api/trace` → the contributing raw events, the recomputed figure, and an explicit on-screen **pass/fail** against the displayed one | `src/server/trace.ts`, `src/web/Drilldown.tsx` | Click a bucket's ROAS → the event list, the re-sum, and MATCH. Corrupt one rollup row by hand and watch the same click read FAIL | D§10.2 | **HR5** |
-| [ ] | **B54** | `as_of` control on the drill-down: re-run the same descriptor at an earlier log position | `src/web/Drilldown.tsx` | Set `as_of` to just before a late arrival → the previous figure; the difference is exactly the named `event_id`s, each with its lateness | D§10.3 | **HR4 HR5** |
-| [ ] | **B55** | **P13** — `trace <event_id>`: one event → its deliveries → its canonical row → its attribution → the buckets it moved → the metrics that changed → the screen elements affected. **This is the "life of one event" deliverable, executable** | `src/server/trace.ts`, `src/web/EventTrace.tsx` | Paste any `event_id` from the tail and read all eight steps of D§10.4 as selectable rows | D§10.4 | **HR5** |
-| [ ] | **B56** | **P15** — Workbench component screen: the reverse join, per lineage as the headline and per version beneath | `src/web/Components.tsx`, `src/server/components.ts` | "Product demo — 2 versions, live in 3 ads" with the breakdown; pause an ad and the count drops, because `ads.status` is written only by the fold | D§8 | **HR6** |
+| [x] | **B51** | `TraceDescriptor` issuance: every metric the server sends carries a signed descriptor — the query, not the answer. HMAC via `node:crypto` | `src/server/descriptor.ts`, `src/shared/wire.ts` | Every number in the snapshot payload has one; tamper with a descriptor and the trace endpoint rejects it | D§10.1 | **HR5** |
+| [x] | **B52** | The `<Metric>` component: rendering a performance number **requires** a server-issued descriptor, so tail data cannot produce one | `src/web/Metric.tsx` | Try to render a number without a descriptor and watch `tsc` reject it — the quarantine is compile-time, not convention | D§11 (D34) | **HR5** |
+| [x] | **B53** | **P12** — drill-down: click any number → `POST /api/trace` → the contributing raw events, the recomputed figure, and an explicit on-screen **pass/fail** against the displayed one | `src/server/trace.ts`, `src/web/Drilldown.tsx` | Click a bucket's ROAS → the event list, the re-sum, and MATCH. Corrupt one rollup row by hand and watch the same click read FAIL | D§10.2 | **HR5** |
+| [x] | **B54** | `as_of` control on the drill-down: re-run the same descriptor at an earlier log position | `src/web/Drilldown.tsx` | Set `as_of` to just before a late arrival → the previous figure; the difference is exactly the named `event_id`s, each with its lateness | D§10.3 | **HR4 HR5** |
+| [x] | **B55** | **P13** — `trace <event_id>`: one event → its deliveries → its canonical row → its attribution → the buckets it moved → the metrics that changed → the screen elements affected. **This is the "life of one event" deliverable, executable** | `src/server/trace.ts`, `src/web/EventTrace.tsx` | Paste any `event_id` from the tail and read all eight steps of D§10.4 as selectable rows | D§10.4 | **HR5** |
+| [x] | **B56** | **P15** — Workbench component screen: the reverse join, per lineage as the headline and per version beneath | `src/web/Components.tsx`, `src/server/components.ts` | "Product demo — 2 versions, live in 3 ads" with the breakdown; pause an ad and the count drops, because `ads.status` is written only by the fold | D§8 | **HR6** |
 
 > ### ▶ Demo checkpoint 6 — *"and they agree"*
 >
@@ -520,6 +520,65 @@ remains unspent, and step 4 is unchanged.
 ## 14 — Standing rules for every chunk in this plan
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
+
+**The newest (G16 — B51–B56, stage 6):**
+
+- **A rewound `as_of` compared against the rollup reports MISMATCH on a correct store.** The
+  recomputation answers a log PREFIX; `rollup_minute` is the fold of everything applied to it and
+  has no `as_of`. So the one screen built to prove agreement cries wolf every time a reviewer uses
+  its other control — and the number it prints is *correct*, which is what makes it convincing.
+  The verdict is withheld (`NOT_COMPARABLE`) below `MAX(max_ingest_seq)` over the range, which is an
+  exact test rather than a heuristic: at exactly that seq the verdict returns to MATCH.
+- **Comparing only the displayed metric lets a real divergence through.** A ratio can agree while
+  its terms do not — 2/4 and 3/6 are both 0.5 — so a corruption that moves numerator and denominator
+  together is invisible to a ratio check. Measured: adding 7 impressions to one rollup row reads
+  MISMATCH on the counts with ROAS unmoved. The counts are compared **exactly**; only the ratio
+  gets a tolerance, and it needs one (IEEE-754 addition is not associative and the two paths sum in
+  different orders, so `===` would report MISMATCH on a correct store).
+- **An evidence list in log order shows none of the interesting rows.** Measured: the first 400 of
+  `a_03`'s 10,481 contributors over six hours were **all impressions** — not one conversion made the
+  cap, so a ROAS sat above a list containing nothing that earned any revenue. Every number correct,
+  the evidence worthless. Identical in shape to G14's newest-first sweep sample. Conversions fill
+  the sample first.
+- **`replay()` inside `trace()` deadlocks the transaction, not the store.** `readTx` does not nest
+  (`db.ts` says so; SQLite has no nested transactions), so calling `replay()` from inside a read
+  transaction throws *"cannot start a transaction within a transaction"* — loudly, which is the good
+  case. The bad case is the fix that reads as tidier: dropping `trace()`'s own transaction so
+  `replay()` can keep its. Then the rollup read and the raw re-derivation see two instants, and a
+  conversion landing between them reads as a **divergence**. `replayIn()` exists for this.
+- **`JSON.stringify` must never be the signed bytes.** Object serialisation follows insertion order,
+  so two descriptors with identical fields built by two different code paths hash differently and
+  one of them fails to verify — intermittently, depending on which path built it. Nothing errors at
+  the boundary; the drill-down simply refuses a legitimate number, which reads as a traceability bug
+  rather than a serialisation one. `canonical()` is an explicit field list, and the separator must
+  be a character that cannot occur in any field (a `|` lets `ads=["a_1|x"]` and `ads=["a_1","x"]`
+  collide).
+- **`timingSafeEqual` THROWS on unequal lengths.** A one-character `sig` is then a 500 in the server
+  log instead of a rejection on screen, and a reviewer chases the wrong thing. Compare lengths first.
+- **A descriptor's shape must be checked before its signature.** `canonical()` reads nine fields; on
+  a body missing one it builds a string containing `undefined`, computes a perfectly valid HMAC of
+  nonsense, and reports `invalid_signature` for what is actually a malformed request. Same screen,
+  wrong diagnosis.
+- **D46's grain binding cannot be an argument to `pointCounts()`.** The gate calls it once per
+  ladder rung to DECIDE a rung, so three of four calls are hypothetical and no descriptor exists for
+  them. The rule is enforced at the trace boundary instead (`narrows()`), which is also the only
+  place it can fail loudly: a client drawing at the hour while holding a minute descriptor gets a
+  **400 with the reason**, where an unchecked narrowing returns a real number that fails against the
+  displayed figure for a reason that is not corruption.
+- **A lineage's ad count is a SET, not a sum of its versions.** An ad using v1 in one slot and v2 in
+  another is one ad using that lineage; adding the per-version counts reports two. The per-version
+  numbers are ad-*slots* and are summed on purpose, which is exactly what makes the mistake easy.
+- **A component used by no ad must still appear.** `JOIN` instead of `LEFT JOIN` turns a component
+  *library* into a list of what is currently in use — the opposite of what a library is for — and
+  nothing looks wrong, because every row shown is correct.
+- **Descriptors do not survive a server restart, and that is deliberate**, but it must be *said*:
+  the key is per process, so a page left open across a restart gets `invalid_signature` on its next
+  click. Verified. The message names the cause and the fix (refresh); without it the failure reads
+  as tampering.
+- **Verifying against a server you did not restart proves nothing.** A stale process kept the port
+  and silently answered while a "new" one failed to bind — the old descriptors kept verifying and
+  the per-process key looked broken-in-the-safe-direction. Confirm the port is free before
+  concluding anything about a restart.
 
 **The newest (G15 — B50a):**
 

@@ -47,8 +47,8 @@ Eight beats, in the order the brief cares about. Beats are filled in as their ch
 | 3 | The gate refuses to draw a ratio it cannot support | **B39**, B40 | ✅ below |
 | 4 | **Pull a lever, the world responds** — pause `a_12`, its events stop | **B46, B47, B48, B50a** | ✅ below — and the score, with its four limits |
 | 5 | **A late conversion restates a settled bucket** | **B41, B42, B43, B49, B50** | ✅ below — and now causable on demand |
-| 6 | **Walk a number back to its events** | B52, B53 | — |
-| 7 | Configs are versioned; the swap is visible | **B48**, B56 | partly — the boundary and the swap are in beat 4; B56's component screen is still owed |
+| 6 | **Walk a number back to its events** | **B51, B52, B53, B54, B55** | ✅ below — the verdict, the rewind, and one event end to end |
+| 7 | Configs are versioned; the swap is visible | **B48**, **B56** | ✅ — the boundary and the swap are in beat 4; **B56's component screen closes it, below beat 6** |
 | 8 | Kill everything and restart — the world is still there | B60 | — |
 
 ---
@@ -538,6 +538,148 @@ advertiser — different table, different endpoint, and it appears in no decisio
 back **400** — *"multiplier must be a number in [1, 20]"*. Arguments are **refused, never clamped**:
 a silently clamped multiplier puts a figure on screen nobody asked for, and the reviewer then reads
 the resulting backpressure as the model's rather than as the clamp's.
+
+---
+
+## Beat 6 — walk a number back to its events (B51, B52, B53, B54, B55)
+
+**This is hard requirement #5 and the brief's own question**: *"can you trace any number on screen
+back to the raw events beneath it — and do they agree?"* The answer has to be **demonstrated**, not
+claimed, so every step below is a click.
+
+### The quarantine, before any click (B51, B52)
+
+22. **Say it before showing it:** *"Every performance number on this page renders through one
+    component, and that component will not compile without a server-issued descriptor. The
+    descriptor is the **query**, not the answer — which metric, which ads, which window, at which
+    grain, at which log position — and it is HMAC-signed, so the browser cannot mint one."*
+
+    **Then say what that buys:** *"If I wanted to put a number on screen by summing the raw event
+    tail, there is no third argument to `<Metric>` that typechecks. Money on a tail frame is a
+    branded display string — `\"$0.42\"` — and arithmetic on it is a compile error. Three layers,
+    two of them at compile time, and the third is the thing I am about to click."*
+
+    The one exception is named on the surface: the stream-health figures under the tail are real
+    numbers and they describe the **transport**, not the ads.
+
+### The click, and the verdict (B53 / P12)
+
+23. **Click the ROAS figure in the headline.** The panel opens under it with the query in full,
+    then: **displayed** from `rollup_minute`, **recomputed** from raw `signals` with attribution
+    re-derived from zero, and the verdict.
+
+    Measured on the seeded week, `a_03` over six hours: **MATCH · displayed 10.20× · recomputed
+    10.20×**, over 360 buckets and **10,481 raw rows**. Both count sets are shown side by side —
+    9,980 impressions, 129 clicks, 6,933¢ + 1,952¢ spend, 12 conversions, 90,593¢ value — from two
+    routes that share no code.
+
+    **Say:** *"The display path reads the rollup, built incrementally at ingest. The check path
+    reads raw events and recomputes from nothing. If the client did the arithmetic, this would be
+    comparing the client to itself and would prove nothing."*
+
+24. **Point at the evidence list, and at one column in it.** All twelve conversions appear, and each
+    has a `ts` and a **credited minute** that are not the same. Pick the one at **14:58:48 credited
+    to 14:43** and say: *"That is D27-B. A conversion lands in its **click's** minute, not its own —
+    which is why this list looks wrong for about two seconds and then looks right."*
+
+    **Then say why the list is ordered as it is** — it is a measured finding, not a preference:
+    *"In log order the first 400 of 10,481 contributors were all impressions. Not one conversion
+    made the cap, so a ROAS sat above a list containing nothing that earned any revenue. Every
+    number was correct and the evidence was useless. Conversions fill the sample first."*
+
+25. **Break it on purpose.** On a scratch copy, add 7 impressions to one `rollup_minute` row by hand
+    and click the same number again:
+
+    ```
+    VERDICT MISMATCH | displayed impr 1523 | recomputed impr 1516 | roas 5.5559 both sides
+    ```
+
+    **Say:** *"The ratio is unmoved and the counts are not. That is why both are compared and why
+    the counts are compared exactly — a ratio can agree while its terms do not. Undo the edit and
+    the same click reads MATCH."*
+
+### The rewind, which is what makes restatement provable (B54 / §10.3)
+
+26. **Type an earlier `ingest_seq` into the drill-down and press rewind.** Take `a_01`'s minute
+    `2026-08-28T20:01` — the one the `late_cascade` restated six times:
+
+    | as_of | conversions | value | ROAS | verdict |
+    |---|---|---|---|---|
+    | 1587167 | 0 | $0.00 | 0.00× | NOT COMPARABLE |
+    | 1587170 | 3 | $339.49 | 84.87× | NOT COMPARABLE |
+    | 1587173 | 6 | $477.01 | 119.25× | **MATCH** |
+
+    The panel names **exactly three `event_id`s** as the difference between the middle row and the
+    last, each with its own lateness — and their `value_cents` sum to **13,752**, which is exactly
+    47,701 − 33,949.
+
+    **Say:** *"That turns 'a conversion landed late and rewrote Tuesday' from a claim into a diff.
+    And notice the verdict withholds itself on the first two rows rather than saying MISMATCH: the
+    rollup has no `as_of` — it is the fold of everything applied to it — so an earlier prefix is not
+    a check on it. It becomes comparable at exactly 1587173, the bucket's own `max_ingest_seq`."*
+
+    **This one is worth flagging as a finding**: the withheld verdict exists because running the
+    rewind showed the surface crying wolf on a correct store. It was found by using the feature, not
+    by reading the code.
+
+### One event, end to end (B55 / P13)
+
+27. **Copy an `event_id` out of the raw tail — or out of the evidence list above — and paste it into
+    the trace box.** Eight steps come back, each naming the table it came from. On the late cascade's
+    `cc176d2ff5046ee2`:
+
+    - **1 EMIT** — the payload as it arrived, with the caveat stated: a re-serialisation of the
+      parsed element, not the received bytes.
+    - **2 ARRIVE** — `received_at 2026-09-04T19:58:45.571Z`, disposition `accepted`.
+    - **3 STORE** — `ingest_seq 1587173`, conversion on `a_01`, ts `2026-08-28T20:01:44Z`,
+      **168.0 h between emission and arrival**.
+    - **4 ATTRIBUTE** — resolved to click `31a412e21db104d8`, credited to minute **20:01** under
+      generation `g_a_01_002`.
+    - **5 ROLL UP** — that bucket: 6 conversions, $477.01, **RESTATED 6×**.
+    - **6 TRANSPORT** — *"not stored, deliberately"*, with the reason on screen.
+    - **7 PIXEL** — which point moved, and that the timeline gains an entry **at that minute**.
+    - **8 PROVE** — a button that opens the drill-down on that one minute.
+
+    **Say:** *"That is the brief's 'life of one event' deliverable, and it is a control rather than
+    a paragraph. Step 6 is the only step with no table behind it, and the screen says so — which SSE
+    frame carried a bucket is a property of a connection that has closed, and a table recording it
+    would be a projection with a second writer."*
+
+28. **Paste three awkward ids** to show the trace is not a happy path:
+
+    - a **duplicate**: two deliveries, `accepted` then `duplicate_identical`, one canonical row.
+    - a **rejected** delivery: one delivery, **no** `signals` row — *"that is an answer, not an
+      error; the boundary records every delivery it is offered."*
+    - an **orphan**: `orphan_provisional`, no click, held at its **own** minute and excluded from
+      CPA and ROAS until it resolves.
+    - and, if you want the fourth: a **clock-skewed** event, where `ts` is *after* `received_at` and
+      the screen reads **"30 s EARLY (clock skew — clamped, I10)"** with `ts_effective` pulled back.
+
+29. **Close the beat with `npm run agree`** — the same claim swept over every bucket in the store
+    rather than the one you clicked.
+
+    **Say:** *"The drill-down is this check on one number, in front of you. `agree` is it on all of
+    them."*
+
+### And the Workbench screen, which closes beat 7 (B56 / P15)
+
+30. **Scroll to the component library.** Fourteen lineages; one of them has two versions:
+
+    > **Product demo, 30s — recut, tighter open** · video · `vl_04` — **2 versions, live in 3 ads**
+    > · `a_01 a_12 a_05`
+    > &nbsp;&nbsp;&nbsp;&nbsp;`v1` `v_04` — Product demo, 30s · live in **2** · `a_01 a_12`
+    > &nbsp;&nbsp;&nbsp;&nbsp;`v2` `v_05` — recut, tighter open · cut from `v_04` · live in **1** · `a_05`
+
+31. **Pause `a_01` in the console above and scroll back.** `vl_04` reads **live in 2 ads, 1 paused**,
+    and `v1` splits into live=1 paused=1. Resume and it returns to 3.
+
+    **Say:** *"Nothing recomputed a cache and there is no reverse index. `ads.status` is written only
+    by the fold, so this count is exactly as current as the last lever — that is §8's 'kept current
+    as ads launch and die' falling out of the write path rather than needing machinery."*
+
+    **And say what it does not answer:** *"This is 'used in N ads **right now**'. 'At time T' and
+    'ever' are one join away over `config_generations`, which exists for D14's sake regardless. They
+    are a scope cut and the README carries the real query — not a modelling gap."*
 
 ---
 
