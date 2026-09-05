@@ -343,3 +343,18 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
 .drill__slices { list-style: none; display: flex; flex-wrap: wrap; gap: .25rem .75rem;
                  margin: .25rem 0 .5rem; padding: 0; font-size: .76rem; max-height: 9rem;
                  overflow-y: auto; }
+
+/* B55's eight steps. A numbered list rather than a table because the steps are a SEQUENCE — the
+ * number is §10.4's own, so the screen and the design document are one map — and because each
+ * step's detail is a different shape (a payload, a table, a sentence). */
+.trace { display: block; }
+.trace__steps { list-style: none; margin: .6rem 0 0; padding: 0; counter-reset: none; }
+.trace__step { display: flex; gap: .6rem; padding: .35rem 0; border-top: 1px solid var(--border);
+               font-size: .8rem; }
+.trace__n { flex: 0 0 1.4rem; height: 1.4rem; line-height: 1.4rem; text-align: center;
+            border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+            color: var(--ink-muted); }
+.trace__body { flex: 1 1 auto; min-width: 0; }
+.trace__detail { margin-top: .15rem; }
+.trace__payload { font-size: .74rem; margin: .2rem 0; padding: .3rem .5rem; overflow-x: auto;
+                  background: var(--surface-sunk); }

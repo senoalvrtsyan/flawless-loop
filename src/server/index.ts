@@ -22,7 +22,7 @@ import { listComponents, type ComponentRow } from './components.ts';
 import { HORIZON_CHOICES_H, sweep, type SweepResult } from './sweep.ts';
 import { listScenarios, postScenario, type ScenarioResult, type ScenarioRow } from './sim-scenario.ts';
 import { scoreDecisions, type DecisionScore } from './scoring.ts';
-import { parseTraceRequest, trace, type TraceResult } from './trace.ts';
+import { parseTraceRequest, trace, traceEvent, type EventTrace, type TraceResult } from './trace.ts';
 import { HORIZON_MS } from '../shared/config.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -325,6 +325,30 @@ const routes: readonly Route[] = [
       // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
       const result: TraceResult = trace(db, request.descriptor);
       sendJson(res, 200, result);
+    },
+  },
+  {
+    method: 'GET',
+    /**
+     * **B55 / P13 — `trace <event_id>`** (`DESIGN.md` §10.4). The "life of one event" deliverable,
+     * executable: paste any id off the raw tail and read all eight steps as rows.
+     *
+     * A GET with one parameter, unlike `/api/trace`: this takes an identifier, not a signed query,
+     * because an `event_id` is not a number on screen and there is nothing to quarantine. It ENDS
+     * in a descriptor, so the last step hands the reviewer back to the drill-down.
+     */
+    path: '/api/trace/event',
+    handler: (_req, res, url) => {
+      const event_id = url.searchParams.get('event_id');
+      if (event_id === null || event_id.trim() === '') {
+        sendJson(res, 400, { error: 'bad_request', message: 'event_id is required' });
+        return;
+      }
+      // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
+      const body: EventTrace = traceEvent(db, event_id.trim());
+      // 200 even with no deliveries: "this store never saw that id" is an answer to the question,
+      // and a 404 would make a mistyped id look like a broken endpoint.
+      sendJson(res, 200, body);
     },
   },
   {

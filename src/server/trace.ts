@@ -24,7 +24,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
 import { replayIn, type ReplayContribution, type ReplayCounts } from './replay.ts';
-import { narrows, sign, verify } from './descriptor.ts';
+import { issue, narrows, sign, verify } from './descriptor.ts';
 import type { TraceDescriptor, TraceEvidence } from '../shared/wire.ts';
 import { metricValue, type MetricCounts, type MetricKey } from '../shared/metrics.ts';
 import { floorMinute } from '../shared/time.ts';
@@ -393,4 +393,188 @@ export function parseTraceRequest(body: unknown): TraceRequest {
   }
 
   return { ok: true, descriptor: next };
+}
+
+// ---------------------------------------------------------------------------------------------
+// **B55 / P13 — `trace <event_id>`: the life of one event, executable.**
+//
+// `DESIGN.md` §10.4 is a worked example with eight numbered steps, written in Phase 2 as prose.
+// This is that example as a query, so the deliverable the brief asks for (*"the life of one event
+// — emission → stored fact → aggregate → pixel"*, L155) is something a reviewer runs rather than
+// something we wrote down.
+//
+// **It is the same function backwards** (§10.2's table). The drill-down goes number → events; this
+// goes event → number. Both read only logs and projections, and neither writes.
+//
+// The eight steps map onto tables one for one, which is the point — a trace that had to *derive*
+// its own history would be a second implementation of the write path:
+//
+//   1 EMIT       the payload as it arrived            signal_deliveries.payload_json
+//   2 ARRIVE     received_at, ingest_seq, disposition signal_deliveries  (EVERY delivery, D15)
+//   3 STORE      the canonical fact                   signals            (one row, or none)
+//   4 ATTRIBUTE  the click, the minute, the generation conversion_attribution
+//   5 ROLL UP    the bucket it moved                  rollup_minute
+//   6 TRANSPORT  the SSE frame it rode                — stated, not stored (see below)
+//   7 PIXEL      what changed on screen               derived from step 5
+//   8 PROVE      the descriptor to re-check it with   issued here, so the trace ends in a click
+
+/** One delivery of this `event_id` — there can be several, and that IS the dedupe story (D15). */
+export type TraceDelivery = {
+  delivery_seq: number;
+  received_at: string;
+  disposition: string;
+  payload_json: string;
+  payload_hash: string;
+};
+
+/** The bucket this event moved, as it stands now. */
+export type TraceBucket = {
+  ad_id: string;
+  minute_start: string;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  value_cents: number;
+  provisional_conversions: number;
+  restated_at: string | null;
+  restatement_count: number;
+  max_ingest_seq: number;
+};
+
+export type EventTrace = {
+  event_id: string;
+  /** Step 1–2. **Every** delivery, in arrival order — a redelivery is a fact, not a non-event. */
+  deliveries: TraceDelivery[];
+  /** Step 3. `null` when no delivery was ever accepted (rejected, or duplicate of nothing). */
+  canonical: {
+    ingest_seq: number;
+    received_at: string;
+    ts: string;
+    ts_effective: string;
+    ad_id: string;
+    kind: string;
+    source: string;
+    click_id: string | null;
+    cost_cents: number | null;
+    amount_cents: number | null;
+    attributed_click_id: string | null;
+    value_cents: number | null;
+    /** **I10's clamp, made visible**: `ts_effective = MIN(ts, received_at)`, so a future-dated
+     *  event is pulled back and this flag is how a reader sees that it happened. */
+    clamped: boolean;
+  } | null;
+  /** Step 4. Conversions only; `null` for the other three kinds, which need no attribution. */
+  attribution: {
+    state: string;
+    click_event_id: string | null;
+    credited_ad_id: string;
+    credited_minute: string;
+    credited_generation_id: string | null;
+    ad_id_conflict: boolean;
+    resolved_at: string | null;
+    /** The click itself, when it is known — §10.4 step 4 names its `ts` and its ad. */
+    click: { event_id: string; ts_effective: string; ad_id: string } | null;
+  } | null;
+  /** Step 5. The bucket this event landed in — its credited minute, not its own. */
+  bucket: TraceBucket | null;
+  /** Step 8. A signed descriptor for that bucket, so the trace hands off to the drill-down. */
+  descriptor: TraceDescriptor | null;
+  /**
+   * How late it was, in milliseconds — `received_at − ts`. The one derived number here, and it is
+   * a duration rather than a performance figure, so it is outside D34's gate.
+   */
+  late_ms: number | null;
+};
+
+/**
+ * Walk one event from delivery to pixel.
+ *
+ * **Step 6 (TRANSPORT) is deliberately not a stored fact and the surface says so.** Which SSE
+ * frame carried a bucket is a property of a connection that has since closed; recording it would
+ * mean a table written by the flush tick, which is a projection with a second writer (D7). What is
+ * knowable and true is that the bucket's absolute row went out on the next flush, and that any
+ * client resuming from a cursor below `max_ingest_seq` receives it again — which the client
+ * renders from `bucket.max_ingest_seq` rather than from a log we do not keep.
+ */
+export function traceEvent(db: DatabaseSync, event_id: string): EventTrace {
+  return readTx(db, () => {
+    const deliveries = db.prepare(`
+      SELECT delivery_seq, received_at, disposition, payload_json, payload_hash
+        FROM signal_deliveries WHERE event_id = ? ORDER BY delivery_seq
+    `).all(event_id) as unknown as TraceDelivery[];
+
+    const signal = db.prepare(`
+      SELECT ingest_seq, received_at, ts, ts_effective, ad_id, kind, source,
+             click_id, cost_cents, amount_cents, attributed_click_id, value_cents
+        FROM signals WHERE event_id = ?
+    `).get(event_id) as unknown as Omit<NonNullable<EventTrace['canonical']>, 'clamped'> | undefined;
+
+    if (signal === undefined) {
+      // A delivery with no `signals` row: rejected, or a duplicate whose original is another
+      // `event_id`. Both are real outcomes and the trace shows the deliveries and stops there,
+      // rather than reporting "not found" for an event the store demonstrably received.
+      return { event_id, deliveries, canonical: null, attribution: null, bucket: null, descriptor: null, late_ms: null };
+    }
+
+    const canonical = { ...signal, clamped: signal.ts_effective !== signal.ts };
+
+    const attrRow = db.prepare(`
+      SELECT state, click_event_id, credited_ad_id, credited_minute, credited_generation_id,
+             ad_id_conflict, resolved_at
+        FROM conversion_attribution WHERE event_id = ?
+    `).get(event_id) as unknown as {
+      state: string; click_event_id: string | null; credited_ad_id: string;
+      credited_minute: string; credited_generation_id: string | null;
+      ad_id_conflict: number; resolved_at: string | null;
+    } | undefined;
+
+    let attribution: EventTrace['attribution'] = null;
+    if (attrRow !== undefined) {
+      const click = attrRow.click_event_id === null
+        ? null
+        : (db.prepare('SELECT event_id, ts_effective, ad_id FROM signals WHERE event_id = ?')
+            .get(attrRow.click_event_id) as unknown as
+              { event_id: string; ts_effective: string; ad_id: string } | undefined) ?? null;
+      attribution = { ...attrRow, ad_id_conflict: attrRow.ad_id_conflict === 1, click };
+    }
+
+    // **The bucket is the CREDITED minute's, never the event's own** — D27-B, and getting this
+    // wrong is the whole failure this trace exists to make visible. A conversion timestamped
+    // Thursday moved TUESDAY's bucket; showing Thursday's would be a trace that contradicts the
+    // chart while looking entirely reasonable.
+    const ad_id = attribution?.credited_ad_id ?? canonical.ad_id;
+    const minute = attribution?.credited_minute ?? floorMinute(canonical.ts_effective);
+    const bucket = (db.prepare(`
+      SELECT ad_id, minute_start, impressions, clicks, conversions, value_cents,
+             provisional_conversions, restated_at, restatement_count, max_ingest_seq
+        FROM rollup_minute WHERE ad_id = ? AND minute_start = ?
+    `).get(ad_id, minute) as unknown as TraceBucket | undefined) ?? null;
+
+    return {
+      event_id,
+      deliveries,
+      canonical,
+      attribution,
+      bucket,
+      // Step 8: the trace ends in a clickable question. The metric is the one this event's kind
+      // actually moved, so the handoff lands on a number this event is part of rather than on a
+      // generic one — a conversion hands off to ROAS, an impression to impressions.
+      descriptor:
+        bucket === null
+          ? null
+          : issue({
+              metric:
+                canonical.kind === 'conversion' ? 'roas'
+                : canonical.kind === 'click' ? 'clicks'
+                : canonical.kind === 'spend' ? 'spend'
+                : 'impressions',
+              ad_ids: [bucket.ad_id],
+              from: bucket.minute_start,
+              to: new Date(Date.parse(bucket.minute_start) + 60_000).toISOString(),
+              granularity_s: 60,
+              as_of_ingest_seq: bucket.max_ingest_seq,
+            }),
+      late_ms: Date.parse(canonical.received_at) - Date.parse(canonical.ts),
+    };
+  });
 }

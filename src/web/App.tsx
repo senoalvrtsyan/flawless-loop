@@ -54,6 +54,7 @@ import {
   perAd,
 } from './metrics.ts';
 import { Drilldown } from './Drilldown.tsx';
+import { EventTrace } from './EventTrace.tsx';
 import { Metric, MetricCell } from './Metric.tsx';
 import { Portfolio } from './Portfolio.tsx';
 import { Chart } from './Chart.tsx';
@@ -912,6 +913,12 @@ export function App() {
             README only. Above the tail, below the numbers it interprets. */}
         <h2 className="section">Fatigue — component pairs losing their click-through rate</h2>
         <FatigueFlag report={fatigue} />
+
+        {/* **B55 / P13 — the life of one event.** Directly ABOVE the raw tail, because the tail is
+            where a reviewer gets an `event_id` to paste: the two are one gesture, and putting the
+            trace at the top of the page would mean scrolling for the input to it. */}
+        <h2 className="section">Trace one event — emission to pixel, eight steps (§10.4)</h2>
+        <EventTrace onDrill={setDrilling} />
 
         {/* B44 — the raw tail and, in its own treatment, the transport telemetry (D34's named
             exception). Last on the page, below every performance number, so the quarantine is
