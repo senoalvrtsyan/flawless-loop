@@ -16,7 +16,9 @@ All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are clo
 `npx vite build` clean, **172 tests**, **0 broken links** across every markdown file, tree clean.
 
 1. **`npm start`** — migrate, seed if empty, run everything, print the URL. First run ~5m20s.
-2. **`README.md`** is the front door, ~1,540 lines, written for a reviewer. Framing, the three-way
+2. **`README.md`** is the front door, ~1,600 lines, written for a reviewer. It opens with **`Run it`
+   (which now leads with the fresh-clone seed cost) and a grouped Contents list.** Then framing, the
+   three-way
    split, the storage model, the persistence boundary, aggregation with its three option tables,
    `SCOPE.md` §2–§4 verbatim, late conversions end to end, the misbehaviour table, 28 named limits,
    the extensions register, the life of one event with real ids, signal-from-noise, the mock data
@@ -30,7 +32,9 @@ All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are clo
 5. **`docs/DECISIONS.md`**'s index table is the one-line-each view of D1–**D73**.
 
 **What to be careful about, in one list:** `data/loop.sqlite` is the seven-day store and reseeding
-it costs 5m20s and 750 MB, so read it and use a scratch `DB_PATH` for anything that writes · run
+it costs **5m20s and 749 MB**, so read it and use a scratch `DB_PATH` for anything that writes ·
+**`SIM_BACKFILL_DAYS=5` is NOT a rescue — measured at 4m13s / 587 MB, it saves 21%, because 201.8 s
+of the 253 s is *generate* and the rate model does not get cheaper per day** · run
 **one server per store** (descriptors are signed per-process) · `npx vite build`, not just `tsc`,
 catches a server import leaking into the client bundle · nothing writes a projection except
 `apply()` (**D7**) · `BUILD_PLAN.md` §14 holds ~95 traps that will not fail loudly, each written the
@@ -67,6 +71,9 @@ because a list that only shows what remains loses the account of what was paid.
 | 13 | What I'd build next | ✅ `6557eac` — the cut line as an ordered queue, plus four process findings |
 | 14 | AI process artifact pointer | ✅ was already done |
 | — | `docs/DEMO_SCRIPT.md`, 15 min + ten questions | ✅ `f33ab40` |
+| + | **The fresh-clone first run** — not in P6, raised at the end of the session | ✅ `89563f5` — `.gitignore` excludes `*.sqlite`, so a clone ships no store and a reviewer's first five minutes *are* the seed. Now a callout, with the 5-day option **measured** rather than extrapolated and honestly described as a 21% saving |
+| + | **A Contents list** | ✅ `89563f5` — grouped by what the brief asks for, all anchors machine-checked |
+| + | **The phase 6 process capture** | ✅ `bbe4709` — `docs/ai-sessions/06-phase-6-packaging.md`, in the 00–04 convention |
 
 **The two decisions phase 6 owed were answered before anything was built on them** — `eebec52`:
 
@@ -96,9 +103,20 @@ population — so it is reproducible. Three findings are worth carrying forward:
 3. **The seeded past-72 h tail is right-censored at `T0`** — 47% of backfilled clicks fall in the last
    three days — so it reads 0–0.7% against a designed 2.3–4.6%. B35's handover is what re-derives
    them live, and the store's earliest *live* event has a `ts` from before `T0`, which proves it.
+4. **`SIM_BACKFILL_DAYS=5` had never been run end to end and timed.** It is 4m13s / 587 MB against
+   5m20s / 749 MB — **a 21% saving, not a rescue** — because 201.8 s of the 253 s is the *generate*
+   phase, which runs per simulated second. The README says so plainly and recommends seeding in
+   advance instead. **Four days is the floor**: below it no bucket is old enough to have been
+   declared settled, so the flagship restatement moment cannot happen at all.
 
-**Nothing in phase 6 changed code, and nothing in it changed a design document.** It wrote seven
-files and edited two (`README.md`, `DECISIONS.md`).
+**Nothing in phase 6 changed code, and nothing in it changed a design document.** It wrote five files
+(`SCHEMA.md`, `MOCK_DATA.md`, `DECISION_DIGEST.md`, `DEMO_SCRIPT.md`, `ai-sessions/06-…`) and edited
+three (`README.md`, `DECISIONS.md`, this one).
+
+**One curation item is outstanding and is not a phase 6 item.**
+`docs/ai-sessions/05-phase-5-Impl-13.md` landed during this session as a **5,476-line raw terminal
+export** — the state sessions 9–11 were in before B62 curated them. It should get the same treatment
+in its own pass; it was deliberately not absorbed into phase 6.
 
 ---
 
@@ -204,6 +222,7 @@ exports for sessions 9, 10 and 11 are now curated captures (**B62**).
 | `docs/SCHEMA.md` | **Phase 6.** The as-built schema, read from `data/loop.sqlite` with `sqlite_master`: four-category answer with measured row counts, ten indexes with the query each serves, the DDL verbatim, the pragmas, and a parsed diff against `DESIGN.md` §2. |
 | `docs/MOCK_DATA.md` | **Phase 6.** The mock data model **measured** — diurnal, fatigue, novelty, overdispersion, pacing and the lag CDF, designed curve against shipped world, every query shown. The three findings above live here in full. |
 | `docs/DECISION_DIGEST.md` | **Phase 6.** All 77 rows (D1–D73, T1, F1–F4, D35p) reduced to **what each forecloses** — the column `DECISIONS.md`'s index table does not carry. |
+| `docs/ai-sessions/06-phase-6-packaging.md` | **Phase 6.** The process capture for this phase, in the `00`–`04` convention — prompts, the two decisions, four findings, and what the session deliberately did not do. |
 | `docs/DEMO_SCRIPT.md` | **Phase 6.** The 15-minute subset of `DEMO.md` (**D72**) plus the ten hardest reviewer questions, each answered in 1–2 sentences with its decision id. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
 | `docs/DECISIONS.md` | Ratified only — **D1–D63, T1, F1–F4, U8–U9** — nothing deferred: D44/D45 were answered at the B36 gate. **Use the index table at the top as the lookup:** most have their own `## DECISION #n` entry; nine (D3, D4, D15, D16, D18, D19, D21, D23, D25) are rows inside the Phase-2 ratification block and will not be found by grepping for a heading. Seno's verbatim wording sits in per-pass "wording of record" tables. |
