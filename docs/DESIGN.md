@@ -899,7 +899,7 @@ trace endpoint, agreement test. The mechanism is **D31**.
 
 ```ts
 type TraceDescriptor = {
-  metric: "impressions" | "clicks" | "spend_cents" | "conversions" | "value_cents"
+  metric: "impressions" | "clicks" | "spend" | "conversions" | "value_cents"
         | "ctr" | "cpa" | "roas";
   ad_ids: string[];
   from: string; to: string;                 // minute-aligned UTC, half-open [from, to)
@@ -910,6 +910,14 @@ type TraceDescriptor = {
   sig: string;                              // HMAC, node:crypto — server-issued, unforgeable
 };
 ```
+
+**Corrected at B60 (`BRIEF_GAPS.md` §H4).** This union said `spend_cents` where the code signs
+`spend` — `src/shared/metrics.ts`'s `MetricKey`, widened to `TraceMetric` by B52. The code's name
+won, for two reasons: `spend` is a *displayed metric*, not a column (it is the read-time sum of
+`click_cost_cents + spend_cents`, per the brief's own split at L79-80), and the string is inside the
+**signed** bytes — so a document and an implementation disagreeing here is not a naming quibble, it
+is two different signatures over what a reader would call the same query. `conversions` and
+`value_cents` keep their column names because they *are* columns.
 
 The descriptor rides on every metric value the server sends. It is **the query, not the answer** —
 which is what makes the walk-back a proof rather than a second opinion.

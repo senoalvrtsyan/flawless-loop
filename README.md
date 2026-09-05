@@ -36,7 +36,7 @@ Every subsequent `npm start` skips the seed and comes up in about a second.
 |---|---|
 | `npm start` | Migrate, seed if empty, run everything, print the URL |
 | `npm run dev` | The same three processes, without the migrate/seed preflight |
-| `npm test` | `node --test` — 171 tests |
+| `npm test` | `node --test` — 172 tests |
 | `npm run agree` | Re-derive every rollup bucket from the raw log and diff it (P14) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npx vite build` | Bundle the client — the check that no server module leaked into it |
@@ -555,3 +555,402 @@ accrual plus fees" with no fee parameter anywhere (**named as a limit** — ther
 code signs `spend` (**corrected in the code's favour**). All four were found by printing what the
 code computes and diffing it against the table it was transcribed from, which is the only reason
 they were found at all — each would have run without erroring and been wrong by a constant factor.
+
+---
+
+## The life of one event
+
+The brief asks for one event traced end to end: emission → stored fact → aggregate → pixel. It is
+also **executable** — `GET /api/trace/event?event_id=…`, and a screen in the app that you paste an
+id into. What follows is a real capture, not a hand-written illustration.
+
+> **Which store.** Everything below was captured from `data/loop.sqlite` — the seven-day store,
+> seeded with `SIM_SEED=flawless-loop`, with the live emitter running. **A fresh `npm start` seeds a
+> different world**: event ids are derived from `(seed, absolute unix second, index)`, so your `T0`
+> gives you different ids. To find your own equivalent, ask the store for a late one:
+>
+> ```sql
+> SELECT s.event_id, ca.credited_minute,
+>        ROUND((julianday(s.received_at) - julianday(ca.credited_minute)) * 24, 1) AS late_h
+>   FROM conversion_attribution ca JOIN signals s ON s.event_id = ca.event_id
+>  WHERE ca.state = 'resolved' ORDER BY late_h DESC LIMIT 5;
+> ```
+
+The event is **`c4804d05ed499439`** — a conversion that arrived **147.4 hours after the minute it
+belongs to**, and restated a bucket that had been settled for three days.
+
+### 1 — Emission
+
+The simulator drew this conversion for a click it had emitted six days earlier, and posted it in a
+batch to `POST /api/ingest`. It was never stored by the simulator: the emitter holds no durable
+state and never opens the database (**D32**). Two lags separate the click from this line, and the
+model keeps them apart (**I18**): a **purchase** lag of 5.98 days (the buyer decided later) and a
+**reporting** lag of 3.94 hours (the platform told us later).
+
+### 2 — Stored delivery — `signal_deliveries`
+
+Every delivery is retained, accepted or not, before anything is interpreted.
+
+```json
+{ "delivery_seq": 1601622,
+  "received_at":  "2026-09-05T04:29:42.827Z",
+  "disposition":  "accepted",
+  "payload_json": "{\"event_id\":\"c4804d05ed499439\",\"ts\":\"2026-09-05T00:33:05.956Z\",\"ad_id\":\"a_01\",\"event\":\"conversion\",\"attributed_click_id\":\"1d377b1cf2b164c9\",\"value_cents\":17989}",
+  "payload_hash": "846285db1a61e32e0a5523d4ca8395b1e18d3a8cd558d69a6592e45a366b2b27" }
+```
+
+One delivery, so this event was sent once. A redelivery would appear here as a second row with the
+same `payload_hash` and the disposition `duplicate_identical`, and would move no number anywhere.
+(`payload_json` is the parsed element re-serialised, not the received bytes — see
+[Named limits](#named-limits).)
+
+### 3 — Canonical fact — `signals`
+
+```json
+{ "ingest_seq": 1586705, "received_at": "2026-09-05T04:29:42.827Z",
+  "ts": "2026-09-05T00:33:05.956Z", "ts_effective": "2026-09-05T00:33:05.956Z",
+  "ad_id": "a_01", "kind": "conversion", "source": "live",
+  "attributed_click_id": "1d377b1cf2b164c9", "value_cents": 17989, "clamped": false }
+```
+
+`ingest_seq` **1586705** is this event's position in the total order, and it is the number every
+later step is answerable at. `ts_effective` equals `ts` because the emitter's clock was not ahead of
+ours; had it been, `ts_effective` would be clamped to `received_at` and `clamped` would read `true`
+(**I10**), with both values kept.
+
+### 4 — Interpretation — `conversion_attribution`
+
+This is the step the design exists for. The conversion carries `attributed_click_id`
+`1d377b1cf2b164c9`; the click that claimed that id is event **`3c82297378ead37e`**, whose
+`ts_effective` is **`2026-08-30T01:05:43.000Z`**.
+
+```json
+{ "state": "resolved", "click_event_id": "3c82297378ead37e",
+  "credited_ad_id": "a_01", "credited_minute": "2026-08-30T01:05:00.000Z",
+  "credited_generation_id": "g_a_01_002", "ad_id_conflict": false,
+  "resolved_at": "2026-09-05T04:29:42.827Z" }
+```
+
+Three separate rules land here, and each is a ratified decision rather than an implementation
+detail:
+
+- **D27-B** — the conversion is credited to **its click's minute**, `2026-08-30T01:05`, not to its
+  own. That is what makes CPA and ROAS cohort metrics and CTR a live one.
+- **D14** — it is credited to the generation live at the **click's** `ts`, `g_a_01_002` (which
+  ran `v_04` + `h_01` from 2026-08-28T16:03:18.970Z). Here that generation happens to still be
+  `a_01`'s current one, so nothing dramatic hangs on it — but the rule is that the *click's*
+  generation is credited, not the current one, which is what makes a swap-then-late-conversion
+  attribute to the creative that actually earned it rather than to whatever is running today.
+- **I8/G30** — had the conversion's own `ad_id` disagreed with its click's, the **click** would win
+  and `ad_id_conflict` would read `true`. It did not, so it reads `false`.
+
+Note that this row lives in a table of its own, not as columns on `signals`. A late *click* changes
+the interpretation of a conversion, and if the interpretation lived on the log row we would be
+mutating the log.
+
+### 5 — Aggregate — `rollup_minute`
+
+```json
+{ "ad_id": "a_01", "minute_start": "2026-08-30T01:05:00.000Z",
+  "impressions": 72, "clicks": 4, "conversions": 1, "value_cents": 17989,
+  "provisional_conversions": 0,
+  "restated_at": "2026-09-05T04:29:42.827Z", "restatement_count": 1,
+  "max_ingest_seq": 1586705 }
+```
+
+The bucket for 01:05 on 30 August settled at 01:05 on 2 September, 72 hours later. This event
+arrived on 5 September at 04:29 — **3.14 days past settling** — and reopened it. `restated_at` is stamped at **the arriving event's
+`received_at`**, not at wall-clock now (**D38**), which is the difference between an honest
+restatement and tens of thousands of spurious ones stamped by the seed loop.
+
+`restatement_count` is 1: this bucket has been restated exactly once, by this event.
+
+### 6 — Metrics that changed
+
+Nothing is stored here — every ratio is derived at read from the counts above (**D10**). What
+changed is any window that contains 30 August 01:05: ROAS and CPA moved for `a_01`, and CTR did not,
+because CTR's terms both landed at their own `ts` five days earlier.
+
+This is the only step in the trace with no table behind it, and the app's trace screen says so
+rather than inventing one.
+
+### 7 — Pixels, and the proof they agree
+
+The number a strategist sees for that minute is ROAS **61.187…×**. Every displayed number carries a
+signed `TraceDescriptor` (**E14 / D31**) naming the query that produced it, and clicking it runs the
+comparison for real: read the number back out of `rollup_minute`, recompute it from raw `signals`
+through a **different function** (`replay()`, which never reads a rollup), and put the verdict on
+screen.
+
+```
+POST /api/trace  { "descriptor": { "metric":"roas", "ad_ids":["a_01"],
+                                   "from":"2026-08-30T01:05:00.000Z",
+                                   "to":"2026-08-30T01:06:00.000Z",
+                                   "granularity_s":60, "placement_rule":"cohort_click_time",
+                                   "as_of_ingest_seq":1586705, "sig":"2b2d27ae…" } }
+
+  verdict           MATCH
+  displayed         61.18707482993197        (from rollup_minute)
+  recomputed        61.18707482993197        (from raw signals, via replay())
+  counts            impressions 72 · clicks 4 · click_cost 280¢ · spend 14¢
+                    conversions 1 · value 17989¢          — identical on both sides
+```
+
+**Both the ratio and the eight counts are compared, and the counts are compared exactly.** A ratio
+can agree while its terms do not — 2/4 and 3/6 are both 0.5 — so a corruption that moves numerator
+and denominator together is invisible to a ratio check. Measured: adding 7 impressions to one rollup
+row by hand reads MISMATCH on the counts with ROAS unmoved. Only the ratio gets a tolerance, and it
+needs one, because IEEE-754 addition is not associative and the two paths sum in different orders.
+
+### 8 — And the same number one `ingest_seq` earlier
+
+The descriptor's `as_of_ingest_seq` is a control, not a label. Rewind it by **one**:
+
+```
+POST /api/trace  { "descriptor": {…}, "as_of_ingest_seq": 1586704 }
+
+  verdict           NOT_COMPARABLE
+  recomputed        conversions 0 · value 0¢   →  ROAS 0
+  (displayed        conversions 1 · value 17989¢ →  ROAS 61.187…×, rollup_as_of 1586705)
+```
+
+**That is the restatement, proved in two calls.** At log position 1586704 the minute of 30 August
+01:05 had earned nothing; at 1586705 it had earned $179.89. One event moved it, four days after the
+fact, and the raw log can be re-read at either position to show it.
+
+The verdict is `NOT_COMPARABLE` rather than `MISMATCH`, and that distinction was found by *using*
+the control rather than by reading the code. A recomputation answers a log **prefix**;
+`rollup_minute` is the fold of everything applied to it and has no `as_of`. So the one screen built
+to prove agreement would have cried wolf every time a reviewer used its other control — and the
+number it printed would have been *correct*, which is what makes that failure convincing. The
+verdict is withheld below `MAX(max_ingest_seq)` over the range, which is an exact test rather than a
+heuristic: at exactly 1586705 it returns to `MATCH`.
+
+---
+
+## Component performance across swaps
+
+The Workbench is sketched (D1), and one read-only screen is backed by the live reverse join. The
+question the brief asks — *"used in twelve live ads"* — hides three queries, and only the first is
+built:
+
+| Query | Needs | Status |
+|---|---|---|
+| used in N ads **right now** | current fold + ad status | **built** |
+| used in N ads **at time T** | `config_generations` + the fold's origin | *one join from working* |
+| used in N ads **ever** | complete swap history + origin | *one join from working* |
+
+Rows 2 and 3 are unbuilt but not unavailable, because `config_generations` exists for D14's sake
+regardless. So rather than describe them, here is the **real query, run against the real store**:
+
+```sql
+-- "How did each video perform, honestly, across every swap?" — the temporal reverse join
+SELECT g.video_id,
+       SUM(r.impressions) AS impressions, SUM(r.clicks) AS clicks,
+       SUM(r.click_cost_cents + r.spend_cents) AS spend_cents,
+       SUM(r.conversions) AS conversions,   SUM(r.value_cents) AS value_cents
+  FROM rollup_minute r
+  JOIN config_generations g
+    ON g.ad_id = r.ad_id
+   AND r.minute_start >= g.valid_from
+   AND (g.valid_to IS NULL OR r.minute_start < g.valid_to)
+ GROUP BY g.video_id
+ ORDER BY impressions DESC;
+```
+
+Its output on `data/loop.sqlite`, **25 ms**:
+
+```
+video_id  impressions  clicks  spend_cents  conversions  value_cents
+v_04           641161    7004       547677          859      7761488
+v_01           415424    3866       159923           69       396425
+v_02           168488    2886       167709          155      1098177
+v_03           110223    2424       104310          218      2090582
+v_06           105756     895        53463           22       121345
+v_05            58662     370        35415           58       448378
+```
+
+`v_04` and `v_05` are the interesting pair: **the same lineage, two versions** — "Product demo,
+30s" and its recut. Derived from the rows above:
+
+| | impressions | CTR | CVR (conv/click) | ROAS |
+|---|---|---|---|---|
+| `v_04` (v1) | 641,161 | 1.09% | 12.3% | 14.2× |
+| `v_05` (v2, the recut) | 58,662 | 0.63% | 15.7% | 12.7× |
+
+**And this is where a component-level number has to be presented with its limits or it lies.** The
+recut converts better per click and clicks worse per impression — but `v_04` is live in two ads on
+two audiences and has been for a week, while `v_05` is live in one ad on one audience and is
+younger, so the comparison is confounded by audience, by lifetime and by fatigue accrual (which
+under **D35** is keyed to the `(lineage × audience)` pair, not to the component). What the query
+gives you honestly is *what each version actually earned while it was actually configured*. It does
+not give you a verdict on the recut, and the screen does not pretend to.
+
+The point is that the question is **askable at all**: it is unanswerable in the brief's own model,
+because nothing in it names *"the config of `a_12` as of Sunday"*.
+
+**The query is correct because of D27-B.** A conversion sits in its click's minute, and the
+generation covering that minute is the one D14 credits — so joining rollups to generations by time
+is not an approximation of the *attribution rule*. The only imprecision left is the straddled
+minute: a swap at 14:03:27 puts all of 14:03 on one side. One minute, one ad, per swap.
+
+The screen in the app answers the same question per lineage and per version, which is the display
+question §8 says the seed data exists to make concrete:
+
+```
+Unboxing hook, 15s              — 1 version,  live in 3 ads
+   v1  v_01                     — live 3: a_02, a_04, a_11
+Founder story, 45s              — 1 version,  live in 2 ads
+   v1  v_02                     — live 2: a_03, a_09
+UGC testimonial, 20s            — 1 version,  live in 2 ads
+   v1  v_03                     — live 2: a_06, a_08
+Product demo, 30s — recut,      — 2 versions, live in 3 ads
+tighter open
+   v1  v_04                     — live 2: a_01, a_12
+   v2  v_05  (from v_04)        — live 1: a_05
+Before / after, 12s             — 1 version,  live in 2 ads
+   v1  v_06                     — live 2: a_10, a_07
+```
+
+**"Kept current as ads launch and die" falls out of the write path rather than needing machinery**:
+`ads.status` is written only by the fold, so the count is exactly as current as the last decision.
+Pause `a_01` and the Product demo lineage reads *live 2 / paused 1* on the next poll, with v1
+splitting into live 1 / paused 1; resume and it returns.
+
+Computed on read by scanning `ads`, not maintained as an index. At twelve ads the scan is free, and a
+maintained reverse index would be a second thing to keep in step with the fold — a projection whose
+only justification would be a scale we do not have. Calling a twelve-row scan an index would be
+dressing up.
+
+**What the strategist manages** (**D4**): *you decide on ads, you learn about components.* Every
+lever carries `ad_id`, so the ad is unavoidably the unit of **action**; fatigue and reuse are only
+legible at the component level, so that is the unit of **analysis**. Saying that explicitly is a
+better answer to the brief's question than picking one.
+
+---
+
+<a id="component-versioning-copy-on-write"></a>
+
+## Component versioning: copy-on-write
+
+The brief asks directly: *"mutate in place (twelve live ads silently change), copy-on-write, or
+immutable once live. Pick one and defend it."*
+
+**Chosen: copy-on-write** (**D3**). Editing a live component creates a new `component_id` in the
+same lineage; existing ads keep pointing at the old version; moving an ad to the new version is a
+`swap_component` decision with a rationale.
+
+```ts
+interface Component {
+  component_id: string;
+  kind: "video" | "image" | "headline" | "body_copy";
+  payload: string;
+  created_at: string;
+  lineage_id: string;        // E10 — stable across versions
+  version: number;           // E11 — 1-based
+  parent_id: string | null;  // E12
+}
+```
+
+**Mutate in place is disqualified, not merely worse.** It retroactively falsifies history: last
+week's metrics become attributed to text that did not exist last week. That breaks the criterion this
+whole build is organised around — any number on screen walks back to the raw events underneath it —
+and, unlike every other choice here, **it cannot be undone**, because the overwritten payload is
+gone. The brief flags the hazard itself and it is right to.
+
+**Copy-on-write beats immutable-once-live on the same guarantee for less machinery.** Immutability
+needs a computed liveness predicate — *"has this component ever been referenced by a live ad"* —
+which is a reverse join over ad status *and* the decision log. Copy-on-write gets the identical
+history guarantee with no predicate, and it turns propagation into an explicit, logged
+`swap_component` with a rationale, which is precisely the levers-only model the brief asks for.
+Immutable-once-live is copy-on-write plus a friction step.
+
+**What it costs.** The library grows, and the UI must group by lineage or it looks cluttered — which
+is why the reverse join answers per-lineage *and* per-version.
+
+**The honest scope note.** No component editor ships, so **nothing exercises this at runtime.** The
+three fields exist and the seed data contains one two-version lineage (`v_04` → `v_05`, with
+`parent_id` set), so the read path and the display question above are real answers off real data.
+The *write* path is a position defended in prose — which is what the brief asks for, and it is worth
+being precise about the difference rather than letting a reviewer discover it.
+
+---
+
+<a id="check-it-yourself"></a>
+
+## Check it yourself
+
+Hard requirement #5 asks that any number on screen walk back to the raw events underneath it and
+that the two **agree** — and that we build a way to *demonstrate* it rather than claim it. There are
+four, at three different levels, and they are deliberately not the same mechanism.
+
+| Check | What it proves | Cost on the seven-day store |
+|---|---|---|
+| **Click any number** (P12) | *This* number, re-derived from raw `signals` by a different function, agrees — with the eight counts compared exactly | 0.6–1.3 s |
+| **`GET /api/verify`** (D55) | **All four projections**, rebuilt from the logs from zero through the real `apply()` into `TEMP` shadows, hash-match what is stored | **11.5 s**, `200` clean / `409` divergent |
+| **`npm run agree`** (P14) | Every stored bucket's counts re-derived from raw in one ordered whole-log pass — a *second* implementation, so a bug in `apply()` cannot hide itself | **4.0 s** over 1,587,720 events and 71,696 buckets |
+| **`GET /api/trace/event`** (P13) | One event's whole life, table by table | instant |
+
+Measured just now, against the live store with the emitter running:
+
+```
+$ curl -s localhost:8787/api/verify | jq '{ok, checked, duration_ms}'
+{ "ok": true,
+  "checked": { "ads":                    { "rows":    12, "hash_matched": true },
+               "config_generations":     { "rows":    24, "hash_matched": true },
+               "conversion_attribution": { "rows":  1389, "hash_matched": true },
+               "rollup_minute":          { "rows": 71689, "hash_matched": true } },
+  "duration_ms": 11517 }
+
+$ npm run agree
+[agree] 1587720 events -> 71696 recomputed buckets, 71696 stored buckets, in 3819 ms
+[agree] NOT diffed — run /api/verify for these:
+[agree]   columns     first_written_at, restated_at, restatement_count, max_ingest_seq
+[agree]   projections ads, config_generations, conversion_attribution
+[agree] OK — every stored bucket's COUNTS agree with the raw event log.
+```
+
+**The sweep states its own limits on every run, and that is deliberate.** *"Every stored bucket
+agrees with the raw event log"* is a narrower guarantee than it sounds: `agree` never reads
+`conversion_attribution`, so a corrupted `credited_generation_id` passes it. `/api/verify` catches
+that. Neither is redundant, and a reader who only ran one should know which half they have.
+
+**Two different code paths, on purpose.** `replay()` reads raw `signals` and never touches
+`rollup_minute` — enforced by a test — because a walk-back that read the rollup would be comparing
+the display path to itself. `/api/verify` goes the other way and rebuilds *through* the real
+`apply()`, so it catches a drifted **store**; `agree` recomputes *without* it, so it catches wrong
+**code**. Hand-edit one `rollup_minute` row and both catch it, for those two different reasons.
+
+---
+
+## Repository map
+
+| Path | What is in it |
+|---|---|
+| `docs/BRIEF.md` | The brief. The source of truth, read rather than recalled. |
+| `docs/BRIEF_GAPS.md` | 52 audit findings (G01–G52) against the brief, the extensions register (E1–E15, I1–I20), and §H — contradictions found in **our own** design documents. |
+| `docs/DECISIONS.md` | D1–D71, each with its options, what was chosen, the rationale in the human's words, its consequences, and **what it forecloses**. The index table at the top is the one-line-each view. |
+| `docs/SCOPE.md` | What is real, what is sketched, what is cut, ordered cheapest-to-reinstate-first. §2–§4 is the block copied into this file. |
+| `docs/DESIGN.md` | The data model, the DDL, the persistence boundary, late conversions end to end, the fold, the reverse join, traceability. |
+| `docs/SIMULATOR.md` | The mock data as a design artifact: the rate equation, diurnal and day-of-week shape, fatigue and novelty, pacing, the lag mixture, noise, injected misbehaviours, determinism, and a measured parameter appendix. |
+| `docs/BUILD_PLAN.md` | 69 chunks with per-chunk verification, plus §14 — the ~90 traps that will not fail loudly, each written the day it was found. |
+| `docs/DEMO.md` | The walkthrough. Eight beats, followable cold. |
+| `docs/STATUS.md` | Written to resume the repo cold with no memory of the conversation. |
+| `docs/ai-sessions/` | The AI process artifact — one capture per phase plus one per implementation session. |
+| `src/server/` | HTTP, ingest, `apply()` (**the only projection writer**), fold, attribution, settlement, snapshot, SSE, verify, trace, scoring. |
+| `src/sim/` | The emitter and the seeder. **Never opens the store** (D32) — it reaches it over HTTP. |
+| `src/web/` | The React client. No durable state, and no number it computes that the server did not sign. |
+| `src/shared/` | The types, the timestamp invariant, the ratio arithmetic — one implementation each, imported by both sides. |
+
+## AI process artifact
+
+`docs/ai-sessions/` is the process record the brief asks for: one capture per phase (`00`–`04`) and
+one per implementation session, holding the prompts, the decision points and the turning points
+rather than a keystroke transcript. `docs/ai-sessions/PHASE_PROMPTS.md` holds the phase prompts
+themselves.
+
+The working method is in [`CLAUDE.md`](CLAUDE.md), and it has two rules that did most of the work.
+**The model does not make design decisions; it surfaces them** — 71 of them, each with its
+alternatives and its reversal cost, answered by a human whose exact words are recorded. And **no
+code before design**: phases 0 through 4 produced documents and nothing on disk outside `docs/`,
+which is why `DESIGN.md` could be wrong on paper — where it was cheap — rather than in a schema.

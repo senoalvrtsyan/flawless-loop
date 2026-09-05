@@ -1746,7 +1746,7 @@ window too. §8 does not make that argument and we did not make it for them.
 
 ---
 
-### H4 — `DESIGN.md` §10.1's metric union and the code's `MetricKey` name the same metrics differently · **CORRECTED IN CODE, DOCUMENT OWES A LINE**
+### H4 — `DESIGN.md` §10.1's metric union and the code's `MetricKey` name the same metrics differently · **CLOSED — document corrected at B60**
 
 **What §10.1 says.** The `TraceDescriptor` sketch, written in Phase 2:
 
