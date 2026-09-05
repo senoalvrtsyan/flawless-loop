@@ -101,10 +101,20 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
 
   // A new descriptor is a new question: reset the rewind box and the baseline with it, or the
   // "as of N, was M" line would be comparing two different windows.
+  //
+  // **And clear the ANSWER — B71.** Without this the panel kept the previous metric's verdict,
+  // counts, evidence and slices on screen while the new one was in flight, under a title that had
+  // already switched: click impressions, then clicks, and for the length of a raw re-derivation the
+  // page showed impression rows under "Walk it back — clicks". That is the one thing this surface
+  // exists to make impossible — a number that does not answer the question above it — and on a
+  // 24 h portfolio drill-down, which re-derives over ~315,000 raw rows, the window is seconds, not
+  // milliseconds. Blank and honest beats stale and plausible.
   useEffect(() => {
     if (descriptor === null) return;
     setAsOf('');
     setBaseline(null);
+    setResult(null);
+    setError(null);
     return run(descriptor, {}, true);
   }, [descriptor, run]);
 
@@ -113,12 +123,18 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
   const metric = descriptor.metric;
   const changed = diffAgainstBaseline(result, baseline);
 
+  // A rewind re-asks the SAME question at a different `as_of`, so the answer on screen stays
+  // internally consistent (the query line reads its own `result`'s window and position). It is
+  // still not the answer being waited for, so it is marked rather than left to look final.
+  const stale = pending && result !== null;
+
   return (
-    <section className="drill">
+    <section className={stale ? 'drill drill--stale' : 'drill'}>
       <header className="drill__head">
         <h3 className="drill__title">
           Walk it back — <code>{metric}</code>
         </h3>
+        {stale ? <span className="drill__pending">answering…</span> : null}
         <button type="button" className="drill__close" onClick={onClose}>close</button>
       </header>
 
@@ -135,7 +151,18 @@ export function Drilldown({ descriptor, onClose }: DrilldownProps) {
       {error !== null ? (
         <p className="drill__verdict drill__verdict--fail">{error}</p>
       ) : result === null ? (
-        <p className="drill__query">{pending ? 'replaying the log…' : 'no answer yet'}</p>
+        <p className="drill__query">
+          {pending ? (
+            <>
+              <strong>replaying the log…</strong> — re-deriving <code>{metric}</code> from raw{' '}
+              <code>signals</code> with attribution rebuilt from zero. A whole-portfolio window is
+              hundreds of thousands of rows; narrowing to one ad and one hour is roughly two orders
+              of magnitude fewer.
+            </>
+          ) : (
+            'no answer yet'
+          )}
+        </p>
       ) : (
         <>
           <p
