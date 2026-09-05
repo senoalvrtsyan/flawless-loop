@@ -410,6 +410,13 @@ surfaces on top of it, plus D1's one read-only Workbench screen.
 | [x] | **B61** | Demo script: the **final ordered pass** over `docs/DEMO.md`, including the **refresh test and the restart test** as written steps a stranger can follow. **D50: the document is written incrementally from the B36 group onward** — every stage-4/5 group appends its steps as it lands and says so in its report — so this chunk is a tidy-up, not a write-from-nothing | `docs/DEMO.md` | Follow it cold, start to finish, on a clean clone, and time it | — | **HR1** |
 | [x] | **B62** | AI process artifact: export sessions 04–06 to `docs/ai-sessions/`; final `STATUS.md` refresh. **No cheatsheet** — `CHEATSHEET.md` was dropped 2026-09-04 | `docs/ai-sessions/`, `docs/STATUS.md` | Six captures, one per phase, **plus one per implementation session (`-Impl-1` … `-Impl-12`)**; `STATUS.md` alone plus `CLAUDE.md` resumes the repo cold | `CLAUDE.md` §9 | — |
 
+**THIS PLAN IS COMPLETE — 69 of 69 chunks ticked, 2026-09-05.** Stage 7 landed as one batch (`G17`).
+Note the boundary: **stage 7 is the BUILD PLAN's packaging, not the phase gate's.**
+`docs/ai-sessions/PHASE_PROMPTS.md` § P6 asks for a fourteen-section README and a
+`docs/DEMO_SCRIPT.md`; this stage delivered eight of those sections and `docs/DEMO.md`. The
+remaining work is phase 6 and it is tabulated in `docs/STATUS.md` § "Phase 6 — the gap, precisely".
+**Phase 6 writes documents, not chunks** — nothing below is owed.
+
 > ### ▶ Demo checkpoint 7 — *"shippable"*
 >
 > Clean clone, `npm i && npm start`, and a stranger has the whole thing in one command. The README

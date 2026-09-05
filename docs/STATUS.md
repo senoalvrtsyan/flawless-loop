@@ -3,15 +3,22 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **PHASE 5 IS CLOSED — 69 / 69 chunks. THE BUILD IS COMPLETE.**
+**Last updated:** 2026-09-05 · **PHASE 5 CLOSED, 69 / 69 chunks · PHASE 6 (P6, packaging) IS OPEN**
 
 ---
 
 ## If you are reading this cold
 
-**There is nothing left to build.** All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven
-stages are closed, and `README.md` exists. `tsc` clean, `npx vite build` clean, **172 tests**, tree
-clean.
+**PHASE 5 IS CLOSED. PHASE 6 (PACKAGING, `PHASE_PROMPTS.md` § P6) IS THE LAST GATE AND IT IS OPEN.**
+
+All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are closed, and the app is
+finished. `tsc` clean, `npx vite build` clean, **172 tests**, tree clean.
+
+**Do not confuse the two packagings.** `BUILD_PLAN.md` stage 7 (B57–B62) was the *build plan's*
+packaging and is done. `PHASE_PROMPTS.md` § **P6** is the *phase gate's* packaging and is a
+**superset** of it — six of its fourteen README sections are missing or partial, and it asks for a
+`docs/DEMO_SCRIPT.md` with ten reviewer questions that does not exist. **See
+[Phase 6 — the gap, precisely](#phase-6-the-gap) below before writing anything.**
 
 1. **`npm start`** — migrate, seed if empty, run everything, print the URL. First run ~5m20s.
 2. **`README.md`** is the front door and is written for a reviewer, not for you. It carries the
@@ -28,8 +35,66 @@ catches a server import leaking into the client bundle · nothing writes a proje
 `apply()` (**D7**) · `BUILD_PLAN.md` §14 holds ~95 traps that will not fail loudly, each written the
 day it was found.
 
-**If work resumes**, the open items are in [What is owed](#what-is-owed) below — none of them block
-anything, and the largest (`B33a`, the fault split) is a plan edit that is Seno's call.
+**Carry-over items from the build** are in [What is owed](#what-is-owed) below — none of them block
+phase 6, and the largest (`B33a`, the fault split) is a plan edit that is Seno's call.
+
+---
+
+<a id="phase-6-the-gap"></a>
+
+## Phase 6 — the gap, precisely
+
+`PHASE_PROMPTS.md` § P6 asks for a fourteen-section README and a `docs/DEMO_SCRIPT.md`. Stage 7 built
+a README with eight of those fourteen and a `docs/DEMO.md`. **This table is the whole of phase 6's
+remaining work** — it was produced by reading P6 against the file, not from memory.
+
+| P6 § | Asked for | State |
+|---|---|---|
+| 1 | What this is, and how to run it in one command | ✅ **done** — header + `## Run it` |
+| 2 | **Framing — how I read the brief and what I think the product actually is** | ❌ **missing.** Nothing in the README says what we think the product *is*. Source: `SCOPE.md` §1, D1, D4, D26 |
+| 3 | Scope verbatim from `SCOPE.md` | ✅ **done** — byte-checked by `src/shared/docs.test.ts` |
+| 4 | Storage model — table / log / derived / cached, **including the schema** | ⚠️ **partial.** The four-category table is there; **the DDL is not.** Source: `DESIGN.md` §2, 11 `CREATE TABLE`s |
+| 5 | The persistence boundary and its defence | ✅ **done** |
+| 6 | Aggregation strategy — **keep the pros/cons table** | ⚠️ **partial.** The prose and the choices are there; **D9's, D10's and D29's option tables are not.** Source: `DESIGN.md` §4 |
+| 7 | **Late-arriving conversions end to end**, then the misbehaviour table | ⚠️ **partial.** The misbehaviour table is verbatim; **the end-to-end walkthrough is not.** Source: `DESIGN.md` §5 (§5.1–§5.6). Note the README's *life of one event* is a worked example of this, not a substitute for the mechanism |
+| 8 | The life of one event, real ids from a real run | ✅ **done** — `c4804d05ed499439`, every id resolves |
+| 9 | **Separating signal from noise — the heuristic and its stated limits** | ❌ **missing as a section.** The pieces exist and are scattered: D20's gate, D33's maturity curve, §19's fatigue flag, D19/D70/D71's scoring. Source: `SIMULATOR.md` §19, `DESIGN.md` §4.5 |
+| 10 | **Mock data model — fatigue curve, diurnal rhythm, noise model, lag distribution. Show the shapes.** | ❌ **missing entirely, and it is hard requirement #7** (*"the mock data is a design artifact"*). This is the single biggest gap. Source: `SIMULATOR.md` §3–§13 and §21's measured parameter appendix |
+| 11 | Extensions and corrections to the brief — the push-back, not buried | ✅ **done** — E1–E15, I1–I20, §H |
+| 12 | **Decision log — the `DECISIONS.md` digest, each with what it forecloses** | ❌ **missing.** 71 decisions; `DECISIONS.md`'s index table is the digest source but *forecloses* lives in the per-decision entries |
+| 13 | **What I'd build next, and what I'd do differently with another week** | ❌ **missing.** Sources: `SCOPE.md` §4's cut line (ordered cheapest-first, which is literally "what I'd build next"), and `STATUS.md`'s owed list for "differently" |
+| 14 | How I worked with AI tooling — pointer to the process artifact | ✅ **done** — `## AI process artifact` |
+| — | **`docs/DEMO_SCRIPT.md`** — a **15-minute** walkthrough, plus **the ten hardest questions a reviewer could ask**, each answered in one or two sentences from `DECISIONS.md` | ❌ **missing.** `docs/DEMO.md` exists, is eight beats and **20–25 minutes**, and was followed cold in a browser at B61. It has no questions section and a different filename |
+
+### The two decisions phase 6 owes before it writes a line
+
+Both are `CLAUDE.md` §3 decisions — they have defensible alternatives and they change what gets
+built. **Neither should be taken by the model.**
+
+**A — `DEMO_SCRIPT.md` against the `DEMO.md` that exists.** P6 names a 15-minute script; we have a
+tested 20–25-minute one. Options: (a) rename `DEMO.md` → `DEMO_SCRIPT.md`, trim to 15 minutes, add
+the ten questions — one file, but the trimmed beats lose the ⚑ findings that came from following it;
+(b) keep `DEMO.md` as the full tested reference and write `DEMO_SCRIPT.md` as a 15-minute subset that
+points at it — two files, no loss, some duplication; (c) keep the name `DEMO.md`, add the questions,
+and state the divergence from P6's filename.
+
+**B — how much of this goes *in* the README.** It is already 957 lines. Sections 4, 6, 7, 10 and 12
+are the heavy ones — the DDL, three option tables, the late-conversion mechanism, the mock-data
+shapes and a 71-row decision digest could roughly double it. Options: (a) one long README, because a
+reviewer reads one file; (b) README as the front door with linked appendices under `docs/`;
+(c) README carries §10 and §12 in *summary* with the full material staying in `SIMULATOR.md` and
+`DECISIONS.md`, which are already written and already good.
+
+### What phase 6 must not do
+
+- **No new numbers.** P6 says *"pull real numbers and real ids from an actual run. Nothing
+  invented."* Every figure in `SIMULATOR.md` §21 was measured; quote those rather than recomputing,
+  and if you do recompute, say which store.
+- **`data/loop.sqlite` is the seven-day store.** Read it; use a scratch `DB_PATH` for anything that
+  writes. Reseeding costs 5m20s and 750 MB.
+- **`SCOPE.md` §2–§4 is README-verbatim and byte-checked.** If phase 6 moves scope, the block moves
+  with it and `src/shared/docs.test.ts` will say so.
+- **The app is finished.** Phase 6 writes documents. If it wants to change code, that is a decision.
 
 ---
 
@@ -1227,6 +1292,12 @@ version gap is the first thing to check.
 69 chunks and **all 69 are ticked**. `tsc` clean, `npx vite build` clean, **172 tests**, tree clean.
 
 **What a reviewer does:** `npm i && npm start`, then `README.md`, then `docs/DEMO.md`.
+
+**What the NEXT SESSION does: phase 6.** Not more chunks — `BUILD_PLAN.md` is finished. The work is
+`PHASE_PROMPTS.md` § P6, and the gap against what exists is tabulated in
+[Phase 6 — the gap, precisely](#phase-6-the-gap) at the top of this file. **Two decisions come
+first** (the `DEMO_SCRIPT.md`/`DEMO.md` relationship, and how much of the new material goes inside a
+README that is already 957 lines); both are in that section, and neither is the model's to take.
 
 **What stage 7 measured, all against the real seven-day store with the emitter running:**
 
