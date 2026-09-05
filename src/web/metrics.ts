@@ -254,12 +254,45 @@ export async function fetchSweep(
  * the chart and the timeline are answered at, or the log would say "scoring in 68 h" beside a chart
  * already drawn as settled.
  */
+export type ScoresResponse = {
+  horizon_h: number;
+  /** **D71** — the window these scores were answered at. The caption names it. */
+  window_h: number;
+  /** D70's ratified 6 h, so the surface can say when it is NOT answering at it. */
+  default_window_h: number;
+  byDecision: Map<string, DecisionScore>;
+};
+
+/**
+ * **B50a / P18, and D71's second parameter.**
+ *
+ * `horizon_h` governs *when* a score may be shown (both windows past settlement); `window_h`
+ * governs *what it is measured over*. Two independent knobs, and shortening only one of them still
+ * yields nothing — which is why the response echoes both and the caption prints both.
+ *
+ * The whole envelope is returned, not just the map: D71's ratification is conditional on the
+ * caption naming the window each score was answered at, and a bare `Map` would leave the surface
+ * printing whatever the control currently says rather than what the SERVER answered. Those differ
+ * for one tick after every change, which is exactly when a reader would be misled.
+ */
 export async function fetchScores(
   signal: AbortSignal,
   horizonH?: number,
-): Promise<Map<string, DecisionScore>> {
-  const res = await fetch(`/api/scores${horizonH === undefined ? '' : `?horizon_h=${horizonH}`}`, { signal });
+  windowH?: number,
+): Promise<ScoresResponse> {
+  const params = [
+    horizonH === undefined ? null : `horizon_h=${horizonH}`,
+    windowH === undefined ? null : `window_h=${windowH}`,
+  ].filter((p): p is string => p !== null);
+  const res = await fetch(`/api/scores${params.length === 0 ? '' : `?${params.join('&')}`}`, { signal });
   if (!res.ok) throw new Error(`scores: ${res.status} ${res.statusText}`);
-  const body = (await res.json()) as { scores: DecisionScore[] };
-  return new Map(body.scores.map((s) => [s.decision_id, s]));
+  const body = (await res.json()) as {
+    horizon_h: number; window_h: number; default_window_h: number; scores: DecisionScore[];
+  };
+  return {
+    horizon_h: body.horizon_h,
+    window_h: body.window_h,
+    default_window_h: body.default_window_h,
+    byDecision: new Map(body.scores.map((s) => [s.decision_id, s])),
+  };
 }

@@ -57,3 +57,20 @@ export const CONVERSION_LAG_CUTOFF_MS = 7 * 24 * 60 * 60 * 1000;
  * correct by construction and untested in the demo window (DESIGN §5.3).
  */
 export const ACCOUNT_TZ = 'America/New_York';
+
+/**
+ * **D71 — the scoring window choices, in hours.** `?window_h=` on `GET /api/scores`.
+ *
+ * D70's **6 h is first because it is the ratified default and the documented figure**; the rest
+ * descend to a quarter hour, which is short enough that a lever pulled during a demo produces a
+ * score inside it. The caption names which one a score was answered at — Seno's condition on D71,
+ * because a score at 15 minutes and a score at 6 hours are different claims.
+ *
+ * Here rather than in `scoring.ts` for the reason G14 measured at B49: a client importing a VALUE
+ * from `src/server/` drags `node:sqlite` into the bundle, and `tsc` has nothing to say about it —
+ * it fails only at `vite build`.
+ */
+export const WINDOW_CHOICES_H = [6, 2, 1, 0.25] as const;
+
+/** **D70's ratified `w`, in hours** — the default and the figure the README and the caption quote. */
+export const SCORING_WINDOW_H = 6;

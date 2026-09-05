@@ -22,10 +22,21 @@
 // buys cleanliness with normalisation; this buys legibility and pays with a label — and because the
 // contamination is already computed here, a pinned column would be additive rather than a rewrite.
 //
+// **`w` IS A READ PARAMETER — D71**, `?window_h=`, beside B49's `?horizon_h=`. D70's 6 h stays the
+// default and the documented figure; the parameter shifts a READ. It exists because D70's fixed
+// window made P18 undemonstrable: a lever pulled on camera cannot be scored for six hours no matter
+// what the horizon is, and the seeded week has no mid-week levers to score instead. That is
+// verbatim the situation **F2** named for the lateness horizon, and this is the same answer B49
+// gave — which is why the two parameters have the same shape and the same refusal behaviour.
+//
+// **The two knobs are independent and the surface has to say which is which**: the HORIZON governs
+// *when a score is allowed to be shown* (both windows past settlement), the WINDOW governs *what it
+// is measured over*. Shortening only one of them still yields nothing.
+//
 // **This module writes nothing and stores nothing.** There is no `score` column and there must not
-// be: a score is a function of (the decision log, the rollups, the horizon, the read clock), and
-// three of those four move. Storing it would be a projection that changes without an event —
-// exactly what `settlement.ts` refuses for the same reason (D7, D54).
+// be: a score is a function of (the decision log, the rollups, the horizon, **the window**, the read
+// clock), and four of those five move. Storing it would be a projection that changes without an
+// event — exactly what `settlement.ts` refuses for the same reason (D7, D54).
 
 import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
@@ -33,8 +44,23 @@ import { HORIZON_MS } from '../shared/config.ts';
 import { MINUTE_MS } from '../shared/time.ts';
 import { ZERO_COUNTS, addCounts, derive, type MetricCounts, type MetricSet } from '../shared/metrics.ts';
 
-/** **D70: `w` = 6 h, symmetric.** One constant, one reader, quoted in the UI beside the number. */
+/**
+ * **D70: `w` = 6 h, symmetric.** The ratified default and the documented figure.
+ *
+ * **D71 makes it a floor, not a fixture**: `?window_h=` moves the read, and absent it every caller
+ * gets exactly this. The constant stays because it is what the README, the caption and the tests
+ * quote — a parameter with no named default is a number nobody can cite.
+ */
 export const SCORING_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * The windows the control offers, in hours. **D71**, and the same shape as `HORIZON_CHOICES_H`.
+ *
+ * 6 h first because it is the ratified default; the rest descend to a quarter hour, which is short
+ * enough that a lever pulled on camera scores inside a demo. In `shared/` — not here — for the
+ * reason G14 measured: a client importing a value from `src/server/` drags `node:sqlite` into the
+ * bundle and `tsc` says nothing about it.
+ */
 
 /**
  * Which metric a score is expressed in.
@@ -124,6 +150,8 @@ export function scoreDecisions(
   db: DatabaseSync,
   at: string = new Date().toISOString(),
   horizonMs: number = HORIZON_MS,
+  /** **D71.** The half-width of the symmetric window. Defaults to D70's ratified 6 h. */
+  windowMs: number = SCORING_WINDOW_MS,
 ): DecisionScore[] {
   const atMs = Date.parse(at);
 
@@ -166,10 +194,10 @@ export function scoreDecisions(
     return rows.map((r): DecisionScore => {
       const tsMs = Date.parse(r.ts);
       const bounds = {
-        before_from: floorMinuteMs(tsMs - SCORING_WINDOW_MS),
+        before_from: floorMinuteMs(tsMs - windowMs),
         before_to: floorMinuteMs(tsMs),
         after_from: floorMinuteMs(tsMs),
-        after_to: floorMinuteMs(tsMs + SCORING_WINDOW_MS),
+        after_to: floorMinuteMs(tsMs + windowMs),
       };
       const beforeRaw = counts(r.ad_id, bounds.before_from, bounds.before_to);
       const afterRaw = counts(r.ad_id, bounds.after_from, bounds.after_to);
@@ -178,6 +206,12 @@ export function scoreDecisions(
 
       // D70: any OTHER lever on this ad inside either window. Half-open on both, matching the
       // count windows exactly — a decision on the boundary belongs to the window that contains it.
+      //
+      // **D71 consequence 5: this follows the WINDOW, so it is recomputed per read.** A second
+      // lever inside a shortened window is a different set from one inside 6 h, and the flag
+      // describes the window that was asked for rather than the ratified one. Carrying the 6 h
+      // answer at a 15-minute window would flag levers that are provably outside the counts being
+      // compared — a contamination claim about evidence the score never saw.
       const contaminated_by = (byAd.get(r.ad_id) ?? [])
         .filter((d) => d.seq !== r.decision_seq)
         .filter((d) => d.ms >= Date.parse(bounds.before_from) && d.ms < Date.parse(bounds.after_to))
@@ -225,13 +259,31 @@ export function scoreDecisions(
       const afterValue = metric === 'cpa' ? after.cpa_cents : after.ctr;
 
       if (beforeValue === null || afterValue === null || beforeValue === 0) {
+        // **The detail must name WHICH side is missing**, and the version that did not was wrong on
+        // the real store: `pause a_12` reads **3,001 impressions before and 0 after**, and the
+        // sentence said *"neither window has enough delivery"* — inviting a reader to conclude the
+        // ad was under-delivering before the lever, when the before-window had a perfectly good
+        // CTR and only the after-window was empty. Found at D71's verification, not by reading.
+        //
+        // This is the same distinction `no_before_window` already draws for `launch` and §14
+        // already names: *"structurally empty" and "too little evidence" are different statements*.
+        const missing =
+          beforeValue === null || beforeValue === 0
+            ? afterValue === null
+              ? 'neither window'
+              : 'the before-window'
+            : 'the after-window';
+        const unit = cpaUsable ? 'CPA' : 'CTR';
         return {
           ...base, score: null,
           withheld: {
             reason: 'no_evidence',
-            detail: cpaUsable
-              ? 'the before-window has no usable CPA to compare against'
-              : 'neither window has enough delivery for a CTR',
+            detail:
+              `${missing} has no ${unit} to compare` +
+              (missing === 'the after-window'
+                ? ` — the before-window has ${before.impressions.toLocaleString('en-US')} impressions,` +
+                  ' so this is the lever or the end of the data, not under-delivery'
+                : ''),
           },
         };
       }

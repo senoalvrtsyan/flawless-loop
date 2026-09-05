@@ -73,12 +73,16 @@ import type { ScenarioRow } from '../server/sim-scenario.ts';
 // of `node:sqlite` so the client can re-derive a streamed row's state at a swept horizon with the
 // SAME function the server stamps with, rather than a second copy of the rule (B49).
 import { bucketState } from '../server/settlement.ts';
-import { HORIZON_MS } from '../shared/config.ts';
+import { HORIZON_MS, SCORING_WINDOW_H, WINDOW_CHOICES_H } from '../shared/config.ts';
 import type { SweepResult } from '../server/sweep.ts';
 import type { DecisionScore } from '../server/scoring.ts';
+import type { ScoresResponse } from './metrics.ts';
 import './app.css';
 
 /** The window choices. Minutes, because that is the bucket unit the store speaks (D28). */
+/** One allocation, so a render with no scores yet does not mint a new empty Map every pass. */
+const EMPTY_SCORES: ReadonlyMap<string, DecisionScore> = new Map();
+
 const WINDOWS = [
   { label: '15m', minutes: 15 },
   { label: '1h', minutes: 60 },
@@ -221,8 +225,23 @@ export function App() {
    * rule is the horizon's: sweeping to 2 h releases scores that were withheld at 72 h, and a log
    * still saying "scoring in 68 h" beside a chart drawn as settled would be the disagreement P16
    * exists to avoid, moved one section down the page.
+   *
+   * **D71** — the whole envelope is held, not just the map, because the ratification requires the
+   * caption to name **the window the server answered at**. Printing `windowH` (the control) instead
+   * of `scores.window_h` (the answer) would misstate the claim for one tick after every change,
+   * which is exactly the tick a reader is looking at it.
    */
-  const [scores, setScores] = useState<ReadonlyMap<string, DecisionScore>>(new Map());
+  const [scores, setScores] = useState<ScoresResponse | null>(null);
+
+  /**
+   * **D71 / P18** — the half-width of the scoring window, in hours. **D70's 6 h is the default and
+   * the documented figure**; this control shifts a read and writes nothing.
+   *
+   * A sibling of `horizonH` above and deliberately NOT merged with it: the horizon governs *when* a
+   * score may be shown, the window governs *what it is measured over*. One control doing both would
+   * make the two indistinguishable in the one place the difference matters.
+   */
+  const [windowH, setWindowH] = useState<number>(SCORING_WINDOW_H);
 
   /**
    * Toggling from "all" selects that ad ALONE rather than deselecting it out of twelve.
@@ -357,9 +376,9 @@ export function App() {
         void fetchScenarios(controller.signal)
           .then(setScenarioLog)
           .catch(() => setScenarioLog([]));
-        void fetchScores(controller.signal, horizonH)
+        void fetchScores(controller.signal, horizonH, windowH)
           .then(setScores)
-          .catch(() => setScores(new Map()));
+          .catch(() => setScores(null));
 
         // Steps 2-4. The cursor closes the snapshot-to-subscribe gap: anything ingested between
         // the read transaction above and this line is replayed by B10a.
@@ -478,7 +497,7 @@ export function App() {
         .then((response) => setEntries(response.entries))
         .then(() => fetchScenarios(controller.signal))
         .then(setScenarioLog)
-        .then(() => fetchScores(controller.signal, horizonH))
+        .then(() => fetchScores(controller.signal, horizonH, windowH))
         .then(setScores)
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
@@ -884,10 +903,59 @@ export function App() {
 
         {/* B47 — the authoritative log, and the config on the left is its fold. */}
         <h2 className="section">Decision log — what produced this config</h2>
+
+        {/* **D71 / P18 — the scoring window, beside the log it annotates.** Two knobs, and the
+            caption below says which does what: the HORIZON (above the chart) decides when a score
+            may be shown at all; this decides what it is measured over. Both are read parameters and
+            neither writes anything — a score is a function of the log, the rollups, the horizon,
+            this window and the read clock, and four of those five move. */}
+        <div className="controls">
+          <div className="controls__group">
+            <span className="controls__label">Scoring window (±)</span>
+            {WINDOW_CHOICES_H.map((h) => (
+              <button
+                key={h}
+                type="button"
+                aria-pressed={windowH === h}
+                onClick={() => setWindowH(h)}
+              >
+                {h >= 1 ? `${h}h` : `${h * 60}m`}
+                {h === SCORING_WINDOW_H ? ' (D70)' : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+        {scores === null ? (
+          <p className="gate">scores not read yet.</p>
+        ) : scores.window_h === scores.default_window_h ? (
+          <p className="gate">
+            scored over <strong>±{scores.window_h} h</strong> either side of each decision — D70&rsquo;s
+            ratified window, and the figure the README quotes · withheld until both windows are past
+            the <strong>{scores.horizon_h} h</strong> lateness horizon, because the before-window has
+            had longer to accumulate late conversions than the after-window and an unguarded
+            comparison makes <em>every</em> decision look worse than it was.{' '}
+            <strong>Shorten the window to score a lever you just pulled</strong>; shortening the
+            horizon alone will not release it.
+          </p>
+        ) : (
+          <p className="gate gate--dropped">
+            <strong>
+              scored over ±{scores.window_h >= 1 ? `${scores.window_h} h` : `${scores.window_h * 60} min`},
+              not D70&rsquo;s ±{scores.default_window_h} h
+            </strong>{' '}
+            — a shorter window is a <em>different claim</em>, not a sharper one: less delivery on
+            both sides, so the comparison is noisier and the contamination flag describes this
+            window rather than the ratified one. Answered at the{' '}
+            <strong>{scores.horizon_h} h</strong> horizon. <strong>Nothing was written</strong> —
+            the window is a read parameter (D71), like the horizon.
+          </p>
+        )}
+
         <DecisionLog
           decisions={decisions}
           generations={generations}
-          scores={scores}
+          scores={scores?.byDecision ?? EMPTY_SCORES}
+          windowH={scores?.window_h ?? SCORING_WINDOW_H}
           selected={selected}
         />
 

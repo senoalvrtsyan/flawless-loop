@@ -21,9 +21,9 @@ import { listDecisions, postDecision, type PostResult } from './decisions.ts';
 import { componentUsage, listComponents, type ComponentRow, type LineageUsage } from './components.ts';
 import { HORIZON_CHOICES_H, sweep, type SweepResult } from './sweep.ts';
 import { listScenarios, postScenario, type ScenarioResult, type ScenarioRow } from './sim-scenario.ts';
-import { scoreDecisions, type DecisionScore } from './scoring.ts';
+import { SCORING_WINDOW_MS, scoreDecisions, type DecisionScore } from './scoring.ts';
 import { parseTraceRequest, trace, traceEvent, type EventTrace, type TraceResult } from './trace.ts';
-import { HORIZON_MS } from '../shared/config.ts';
+import { HORIZON_MS, WINDOW_CHOICES_H } from '../shared/config.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -177,21 +177,44 @@ const routes: readonly Route[] = [
      */
     path: '/api/scores',
     handler: (_req, res, url) => {
-      const raw = url.searchParams.get('horizon_h');
-      let horizonMs = HORIZON_MS;
-      if (raw !== null) {
-        const hours = Number(raw);
-        if (!Number.isFinite(hours) || hours <= 0 || hours > 168) {
-          sendJson(res, 400, { error: 'bad_request', message: `horizon_h: '${raw}' must be in (0, 168]` });
-          return;
-        }
-        horizonMs = hours * 3_600_000;
+      // Both parameters are bounded and **refused rather than clamped**, for the reason
+      // `parseSnapshotQuery` gives for `horizon_h`: a silently adjusted value puts a figure on
+      // screen the caller did not ask for and cannot see the cause of.
+      const hours = (name: string, fallbackMs: number, min: number, max: number): number | null => {
+        const raw = url.searchParams.get(name);
+        if (raw === null) return fallbackMs;
+        const value = Number(raw);
+        return Number.isFinite(value) && value >= min && value <= max ? value * 3_600_000 : null;
+      };
+      // 1/60 h is one minute — `rollup_minute`'s own grain (D28). The original bound here was
+      // "any positive number", which accepted a horizon of one second; it is stated as a minute
+      // now because that is the smallest horizon the store can actually distinguish.
+      const horizonMs = hours('horizon_h', HORIZON_MS, 1 / 60, 168);
+      // **D71.** Lower bound is a quarter hour, not zero: below one minute the window rounds to
+      // the same floored minute at both ends (D28's bucket unit) and every score would compare a
+      // window against itself. Upper bound is the seeded week — past it the window outlives the
+      // history it is measured over.
+      const windowMs = hours('window_h', SCORING_WINDOW_MS, 0.25, 168);
+      if (horizonMs === null || windowMs === null) {
+        sendJson(res, 400, {
+          error: 'bad_request',
+          message:
+            `horizon_h must be a number of hours in [1/60, 168]; window_h in [0.25, 168] ` +
+            `(the control offers ${WINDOW_CHOICES_H.join(', ')})`,
+        });
+        return;
       }
       // Annotated at the call site (§14, B09): `sendJson` takes `unknown`.
-      const body: { horizon_h: number; window_h: number; scores: DecisionScore[] } = {
+      //
+      // **`window_h` is echoed because D71 requires the caption to name it** — Seno's condition:
+      // a score at 15 minutes and a score at 6 hours are different claims, and the surface says
+      // which one it is making rather than leaving the reader to remember what they clicked.
+      const body: { horizon_h: number; window_h: number; default_window_h: number; scores: DecisionScore[] } = {
         horizon_h: horizonMs / 3_600_000,
-        window_h: 6,
-        scores: scoreDecisions(db, new Date().toISOString(), horizonMs),
+        window_h: windowMs / 3_600_000,
+        /** D70's ratified figure, so the surface can say when it is NOT answering at it. */
+        default_window_h: SCORING_WINDOW_MS / 3_600_000,
+        scores: scoreDecisions(db, new Date().toISOString(), horizonMs, windowMs),
       };
       sendJson(res, 200, body);
     },

@@ -3,7 +3,7 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **Phase 5 · STAGE 6 IS CLOSED · 63 / 69 chunks**
+**Last updated:** 2026-09-05 · **Phase 5 · STAGE 6 IS CLOSED, AND D71 IS BUILT · 63 / 69 chunks**
 
 ---
 
@@ -887,15 +887,12 @@ Recorded here because `DESIGN.md` was approved before these landed. Full list: `
 
 ## What is owed
 
-- **D71 IS OWED AND UNASKED — the scoring window's demo problem.** `w` is fixed at 6 h (D70), so a
-  lever pulled on camera cannot be scored for six hours regardless of the horizon, and the seeded
-  week contains no mid-week levers to score instead. **This is exactly the situation F2 named for
-  the lateness horizon**, and F2's answer was that shortening it is a build item (P16), not a
-  toggle. The candidate options are: (A) leave `w` fixed and accept that P18 is demonstrated by its
-  withheld state and its limits rather than by a number; (B) make `w` a read parameter like
-  `?horizon_h=`, keeping 6 h as the ratified default and the documented figure; (C) seed two or
-  three mid-week levers on the next reseed, which costs 5m20s and 750 MB and is the only option that
-  produces a score on frame one. **Not taken — ask it.**
+- ~~**D71 — the scoring window's demo problem**~~ — **RATIFIED as option B** (2026-09-05, `6198b73`)
+  and **BUILT**. `?window_h=` beside `?horizon_h=`; D70's 6 h stays the default and the documented
+  figure; the caption and the column header name the window each score was **answered** at.
+  **The README owes two lines**: the window is a read parameter and writes nothing, and the fastest
+  possible on-camera score is window + horizon — about **sixteen minutes** at the 15-minute floor,
+  so a demo starts that clock early rather than scoring a lever inside one beat.
 - ~~**The scenario-consumption ASSUMPTION**~~ — **RATIFIED as D69** (2026-09-05), with the flip
   condition recorded. The README's named-limits section owes one line: triggers are delivered at
   most once, and a dropped poll response loses one — press the button again.
@@ -1126,6 +1123,31 @@ Everything below was measured against a copy of the seven-day store; `data/loop.
 and has not been reseeded.
 
 **Stage 7 (packaging, B57–B62) is next, and nothing blocks it.**
+
+### D71 landed after stage 6, and it is not a chunk
+
+**`?window_h=` on `GET /api/scores`**, ratified as option B and recorded in `6198b73` **before** any
+code, per §3. It is an amendment to `B50a`, not a new plan row, so `BUILD_PLAN.md` §9 is unchanged
+and the chunk count stays 63 / 69.
+
+- **`SCORING_WINDOW_MS` / `SCORING_WINDOW_H` remain D70's ratified 6 h** and are what the README, the
+  caption and the tests quote. The parameter shifts a read; absent it every caller is unchanged.
+- **Refused, never clamped**, in `[0.25, 168]` hours — and `horizon_h`'s lower bound is now stated as
+  one minute (`1/60 h`), the store's own grain, rather than "any positive number".
+- **The caption and the `score (±… )` header name the window the SERVER answered at**, which is why
+  `App.tsx` holds the whole `/api/scores` envelope rather than just the map: control and answer
+  differ for one tick after every change, and that is the tick a reader is looking at.
+- **Contamination is recomputed per read**, because a second lever inside 15 minutes is a different
+  set from one inside six hours.
+- **Two tests** (169 → 171): a shortened window measures different minutes and moves the score; and
+  withholding follows the window, not only the horizon.
+- **One B50a defect fixed, found by verifying D71 against the real store**: `no_evidence` said
+  *"neither window has enough delivery for a CTR"* where `pause a_12` has **3,001 impressions before
+  and 0 after** — which invites a reader to diagnose under-delivery before the lever. It now names
+  which window is missing, and says the before-window's size when the missing one is the after.
+- **The floor is a stated limit.** Fastest possible on-camera score is window + horizon ≈ **16
+  minutes**. A demo starts that clock early; it cannot score a lever inside one beat.
+
 
 ### What stage 6 built, in one paragraph each
 

@@ -521,6 +521,36 @@ remains unspent, and step 4 is unchanged.
 
 Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite during Phase 5.
 
+**The newest (D71 — the scoring window as a read parameter):**
+
+- **The horizon alone cannot release a score whose window is still open.** They are two knobs and
+  they fail independently: shorten the horizon and a decision whose after-window has not finished
+  is still `settling`; shorten the window and a decision inside a long horizon is still withheld.
+  A surface that offered one and implied it did both would look broken for a reason nobody could
+  find. Both are printed in the caption.
+- **The contamination flag must follow the WINDOW, not the ratified 6 h.** A second lever inside a
+  15-minute window is a different set from one inside six hours, and carrying the 6 h answer at a
+  shortened window claims contamination from evidence the score never saw. Recomputed per read.
+- **The caption and the column header must name the window the SERVER answered at, not the control's
+  current value.** They differ for one tick after every change — which is precisely the tick a
+  reader is looking at. Hence the whole `/api/scores` envelope is held in state, not just the map.
+- **`no_evidence` must say WHICH window is missing**, and the version that did not was wrong on the
+  real store: `pause a_12` reads **3,001 impressions before and 0 after**, and the sentence said
+  *"neither window has enough delivery for a CTR"* — inviting a reader to diagnose under-delivery
+  before the lever, when the before-window had a perfectly good CTR. Same distinction §14 already
+  draws for `no_before_window`; found at D71's verification, not by reading. **Fixed.**
+- **A test whose "lift" is in the wrong metric passes with a delta of zero on both windows.** The
+  first D71 test lifted CLICKS, but with conversions on both sides the metric is CPA — so both
+  windows reported 0.0% change and the test compared two zeros. The lift has to be in the term the
+  chosen metric divides by.
+- **Comparing two windows' `delta_pct` by SIGN is the per-metric direction bug in a new costume.**
+  CPA improves when it falls, so a bigger improvement is a bigger *negative* delta; `narrow > wide`
+  is the wrong assertion and it fails on exactly the case the test exists for. Compare magnitudes.
+- **The window's lower bound is 15 minutes and that is a stated limit, not a knob left short.**
+  Below one minute both bounds floor to the same minute (D28's grain) and every score compares a
+  window against itself. Even at the floor, the fastest possible on-camera score is window + horizon
+  — about sixteen minutes. The demo has to start the clock early; it cannot score a lever in a beat.
+
 **The newest (G16 — B51–B56, stage 6):**
 
 - **A rewound `as_of` compared against the rollup reports MISMATCH on a correct store.** The

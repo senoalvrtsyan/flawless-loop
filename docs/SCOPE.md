@@ -43,7 +43,7 @@ that earned them and visibly restate the numbers they land in, and two levers �
 | P15 | Read-only component screen: the reverse join over live data (D1's specified sketch) | — |
 | P16 | Demo-mode lateness horizon: shortening the horizon re-evaluates which buckets are settled | D13 |
 | P17 | Scenario control: `POST /api/sim/scenario` + the seven triggers, delivered over the simulator's existing world poll and persisted so they stay part of the replayable record | F3, D40 |
-| P18 | Decision scoring: a symmetric 6 h before/after window either side of each decision, one primary metric, **withheld until both windows are past the lateness horizon**, with any second lever inside either window flagged as contaminated on the entry | G42, D19, D68, D70 |
+| P18 | Decision scoring: a symmetric before/after window either side of each decision — **6 h ratified (D70), and a read parameter (D71) so a lever pulled live can be scored** — one primary metric, **withheld until both windows are past the lateness horizon**, with any second lever inside either window flagged as contaminated on the entry, and the surface naming the window each score was answered at | G42, D19, D68, D70, D71 |
 
 **P17 is not optional either, and for the same reason as P16.** Every interesting property of an
 event pipeline is rare by construction — a fatigue collapse, a conversion cascade arriving four days

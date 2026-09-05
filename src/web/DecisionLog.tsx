@@ -21,6 +21,7 @@ import { useState } from 'react';
 import type { GenerationRow } from '../server/snapshot.ts';
 import type { Decision } from '../shared/decisions.ts';
 import type { DecisionScore } from '../server/scoring.ts';
+import { SCORING_WINDOW_H } from '../shared/config.ts';
 import { describeBody } from './decisions.ts';
 
 /**
@@ -37,12 +38,15 @@ import { describeBody } from './decisions.ts';
  *   - **contaminated** — D70. A second lever inside either window is flagged and named, never
  *     silently averaged in and never used to suppress the number.
  */
-function Score({ score }: { score: DecisionScore | undefined }) {
+function Score({ score, windowH }: { score: DecisionScore | undefined; windowH: number }) {
   if (score === undefined) return <span className="log__none">—</span>;
 
   const flag =
     score.contaminated_by.length === 0 ? null : (
-      <span className="log__contaminated" title="D70: another lever was pulled on this ad inside the ±6 h window, so this comparison is not clean">
+      <span
+        className="log__contaminated"
+        title={`D70: another lever was pulled on this ad inside the ±${windowH} h window, so this comparison is not clean`}
+      >
         {' '}⚠ contaminated by #{score.contaminated_by.join(', #')}
       </span>
     );
@@ -86,11 +90,20 @@ export type DecisionLogProps = {
   generations: readonly GenerationRow[];
   /** **B50a** — by `decision_id`. Absent while the first read is in flight. */
   scores: ReadonlyMap<string, DecisionScore>;
+  /**
+   * **D71** — the window the server answered these scores at, in hours, for the cell's own tooltip.
+   *
+   * Passed down rather than imported as the constant, because after D71 the constant is only the
+   * DEFAULT: a tooltip hard-coded to "±6 h" would state the ratified window while the numbers beside
+   * it were measured over fifteen minutes. That is the misstatement D71's caption condition exists
+   * to prevent, and it would be invisible.
+   */
+  windowH: number;
   /** `null` = the whole portfolio is charted, which is the snapshot's own convention for `?ads=`. */
   selected: ReadonlySet<string> | null;
 };
 
-export function DecisionLog({ decisions, generations, scores, selected }: DecisionLogProps) {
+export function DecisionLog({ decisions, generations, scores, windowH, selected }: DecisionLogProps) {
   // Global by default. The plan row asks for "per-ad and global"; the per-ad view reuses the
   // portfolio selection rather than adding a second, independently-wrong idea of which ad is in
   // focus — so clicking an ad on the left filters the chart, the totals AND the log together.
@@ -145,7 +158,10 @@ export function DecisionLog({ decisions, generations, scores, selected }: Decisi
               <th>what changed</th>
               <th>rationale</th>
               <th>opened</th>
-              <th>score (±6 h, D70)</th>
+              {/* **D71: the header names the window these scores were ANSWERED at**, not the
+                  ratified default — Seno's condition on the ratification. `(D70)` appears only when
+                  the two are the same, so the ratified figure is never claimed for a shortened one. */}
+              <th>score (±{windowH >= 1 ? `${windowH} h` : `${windowH * 60} min`}{windowH === SCORING_WINDOW_H ? ', D70' : ''})</th>
             </tr>
           </thead>
           <tbody>
@@ -183,7 +199,7 @@ export function DecisionLog({ decisions, generations, scores, selected }: Decisi
                     )}
                   </td>
                   <td className="log__score">
-                    <Score score={scores.get(d.decision_id)} />
+                    <Score score={scores.get(d.decision_id)} windowH={windowH} />
                   </td>
                 </tr>
               );

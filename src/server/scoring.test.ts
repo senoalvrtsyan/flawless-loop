@@ -147,3 +147,61 @@ test('create_ad is not scored against an empty before-window, and says why', (t)
   // definition rather than by a lack of delivery, and the two are different statements.
   assert.equal(entry?.withheld?.reason, 'no_before_window');
 });
+
+// **D71 — `w` is a read parameter.** Two properties, and D43's criterion is why they are tested
+// rather than eyeballed: a score computed over the wrong window renders a perfectly ordinary
+// sentence. There is no visible failure.
+
+test('D71: a shortened window measures different minutes, and the score moves with it', (t) => {
+  const db = store(t);
+  decide(db, 1, TS);
+  // Six hours of flat delivery either side, and ONE hour immediately after the decision that
+  // converts twice as well for the same spend. A ±6 h window dilutes that hour across six; a ±1 h
+  // window sees only it. The lift is in CONVERSIONS, not clicks, because with conversions on both
+  // sides the metric is CPA — a clicks-only lift moves CTR, which is not the metric being scored,
+  // and the test would pass trivially with a delta of zero on both windows. (It did, first run.)
+  const flat = { impressions: 1_000, clicks: 10, conversions: 1, click_cost_cents: 1_000 };
+  const lifted = { impressions: 1_000, clicks: 10, conversions: 2, click_cost_cents: 1_000 };
+  for (let m = -360; m < 0; m++) bucket(db, m, flat);
+  for (let m = 0; m < 60; m++) bucket(db, m, lifted);
+  for (let m = 60; m < 360; m++) bucket(db, m, flat);
+
+  const at = new Date(TS + H(6) + HORIZON_MS + 60_000).toISOString();
+  const wide = scoreDecisions(db, at, HORIZON_MS, SCORING_WINDOW_MS)[0];
+  const narrow = scoreDecisions(db, at, HORIZON_MS, H(1))[0];
+
+  assert.ok(wide?.score !== null && wide?.score !== undefined, 'the 6 h window scores');
+  assert.ok(narrow?.score !== null && narrow?.score !== undefined, 'the 1 h window scores');
+  // Same metric, same direction, different magnitude — the narrow window sees only the good hour.
+  // Compared on MAGNITUDE, not sign: CPA improves when it falls, so "bigger lift" is a bigger
+  // NEGATIVE delta, and asserting `narrow > wide` would be the per-metric direction bug §14 names.
+  assert.equal(wide.score.metric, 'cpa');
+  assert.equal(narrow.score.metric, 'cpa');
+  assert.equal(wide.score.improved, true);
+  assert.equal(narrow.score.improved, true);
+  assert.ok(
+    Math.abs(narrow.score.delta_pct) > Math.abs(wide.score.delta_pct),
+    `the narrow window should see the full lift: narrow ${narrow.score.delta_pct} vs wide ${wide.score.delta_pct}`,
+  );
+  // And the bounds themselves moved, which is what makes the number different.
+  assert.notEqual(wide.window.after_to, narrow.window.after_to);
+  assert.equal(
+    Date.parse(narrow.window.after_to) - Date.parse(narrow.window.after_from),
+    H(1),
+    'the after-window is exactly the requested width',
+  );
+});
+
+test('D71: withholding follows the window, not only the horizon', (t) => {
+  const db = store(t);
+  decide(db, 1, TS);
+  for (let m = -60; m < 60; m++) {
+    bucket(db, m, { impressions: 1_000, clicks: 10, conversions: 1, click_cost_cents: 1_000 });
+  }
+
+  // A moment at which the ±15 min window has settled but the ratified ±6 h one has not. This is
+  // the whole point of D71: the horizon alone cannot release a score whose window is still open.
+  const at = new Date(TS + H(0.25) + HORIZON_MS + 60_000).toISOString();
+  assert.equal(scoreDecisions(db, at, HORIZON_MS, SCORING_WINDOW_MS)[0]?.withheld?.reason, 'settling');
+  assert.equal(scoreDecisions(db, at, HORIZON_MS, H(0.25))[0]?.withheld, null);
+});

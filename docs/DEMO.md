@@ -348,7 +348,9 @@ the one property this whole design is built to demonstrate, and `/api/verify` is
 **Say:** *"The obvious next question is whether any of that helped. There is a column for it, and
 the interesting thing about that column is how often it refuses to answer."*
 
-16. **The last column of the decision log: `score (±6 h, D70)`.** On the seeded week every row reads
+16. **The last column of the decision log: `score (±6 h, D70)`** — and note the header names the
+    window, because after D71 it is a control and `(D70)` appears only while it is at the ratified
+    value. On the seeded week every row reads
     **`no before-window`** — the twelve `create_ad`s because the ad did not exist, and the twelve
     `launch`es because the ad was in `draft` and a draft ad delivers nothing. **Say so plainly:**
     *"P18 is built and it has nothing to score here, because the seeded week contains no mid-week
@@ -366,6 +368,24 @@ the interesting thing about that column is how often it refuses to answer."*
     Measured on the seeded week: at 72 h, six entries read `scoring in 2 h`; swept to 2 h, **all six
     release**. That pairing is D19's own recommendation — *"pair with a shortened horizon in demo
     mode so a score can be produced live."*
+
+18a. **Then shorten the scoring window — `Scoring window (±)`, beside the log — and say why there
+    are two knobs.** *"The horizon decides **when** a score is allowed to be shown: both windows have
+    to be past settlement. The window decides **what it is measured over**. Shortening only one of
+    them still gives you nothing, which is exactly the trap D71 was raised for: `w` was fixed at six
+    hours, so a lever I pull on camera could not be scored for six hours no matter what the horizon
+    said."*
+
+    **The caption changes with it, and that is the ratification's own condition:** at 6 h it says
+    *"D70's ratified window, and the figure the README quotes"*; below it, the caption and the
+    column header both switch to the shortened width and the surface says plainly that **a shorter
+    window is a different claim, not a sharper one** — less delivery on both sides, so the
+    comparison is noisier and the contamination flag describes *this* window rather than the
+    ratified one. **Nothing is written**: like the horizon, `w` is a read parameter.
+
+    **The honest limit, said out loud:** *"The floor is fifteen minutes, so the fastest score I can
+    produce is window plus horizon — about sixteen minutes. If you want one live, I pull the lever
+    at the start of the session and we come back to it."*
 19. **Where a score does appear**, it reads e.g. `▲ better · CPA $5.00 → $2.50 (−50.0%)`.
 
     **Say:** *"One metric, never both — CPA where both windows carry conversions, CTR otherwise —
@@ -379,6 +399,12 @@ the interesting thing about that column is how often it refuses to answer."*
     of wildly different lengths that need normalising against a `valid_to` that moves. A
     contamination the reader can see beats a correction they cannot audit, and the brief asks only
     for a stated before-window versus after-window heuristic."*
+
+**One refusal worth reading out**, because the sentence was wrong until D71's verification caught
+it: where a lever stops delivery, the entry reads *"the after-window has no CTR to compare — the
+before-window has 3,001 impressions, so this is the lever or the end of the data, not
+under-delivery."* The earlier wording said *"neither window has enough delivery"*, which invited a
+reader to diagnose a delivery problem that did not exist.
 
 **What this beat still does not show.** Whether the swap worked *causally*. Six hours of the world
 moved too, and the score is a comparison, not an attribution. That limit is printed under the table
