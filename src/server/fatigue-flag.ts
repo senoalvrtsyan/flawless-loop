@@ -30,7 +30,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readTx } from './db.ts';
 import { BARS } from '../web/gate.ts';
 import { ctr, type MetricCounts } from '../shared/metrics.ts';
-import { HALF_LIFE_MS } from '../web/metrics.ts';
+import { HALF_LIFE_MS } from '../shared/config.ts';
 
 /** §19: >= 25% below the pair's peak. */
 export const DROP = 0.25;
@@ -133,8 +133,9 @@ function trailingEwma(
     const window = qualifying.filter((q) => q.at <= point.at && q.at > point.at - WINDOW_MS);
     if (window.length < MIN_POINTS) return { at: point.at, value: null, qualifying: window.length };
 
-    // Time-decayed EWMA over the window's qualifying points — the same rule and the same half-life
-    // as the chart's smoother (B40), so "the EWMA CTR" means one thing in this codebase.
+    // Time-decayed EWMA over the window's qualifying points. **This is now the only smoother in
+    // the codebase** — D74 deleted the chart's raw/EWMA toggle, so there is no second
+    // implementation to agree with and the half-life is a parameter of the heuristic (config.ts).
     let level: number | null = null;
     let previousAt = 0;
     for (const q of window) {

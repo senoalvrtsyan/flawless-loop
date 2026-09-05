@@ -42,7 +42,7 @@ import { planChart, rungLabel } from './gate.ts';
 import { METRIC_GLOSSARY, METRIC_LABELS, glossFor } from './metrics.ts';
 import { RATIO_METRICS, type MetricKey } from '../shared/metrics.ts';
 import {
-  METRIC_NOTES,
+  METRIC_NOTES_SHORT,
   combined,
   fetchFatigue,
   fetchRestatements,
@@ -154,12 +154,6 @@ export function App() {
    * a ratio and a count share no y axis and D20's gate is a per-metric question.
    */
   const [metric, setMetric] = useState<MetricKey>('impressions');
-  /**
-   * **B40 — smoothing, off by default.** D20 ratified EWMA at a 15-minute half-life *with a raw
-   * toggle*; raw is the default because it is the series B53's drill-down asserts against, so the
-   * number a reviewer is most likely to try to walk back is the one that will reconcile.
-   */
-  const [smooth, setSmooth] = useState(false);
   /** `null` is "all ads" — the same convention as an absent `?ads=`, so no translation is needed. */
   const [selected, setSelected] = useState<ReadonlySet<string> | null>(null);
   /**
@@ -633,16 +627,6 @@ export function App() {
           </div>
 
           <div className="controls__group">
-            <span className="controls__label">Series</span>
-            <button type="button" aria-pressed={!smooth} onClick={() => setSmooth(false)}>
-              raw
-            </button>
-            <button type="button" aria-pressed={smooth} onClick={() => setSmooth(true)}>
-              EWMA 15m
-            </button>
-          </div>
-
-          <div className="controls__group">
             <span className="controls__label">Charting</span>
             <span>{selected === null ? `all ${ads.length}` : `${selected.size} of ${ads.length}`}</span>
           </div>
@@ -664,7 +648,6 @@ export function App() {
           rows={viewRows}
           window={store.window}
           plan={plan}
-          smooth={smooth}
           boundaries={boundaries}
           horizonMs={horizonMs}
         />
@@ -676,15 +659,6 @@ export function App() {
           drawn at <strong>{rungLabel(plan.granularity_s)}</strong>
           {plan.coarsened ? (
             <> — the gate coarsened from {rungLabel(granularity)} to clear its bar</>
-          ) : null}
-          {smooth ? (
-            <>
-              {' '}·{' '}
-              <strong>
-                EWMA, 15-minute half-life — smoothed, so these points will NOT reconcile against raw
-                events; switch to raw before walking one back
-              </strong>
-            </>
           ) : null}
           {plan.bar === null ? (
             <> · counts are their own evidence, so no bar applies</>
@@ -801,7 +775,7 @@ export function App() {
                 label="CTR"
                 value={total.ctr}
                 descriptor={total.descriptors.ctr}
-                note={METRIC_NOTES.ctr}
+                note={METRIC_NOTES_SHORT.ctr}
                 onDrill={setDrilling}
               />
               <Metric
@@ -809,7 +783,7 @@ export function App() {
                 label="CPA"
                 value={total.cpa_cents}
                 descriptor={total.descriptors.cpa}
-                note={METRIC_NOTES.cpa}
+                note={METRIC_NOTES_SHORT.cpa}
                 onDrill={setDrilling}
               />
               <Metric
@@ -817,7 +791,7 @@ export function App() {
                 label="ROAS"
                 value={total.roas}
                 descriptor={total.descriptors.roas}
-                note={METRIC_NOTES.roas}
+                note={METRIC_NOTES_SHORT.roas}
                 onDrill={setDrilling}
               />
             </div>
@@ -916,11 +890,17 @@ export function App() {
             what this console did; below the numbers, because a lever is pulled in response to them.
             The world responds within one simulator tick: pause `a_12` and its impressions stop
             arriving, which is visible on the chart above without touching anything else. */}
-        <h2 className="section">Decision loop — pull a lever</h2>
+        <h2 className="section">
+          Decision loop
+          <span className="section__sub">pull a lever; the world responds within a second</span>
+        </h2>
         <Console ads={ads} components={components} onApplied={reload} />
 
         {/* B47 — the authoritative log, and the config on the left is its fold. */}
-        <h2 className="section">Decision log — what produced this config</h2>
+        <h2 className="section">
+          Decision log
+          <span className="section__sub">what produced the config on the left</span>
+        </h2>
 
         {/* **D71 / P18 — the scoring window, beside the log it annotates.** Two knobs, and the
             caption below says which does what: the HORIZON (above the chart) decides when a score
@@ -946,14 +926,13 @@ export function App() {
         {scores === null ? (
           <p className="gate">scores not read yet.</p>
         ) : scores.window_h === scores.default_window_h ? (
+          /* **D75.** D71 consequence 3 requires the caption to NAME the window each score was
+             answered at, so that stays; the reason a score is withheld moved into the collapsed
+             limits below the log. */
           <p className="gate">
-            scored over <strong>±{scores.window_h} h</strong> either side of each decision — D70&rsquo;s
-            ratified window, and the figure the README quotes · withheld until both windows are past
-            the <strong>{scores.horizon_h} h</strong> lateness horizon, because the before-window has
-            had longer to accumulate late conversions than the after-window and an unguarded
-            comparison makes <em>every</em> decision look worse than it was.{' '}
-            <strong>Shorten the window to score a lever you just pulled</strong>; shortening the
-            horizon alone will not release it.
+            scored over <strong>±{scores.window_h} h</strong> (D70), withheld until both windows pass
+            the <strong>{scores.horizon_h} h</strong> horizon ·{' '}
+            <strong>shorten the window to score a lever you just pulled</strong>
           </p>
         ) : (
           <p className="gate gate--dropped">
@@ -961,11 +940,9 @@ export function App() {
               scored over ±{scores.window_h >= 1 ? `${scores.window_h} h` : `${scores.window_h * 60} min`},
               not D70&rsquo;s ±{scores.default_window_h} h
             </strong>{' '}
-            — a shorter window is a <em>different claim</em>, not a sharper one: less delivery on
-            both sides, so the comparison is noisier and the contamination flag describes this
-            window rather than the ratified one. Answered at the{' '}
-            <strong>{scores.horizon_h} h</strong> horizon. <strong>Nothing was written</strong> —
-            the window is a read parameter (D71), like the horizon.
+            — a <em>different claim</em>, not a sharper one: less delivery either side, so it is
+            noisier. Answered at the <strong>{scores.horizon_h} h</strong> horizon.{' '}
+            <strong>Nothing was written.</strong>
           </p>
         )}
 
@@ -980,7 +957,10 @@ export function App() {
         {/* **B50 / P17.** Below the decision loop and under its own heading, because a scenario is
             NOT a lever: it changes what the world does, never what the advertiser decided. Keeping
             the two apart on the surface is the same rule the model keeps them apart by. */}
-        <h2 className="section">Scenario control — cause the interesting thing (the simulator, not the advertiser)</h2>
+        <h2 className="section">
+          Scenario control
+          <span className="section__sub">the simulator, not the advertiser</span>
+        </h2>
         <Scenarios
           ads={ads}
           log={scenarioLog}
@@ -993,7 +973,10 @@ export function App() {
         />
 
         {/* B43 — §5.6's timeline. Below the chart, because an entry explains a mark on it. */}
-        <h2 className="section">Restatements — settled buckets that moved</h2>
+        <h2 className="section">
+          Restatements
+          <span className="section__sub">settled buckets that moved</span>
+        </h2>
         <Timeline entries={entries} />
 
         {/* **B56 / P15 — the Workbench's one screen.** Below the decision log and above fatigue,
@@ -1001,24 +984,36 @@ export function App() {
             says what that config is currently made of, and the fatigue flag below reads the same
             component pairs. `generation` is the SAME counter that re-runs §3.1, so a lever pulled
             in the console above lands here in the same pass as everywhere else. */}
-        <h2 className="section">Workbench — the component library, and what is using it (§8)</h2>
+        <h2 className="section">
+          Workbench
+          <span className="section__sub">the component library, and what is using it</span>
+        </h2>
         <Components generation={generation} />
 
         {/* B45 — §19's one heuristic, with its four limits underneath it rather than in the
             README only. Above the tail, below the numbers it interprets. */}
-        <h2 className="section">Fatigue — component pairs losing their click-through rate</h2>
+        <h2 className="section">
+          Fatigue
+          <span className="section__sub">component pairs losing their click-through rate</span>
+        </h2>
         <FatigueFlag report={fatigue} />
 
         {/* **B55 / P13 — the life of one event.** Directly ABOVE the raw tail, because the tail is
             where a reviewer gets an `event_id` to paste: the two are one gesture, and putting the
             trace at the top of the page would mean scrolling for the input to it. */}
-        <h2 className="section">Trace one event — emission to pixel, eight steps (§10.4)</h2>
+        <h2 className="section">
+          Trace one event
+          <span className="section__sub">emission to pixel, eight steps</span>
+        </h2>
         <EventTrace onDrill={setDrilling} />
 
         {/* B44 — the raw tail and, in its own treatment, the transport telemetry (D34's named
             exception). Last on the page, below every performance number, so the quarantine is
             spatial as well as structural. */}
-        <h2 className="section">Raw event tail — the feed itself</h2>
+        <h2 className="section">
+          Raw event tail
+          <span className="section__sub">the feed itself</span>
+        </h2>
         <Tail frame={tail} />
 
         {/* §11's stream telemetry, quarantined by treatment (D45) so it can never be misread as a

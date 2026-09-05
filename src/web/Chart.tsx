@@ -26,7 +26,7 @@ import type { BucketRow } from '../server/snapshot.ts';
 import { metricColumn, pointCounts } from './series.ts';
 import type { Boundary } from './generations.ts';
 import { clears, type ChartPlan } from './gate.ts';
-import { HALF_LIFE_MS, ewma, formatCents, formatCtr, formatRoas } from './metrics.ts';
+import { formatCents, formatCtr, formatRoas } from './metrics.ts';
 import type { MetricKey } from '../shared/metrics.ts';
 
 /** The palette, in order. Twelve ads, twelve hues; index 12+ wraps and the legend disambiguates. */
@@ -86,12 +86,6 @@ export type ChartProps = {
    * The component draws what the plan says and decides nothing itself.
    */
   plan: ChartPlan;
-  /**
-   * **B40 — EWMA at D20's 15-minute half-life, or the raw series.** Off by default: the raw view is
-   * the one B53's drill-down asserts against, so it is the one a reviewer should be looking at
-   * unless they asked otherwise.
-   */
-  smooth: boolean;
   /**
    * **B48** — the config changes that fall inside `window`, for the charted ads, already diffed
    * (`generations.ts`). The component draws them and derives nothing: which boundaries are in view
@@ -273,7 +267,7 @@ function options(
   };
 }
 
-export function Chart({ rows, window, plan, smooth, boundaries, horizonMs }: ChartProps) {
+export function Chart({ rows, window, plan, boundaries, horizonMs }: ChartProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const plot = useRef<uPlot | null>(null);
   const { data, labels, restated } = useMemo(() => {
@@ -283,10 +277,10 @@ export function Chart({ rows, window, plan, smooth, boundaries, horizonMs }: Cha
     const bar = plan.bar;
     const columns = points.series.map((column) => {
       // The suppression: a point whose own denominator is under the bar draws nothing (D20/D67).
-      const raw = metricColumn(column, plan.metric, bar === null ? () => false : (counts) => !clears(counts, bar));
-      // Smoothing comes AFTER the gate, never before it: a suppressed point must not re-enter the
-      // series through its neighbour's average, which is exactly what smoothing first would do.
-      return smooth ? ewma(points.x, raw, HALF_LIFE_MS) : raw;
+      // **D74: the raw series is the only series.** The EWMA toggle is gone; the drill-down asserts
+      // against raw events, so what is drawn here and what a walk-back re-sums are now the same
+      // thing by construction rather than by the reviewer remembering to switch back.
+      return metricColumn(column, plan.metric, bar === null ? () => false : (counts) => !clears(counts, bar));
     });
     // uPlot's `AlignedData` is a positional tuple, so the assertion is over SHAPE, not over values:
     // `series.ts` returns the same arrays this line reorders into one array-of-arrays.
@@ -295,7 +289,7 @@ export function Chart({ rows, window, plan, smooth, boundaries, horizonMs }: Cha
       labels: points.labels,
       restated: points.restated,
     };
-  }, [rows, window, plan, smooth]);
+  }, [rows, window, plan]);
 
   // Read by the construction effect below, which must NOT re-run when only the labels change — a
   // rename is not a new series set. The ref is how that effect reads a current value without taking

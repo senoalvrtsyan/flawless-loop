@@ -36,12 +36,11 @@ function bucketLabel(minute: string): string {
 
 export function Timeline({ entries }: { entries: readonly RestatementEntry[] }) {
   if (entries.length === 0) {
+    // **D75.** The state and the one action; the arrival-model arithmetic is README §10.
     return (
       <p className="timeline__empty">
-        No settled bucket in this window has moved. Widen the window to seven days — the seeded
-        store carries ten restatements from frame one (eight of them inside a rolling seven-day
-        window), because 2–5% of conversions arrive past the 72 h horizon under the seeded arrival
-        model.
+        No settled bucket in this window has moved. <strong>Widen the window to 7d</strong> — the
+        seeded week carries restatements from frame one.
       </p>
     );
   }

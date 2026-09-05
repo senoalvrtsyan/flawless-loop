@@ -63,11 +63,9 @@ export function Components({ generation }: ComponentsProps) {
 
   return (
     <>
+      {/* **D75.** Kept the demo beat, dropped §8's justification for not maintaining an index. */}
       <p className="gate">
-        the reverse join, computed on read by scanning <code>ads</code> — <strong>not</strong> a
-        maintained index (§8: at twelve ads the scan is free, and an index would be a second thing
-        to keep in step with the fold). <strong>Pause an ad in the console above and a count here
-        drops</strong>, because <code>ads.status</code> is written only by <code>applyDecision()</code>.
+        <strong>Pause an ad above and a count here drops</strong> — the join is computed on read.
       </p>
       <ul className="lineages">
         {lineages.map((lineage) => (
@@ -121,15 +119,11 @@ export function Components({ generation }: ComponentsProps) {
           </li>
         ))}
       </ul>
+      {/* **D75.** G38's other two questions — *at time T* and *ever* — are a named scope cut, and
+          the README carries both the reasoning and the query. The surface keeps only the scope of
+          what it is actually showing. */}
       <p className="gate">
-        {/* G38's three questions, and only the first is built. Saying which is which on the surface
-            is the difference between a scope cut and a gap someone finds later. */}
-        this answers <strong>&ldquo;used in N ads right now&rdquo;</strong>. Two neighbouring
-        questions — <em>at time T</em> and <em>ever</em> — are one join from working, over
-        <code> config_generations</code>, which exists for D14&rsquo;s sake regardless; they are a
-        scope cut and the README carries the query. The count is per <em>current config</em>: a
-        component an ad has since swapped away from no longer appears here, and the history of that
-        swap is in the decision log.
+        counts are <em>current config</em> — a component an ad has swapped away from is not here.
       </p>
     </>
   );

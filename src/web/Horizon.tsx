@@ -57,10 +57,10 @@ export function Horizon({ horizonH, defaultH, onChange, result, pending }: Horiz
 
       {horizonH === defaultH ? (
         <p className="gate">
-          answering at D13&rsquo;s <strong>{hours(defaultH)}</strong> — the account horizon, and the
-          one the write side stamps <code>restated_at</code> against. <strong>F2:</strong> at this
-          horizon a bucket that settles during a demo does not exist, so the only restatements you
-          can see are the ones the seeded week already carries. Shorten it to cause one live.
+          {/* **D75.** Was 284 characters of D13/F2 rationale; the fact is the horizon in force and
+              the one action it affords. The argument is README §"Late-arriving conversions". */}
+          answering at <strong>{hours(defaultH)}</strong>, the account horizon ·{' '}
+          <strong>shorten it to cause a restatement live</strong>
         </p>
       ) : (
         <p className="gate gate--dropped">

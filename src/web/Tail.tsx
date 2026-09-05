@@ -31,10 +31,10 @@ const GLYPH: Record<string, string> = {
 function Health({ health }: { health: StreamHealth }) {
   return (
     <div className="telemetry telemetry--block">
+      {/* **D34 requires a heading naming this as transport**, so the first clause is not optional.
+          D75 cut the three sentences that restated it. */}
       <div className="telemetry__heading">
-        Stream health — <strong>transport, not performance</strong>. These describe the feed itself:
-        how fast deliveries are arriving and what the ingest boundary did with them. None of them is
-        an ad metric, and none is derived from a performance number (D34’s named exception).
+        Stream health — <strong>transport, not performance</strong>. None of these is an ad metric.
       </div>
       <div className="telemetry__grid">
         <span>
@@ -52,13 +52,12 @@ function Health({ health }: { health: StreamHealth }) {
         <span>{health.frames_backpressured} frames backpressured</span>
         <span>{health.orphans_unresolved} orphans unresolved</span>
       </div>
+      {/* **D75.** The bound and the reset are facts that change how the figures read, so they stay.
+          Why `orphans unresolved` is counted the way it is belongs to README §"Late-arriving
+          conversions". */}
       <div className="telemetry__scope">
-        measured over the last {health.window_events} deliveries this server process has seen — the
-        ring is bounded and resets on restart, which is correct for transport figures and is why it
-        is said out loud. <code>orphans unresolved</code> is the one store-backed figure here:
-        conversions whose click has not arrived (D16), counted with{' '}
-        <code>state &lt;&gt; 'resolved'</code> because expiry is derived at read and there is no
-        stored flag to filter on (D54).
+        last {health.window_events} deliveries this server process has seen · the ring resets on
+        restart
       </div>
     </div>
   );

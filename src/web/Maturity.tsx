@@ -64,11 +64,10 @@ export function Maturity({ data }: { data: MaturityData }) {
           ) : null}
         </>
       )}
-      {' · '}
-      <span className="maturity__note">
-        cohorts credited after {data.settled_before} were excluded as incomplete — measuring over
-        them biases every quantile short
-      </span>
+      {/* **D75.** D33 requires the sample size on screen and it is above; WHY incomplete cohorts
+          are excluded is README §"Separating signal from noise". Kept as a hover so the caveat is
+          still reachable without occupying a line. */}
+      <span className="maturity__note" title={`cohorts credited after ${data.settled_before} were excluded as incomplete — measuring over them biases every quantile short`} />
     </p>
   );
 }

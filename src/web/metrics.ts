@@ -43,6 +43,19 @@ export const METRIC_NOTES: Partial<Record<MetricKey, string>> = {
 };
 
 /**
+ * **The same caveat, at label length — D75.** `METRIC_NOTES` is the sentence and it still reaches
+ * the reader, through `glossFor()`'s hover text. What sat *under* two of the six headline figures
+ * was the same 66-character clause printed twice, which forced the figure row to five columns and
+ * stranded ROAS on a line of its own. The distinction the strategist has to hold is three words
+ * long; the reason behind it is one hover away and one README section away.
+ */
+export const METRIC_NOTES_SHORT: Partial<Record<MetricKey, string>> = {
+  ctr: 'live',
+  cpa: 'lags by cohort',
+  roas: 'lags by cohort',
+};
+
+/**
  * **What the abbreviations stand for, and the division underneath each one.**
  *
  * The brief's user is an ad strategist, for whom `CTR` needs no expansion — but the brief's
@@ -177,57 +190,6 @@ export async function fetchTotals(
   return (await res.json()) as TotalsResponse;
 }
 
-/**
- * **D20's smoothing — EWMA, 15-minute half-life** (B40). The constant is ratified, not chosen here.
- */
-export const HALF_LIFE_MS = 15 * 60_000;
-
-/**
- * Exponentially-weighted moving average over an irregular grid, in TIME rather than in points.
- *
- * The weight carried from the previous value is `2^(-Δt / halfLife)`, so the same 15 minutes mean
- * the same thing at every rung the gate can pick (D20's ladder makes the step size a variable, and
- * a per-POINT α would silently mean 15 minutes at the minute rung and 15 hours at the hour rung).
- *
- * Two consequences worth knowing before reading the chart, both arithmetic rather than opinion:
- *
- *   - at the **hour** rung the carried weight is `2^-4 = 0.0625`, so smoothing is nearly inert —
- *     which is where CPA and ROAS are usually drawn. At the **15-minute** rung it is 0.5, which is
- *     where CTR is usually drawn. So the toggle visibly does something on CTR and almost nothing on
- *     CPA, and that is the constant behaving correctly, not a broken control;
- *   - **a gap decays rather than bridges.** A `null` point emits `null` and does not advance the
- *     state, so the next real point is weighted by the true elapsed time. A long suppressed stretch
- *     therefore effectively restarts the average, instead of carrying an hour-old level across it.
- *
- * **It smooths the PLOTTED series** — the ratio after the division, not the counts before it. That
- * is the reading of D20's "smoothed series", and it is the one the surface labels, because a
- * smoothed value cannot be reconciled against raw events: B53's drill-down asserts against the RAW
- * toggle, which is why raw is the default.
- */
-export function ewma(
-  xSeconds: readonly number[],
-  y: readonly (number | null)[],
-  halfLifeMs: number = HALF_LIFE_MS,
-): (number | null)[] {
-  const out = new Array<number | null>(y.length).fill(null);
-  let level: number | null = null;
-  let atSeconds = 0;
-
-  for (let i = 0; i < y.length; i++) {
-    const value = y[i];
-    const at = xSeconds[i];
-    if (value === null || value === undefined || at === undefined) continue;
-    if (level === null) {
-      level = value;
-    } else {
-      const alpha = 1 - Math.pow(2, -((at - atSeconds) * 1_000) / halfLifeMs);
-      level = alpha * value + (1 - alpha) * level;
-    }
-    atSeconds = at;
-    out[i] = level;
-  }
-  return out;
-}
 
 /**
  * **B43 — the restatement timeline for a window** (`GET /api/restatements`).

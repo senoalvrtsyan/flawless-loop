@@ -74,3 +74,15 @@ export const WINDOW_CHOICES_H = [6, 2, 1, 0.25] as const;
 
 /** **D70's ratified `w`, in hours** — the default and the figure the README and the caption quote. */
 export const SCORING_WINDOW_H = 6;
+
+/**
+ * **The fatigue flag's smoothing half-life** (`SIMULATOR.md` §19, **D20**).
+ *
+ * It lived in `src/web/metrics.ts` while the chart had a raw/EWMA toggle and the two shared one
+ * constant on purpose, so *"the EWMA CTR"* meant one thing. **D74 deleted the toggle**, so the
+ * client no longer smooths anything and a server module importing a display constant out of the
+ * browser bundle would be the only thing keeping that file's smoother alive. It moves here, beside
+ * the horizon and the scoring window, because it is now what it always really was: a parameter of
+ * the heuristic, not of the chart.
+ */
+export const HALF_LIFE_MS = 15 * 60_000;

@@ -218,12 +218,12 @@ export function Scenarios({ ads, log, onFired }: ScenariosProps) {
         </table>
       )}
 
+      {/* **D75.** The load-bearing sentence is that a scenario is not a lever — that distinction is
+          in the model and the surface has to keep it. The determinism argument for why these rows
+          are persisted at all is README §"The mock data model". */}
       <p className="gate">
-        Every row here is a row of <code>sim_scenarios</code>, and that is why it is a table rather
-        than a message: §14&rsquo;s determinism claim is{' '}
-        <strong>(seed + decision log + sim_scenarios) → world</strong>, and a claim whose third input
-        lived in memory would be false. <strong>A scenario is not a lever</strong> — it changes what
-        the world does, never what the advertiser decided, and it appears in no decision log.
+        <strong>A scenario is not a lever</strong> — it changes what the world does, never what the
+        advertiser decided, and it appears in no decision log.
       </p>
     </section>
   );

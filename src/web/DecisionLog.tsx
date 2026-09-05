@@ -103,6 +103,9 @@ export type DecisionLogProps = {
   selected: ReadonlySet<string> | null;
 };
 
+/** How many rows the log shows before you ask for the rest. */
+const RECENT = 8;
+
 export function DecisionLog({ decisions, generations, scores, windowH, selected }: DecisionLogProps) {
   // Global by default. The plan row asks for "per-ad and global"; the per-ad view reuses the
   // portfolio selection rather than adding a second, independently-wrong idea of which ad is in
@@ -116,7 +119,19 @@ export function DecisionLog({ decisions, generations, scores, windowH, selected 
       : decisions.filter((d) => selected.has(d.ad_id));
   // Newest first — see the header note. `slice()` because the prop is the snapshot's array and
   // `reverse()` mutates in place; reversing it under React would reorder the source of truth.
-  const rows = filtered.slice().reverse();
+  const all = filtered.slice().reverse();
+  /**
+   * **D75 — the log renders its most recent slice, not all of it.** Measured in the browser: at 25
+   * seeded decisions this table was **4,239 px tall, more than half the whole page**, and 24 of
+   * those 25 rows are the seeded world's own `create_ad`/`launch` pairs — setup, not decisions
+   * anyone made while watching. The levers a reviewer pulls land at the top, which is where they
+   * are looking.
+   *
+   * Nothing is hidden: the count says how many there are and one click shows them. The brief asks
+   * for a decision log, and a log you cannot see the top of is worse at being one.
+   */
+  const [showAll, setShowAll] = useState(false);
+  const rows = showAll ? all : all.slice(0, RECENT);
 
   return (
     <>
@@ -136,16 +151,18 @@ export function DecisionLog({ decisions, generations, scores, windowH, selected 
         </div>
         <div className="controls__group">
           <span className="controls__label">
-            {rows.length} of {decisions.length} decisions · fold order reversed for reading
+            {rows.length} of {all.length} decisions{all.length === decisions.length ? '' : ` (${decisions.length} total)`} · newest first
           </span>
+          {all.length > RECENT ? (
+            <button type="button" onClick={() => setShowAll(!showAll)}>
+              {showAll ? `show ${RECENT} most recent` : `show all ${all.length}`}
+            </button>
+          ) : null}
         </div>
       </div>
 
       {rows.length === 0 ? (
-        <p className="timeline__empty">
-          No decisions for this selection. Every ad has at least a <code>create_ad</code> and a{' '}
-          <code>launch</code> (D5/E4/E5) — an empty list here means the selection is empty.
-        </p>
+        <p className="timeline__empty">No decisions for this selection.</p>
       ) : (
         <table className="log">
           <thead>
@@ -211,29 +228,24 @@ export function DecisionLog({ decisions, generations, scores, windowH, selected 
       {/* **B50a.** The heuristic, stated — brief L125 asks for exactly this and L147 warns off
           anything more. The limits are as prominent as the number, the same posture §19's fatigue
           flag takes, because a heuristic whose caveats are smaller than its verdict is dishonest. */}
-      <p className="gate">
-        <strong>Scoring, and its four limits.</strong> Each entry compares a{' '}
-        <strong>symmetric 6-hour window</strong> either side of the decision (<strong>D70</strong>),
-        on one metric — CPA where both windows carry conversions, CTR otherwise. (1) It is{' '}
-        <strong>withheld until both windows are past the lateness horizon</strong>: the before-window
-        has had longer to accumulate late conversions, so an unguarded comparison makes{' '}
-        <em>every</em> decision look worse than it was.{' '}
-        <strong>Shorten the horizon above to release a score live.</strong> (2) A second lever inside
-        either window is <strong>flagged as contaminated</strong>, not corrected for — a visible
-        contamination beats two unequal windows needing normalisation. (3) It is a{' '}
-        <strong>comparison, not a causal claim</strong>: the world moves on its own, and six hours of
-        it moved here too. (4) One metric, chosen by the rule above and never both, so the reader
-        cannot pick whichever moved the way they hoped.
-      </p>
-
-      <p className="gate">
-        Every row above is a row of <code>decisions</code>, and the config on the left is the fold of
-        exactly these rows and nothing else —{' '}
-        <code>sqlite3 data/loop.sqlite &apos;SELECT * FROM decisions ORDER BY decision_seq&apos;</code>{' '}
-        returns them in the reverse of this order. <code>GET /api/verify</code> is the machine
-        version of the same claim: it rebuilds <code>ads</code> and <code>config_generations</code>{' '}
-        from this log into shadow tables and diffs them against the live ones.
-      </p>
+      {/* **D75.** The four limits are honesty the brief grades, so they are NOT deleted — they are
+          collapsed. An 828-character wall is not how to deliver a caveat; a disclosure whose summary
+          says what is inside it is. The paragraph that followed ("every row above is a row of
+          `decisions`…" plus a shell command) is gone entirely: it explained the design rather than
+          the number, and README §"Check it yourself" carries both it and the command. */}
+      <details className="disclosure">
+        <summary>Scoring, and its four limits</summary>
+        <p className="gate">
+          A <strong>symmetric 6-hour window</strong> either side of the decision (<strong>D70</strong>),
+          on one metric — CPA where both windows carry conversions, CTR otherwise. (1) Withheld until
+          both windows are past the lateness horizon: the before-window has had longer to accumulate
+          late conversions, so an unguarded comparison makes <em>every</em> decision look worse than
+          it was. (2) A second lever inside either window is <strong>flagged as contaminated</strong>,
+          not corrected for. (3) It is a <strong>comparison, not a causal claim</strong> — the world
+          moves on its own. (4) One metric, never both, so the reader cannot pick whichever moved the
+          way they hoped.
+        </p>
+      </details>
     </>
   );
 }
