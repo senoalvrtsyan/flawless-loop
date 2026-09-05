@@ -47,6 +47,70 @@ Two endpoints are worth knowing before you click anything: `GET /api/health` (lo
 
 ---
 
+## Framing — how I read the brief, and what I think the product is
+
+The brief opens with a claim rather than a feature list: *"Launch is not the finish line. It's the
+starting gun."* An ad is *"really a bet"*, and the strategist is *"not a producer of ads but the
+operator of a portfolio of experiments"*. Everything below follows from taking that seriously.
+
+**So this is not a dashboard. It is a ledger with a viewport on it.**
+
+A dashboard's job is to show you a number. This product's job is to show you a number *and be able to
+prove where it came from* — which is the difference the brief grades in one sentence: *"is the path
+from event to pixel sound: can you trace any number on screen back to the raw events beneath it — and
+do they agree?"* Once agreement is the criterion, the interesting engineering stops being the chart
+and starts being the chain underneath it: an append-only log, projections that nothing else may
+write (**D7**), and a way to rebuild the projections and diff them (`/api/verify`). Every surface in
+this app is a read of that chain. None of them holds a fact of its own.
+
+**The product problem underneath the data problem is: which numbers are safe to act on yet?**
+
+This is the thing the brief circles without naming. It says conversions *"attribute backwards to
+clicks from hours or days earlier and quietly rewrite numbers you thought were final"* — and if you
+take that literally, as we did (**D27**), a conversion belongs in **its click's minute**, not its
+own. The consequence is not a storage detail; it is the whole product:
+
+> **CTR is live. CPA and ROAS lag by cohort.** A strategist watching a newly-swapped creative can
+> act on its click-through within minutes and must not act on its ROAS for hours.
+
+A cockpit that renders both at the same visual weight, with no marking, is inviting exactly the wrong
+decision — confidently, and with real numbers. So most of the read-side budget went into saying which
+is which: the statistical gate (**D20**), the maturity indicator (**D33**), settlement states, and
+restatement marks that persist rather than flash. That is what *"observable and actionable"* means
+here. Not more numbers — fewer numbers, each carrying what it is worth.
+
+**Three things I take as literal instructions rather than as flavour.**
+
+1. ***"Events, not snapshots"*** and *"nothing on screen is hard-coded"* mean the simulator is not a
+   fixture, it is a **model**. It runs in its own process, reaches the store only over HTTP
+   (**D32**), and re-derives an ad's behaviour from the world it polls at 1 Hz. Its parameters are
+   a design artifact in their own right — see [the mock data model](#the-mock-data-model).
+2. ***"A live ad's config changes only through levers"*** (L42) is a rule the brief states and its
+   own contract cannot keep — nothing in the given `Decision` union creates or launches an ad, so
+   the fold has no origin. We added `create_ad` and `launch` (**D5**) and said so, rather than
+   seeding ads out of band and quietly breaking the property being graded.
+3. ***"A well-chosen heuristic, honestly presented with its limits, beats an opaque model"***
+   (L147) is a budget instruction. There is no forecasting model here and there is no attempt at
+   one. There is one heuristic — the fatigue flag — and five stated limits sitting next to it on the
+   screen, not only in this file.
+
+**Where I think the brief's own framing is misleading, and what I did about it.**
+
+It presents Workbench / Signal / Decision loop as three coordinate surfaces, and then says of one of
+them *"Signal is where we look hardest at your engineering"* — while the Workbench's genuinely hard
+question (*"when one video appears in twelve live ads, what does the strategist see?"*) is a **read**
+question that a sketched surface can answer honestly. Treating the three as equal thirds would have
+bought a shallower Signal in exchange for a builder UI nobody is grading. So **D1** built Signal
+deep, the decision loop plain, and the Workbench as one read-only screen over the live reverse join
+— and the versioning question the brief says to *"pick one and defend"* is defended in prose, which
+is what it asked for.
+
+The rest of the disagreements are itemised, with what we changed and what we argued with and kept,
+in [extensions to the brief's contracts](#extensions-to-the-briefs-contracts). That section is the
+push-back, and it is deliberately not buried.
+
+---
+
 ## The three surfaces
 
 The brief names three. We built two deep and sketched the third, deliberately — see
@@ -104,6 +168,45 @@ stream"*, but `Decision` is not a member of the `Signal` union (finding **G35**)
 reading — a lever's *effect* shows up in the stream, because pausing stops the impressions — and
 merge the two only in the read model. No synthetic signal is emitted for a decision; that would be
 duplicated state that can diverge.
+
+### The storage model, and the schema
+
+**SQLite on the server, through Node's built-in `node:sqlite`** (**D8**) — no new dependency, Node 24+
+pinned in `engines` and `.nvmrc`. Twelve tables. The full DDL, every index with the query it serves,
+and a diff against what Phase 2 designed are in **[`docs/SCHEMA.md`](docs/SCHEMA.md)**; the shape is
+this:
+
+| | Tables | Rows in the shipped seven-day store | Who may write |
+|---|---|---|---|
+| **Logs** — authoritative, append-only | `signals`, `signal_deliveries`, `decisions` | 1,590,951 · 1,605,911 · 24 | The ingest endpoint and the lever endpoint. Never updated, never deleted. |
+| **Static reference** | `components`, `audiences` | 16 · 4 | The seeder, once. |
+| **Simulator input** — neither a fact nor derived from one | `sim_run`, `sim_scenarios` | 1 · 0 | Persisted because the reproducibility claim `(seed + decision log + scenarios) → world` names them (**D40**), and a claim whose inputs live in memory is false. |
+| **Derived** — rebuildable projections | `ads`, `config_generations`, `conversion_attribution`, `rollup_minute`, `projection_meta` | 12 · 24 · 1,389 · 72,018 · 0 | **`src/server/apply.ts`, and nothing else** (**D7**). |
+| **Cached** | *nothing* | — | There is no cache tier, by decision (**D10**, **D29**) rather than by omission. |
+
+Four categories where the brief asks for three, and the fourth is the one that matters. `signals` and
+`signal_deliveries` record *what a delivery said*; every **interpretation** of it — which bucket it
+belongs in, which click it attributes to, which generation earned it — lives in a projection that can
+be dropped and rebuilt. That is why `conversion_attribution` is its own table rather than three
+nullable columns on `signals`: a late click changes the interpretation of a conversion, and if the
+interpretation lived on the log row we would be **mutating the log**.
+
+Six columns carry most of the design, and each is an extension the brief did not have:
+
+| Column | Why it exists |
+|---|---|
+| `signals.received_at` (**E1**) | Arrival time, stamped by *our* server, never by the emitter. Without it lateness is inexpressible — and an emitter that assigns its own arrival time is describing our latency rather than measuring it (**D12**). |
+| `signals.ingest_seq` (**E2**) | The total replay order the wire does not provide, and the SSE cursor. One writer, so it is a real sequence rather than a hint. |
+| `signals.ts_effective` | A **generated** column, `MIN(ts, received_at)` — the clock-skew clamp (I10). Generated so the clamped value cannot drift from the rule that produced it, while the emitted `ts` is still there to show. |
+| `signals.click_id` (**E3**) | The brief's `attributed_click_id` points at a field that exists nowhere in its own contract (**G17**). A click's identity has to be separable from its delivery's identity, or a redelivered click is a second click. |
+| `signals.source` (**E15**) | `backfill` or `live`, assigned by the server from which path the batch arrived on. It is what lets any figure resting on history disclose how much of it was seeded. |
+| `conversion_attribution.credited_minute` | Stored, not computed, for one reason: when a late click promotes an orphan, `apply()` must **decrement the bucket the conversion was previously counted in**, and without the previous placement recorded that bucket cannot be found. |
+
+Two tables admit a value that nothing ever writes, both deliberately. `conversion_attribution.state`
+admits `orphan_expired` — **D54** makes expiry a read-time derivation, because storing it would put a
+clock inside a projection and `/api/verify` would then report divergence on a correct store. And
+`ads.status` admits `archived`, which no lever reaches (**F1**): it is unreachable in our *lever set*,
+not in the *domain*, and narrowing a declared enum would hide a scope cut inside a type.
 
 ### The persistence boundary
 
@@ -177,6 +280,37 @@ policy we *would* adopt is written down instead — past the horizon, compact im
 per-minute counts and retain clicks and conversions in full — along with exactly what it forecloses:
 any question about an *individual* impression past the horizon, which means the traceability
 walk-back stops working on old data while the numbers stay correct.
+
+**The three option tables, kept.** The brief asks what each choice forecloses, so here is the working
+rather than the conclusion.
+
+**D9 — retention granularity.**
+
+| Option | Cost | Under a late event | What it forecloses | |
+|---|---|---|---|---|
+| A — raw only, aggregate on every read | Zero write cost; every chart is a full scan. At 7 days × 12 ads that is ~1.6M rows per repaint | Perfect: nothing to correct, the next read simply sees more rows | Nothing in principle — but the live surface becomes unusable, and *"the number moved"* is invisible because nothing was ever fixed to move | |
+| B — rollups only, raw discarded after folding | Cheapest storage and reads | **Lossy.** A late conversion can be added to a bucket; there is no way to check the bucket against anything | **Traceability (L143) — the graded criterion.** Also drill-down, the agreement test, and any re-bucketing decision ever | rejected outright |
+| **C — hybrid: raw retained forever + minute rollups as a rebuildable projection** | One extra upsert per event; storage ~2× the raw log | Late event updates the affected bucket(s) and stamps `restated_at`; raw is untouched and remains the check | Nothing. Hours derive from minutes; sub-minute ratios are unavailable and nothing needs them | **chosen** |
+
+**D10 — where ratios are computed.**
+
+| Option | Cost | Under a late event | What it forecloses | |
+|---|---|---|---|---|
+| A — write time: store CTR/CPA/ROAS per bucket | Cheapest read | Every stored ratio in every affected bucket must be recomputed and rewritten | **Correctness at other granularities** — re-aggregating stored ratios across buckets is arithmetically wrong | disqualified |
+| **B — read time from stored counts** | A division per displayed point | Nothing to do: the counts moved, so the ratio moves with them | Nothing | **chosen** |
+| C — cached read-through | Fastest repeat reads | A second invalidation mechanism to keep in step with restatement | Nothing, but it buys nothing at this scale | rejected |
+
+**D29 — when the counts are maintained.**
+
+| Option | Cost | Under a late event | What it forecloses | |
+|---|---|---|---|---|
+| **A — ingest-time incremental upsert, same transaction** | One indexed upsert per event per affected bucket | **Identical code path.** The late event updates an older bucket and stamps `restated_at`; there is no second mechanism | Nothing | **chosen** |
+| B — lazy materialisation, cached, invalidated on late touch | Zero until read | Invalidation must find every cached window overlapping the bucket — the restatement problem, solved a second way | Nothing, but it doubles the surface where restatement can be got wrong | rejected |
+| C — periodic batch sweep every N seconds | Amortised, decoupled from ingest latency | Same as A but N seconds later | **The live feel** — a visible lag between "event arrived" and "number moved", and it makes the agreement test race its own writer | rejected |
+
+The decisive argument for D29-A is not performance. It is that **restatement stops being a feature**:
+a late arrival is just an event whose bucket happens to be old, so the restatement path is a flag and
+a fan-out rather than a subsystem. That single choice is why the next section is short.
 
 ### The consequence a strategist actually feels — D27
 
@@ -307,6 +441,140 @@ buys #2**, the data-health panel, which is a genuinely more expensive thing than
 | 9 | Multi-currency, campaign/portfolio entity, conversion kinds, retraction/void event | Each buys realism at the cost of a graded criterion elsewhere, and each is named as a deliberate omission rather than left silent. |
 
 <!-- README-VERBATIM-END -->
+
+---
+
+## Late-arriving conversions, end to end
+
+This is the misbehaviour the brief calls *"the most interesting"*, and it is the one built all the
+way through. **D12, D13, D14, D15, D16, D27, D29, D30 and D33 all land here.** What follows is the
+mechanism; [the life of one event](#the-life-of-one-event) walks a single real conversion through it
+with every id resolved.
+
+### 1 — Arrival, in one transaction
+
+The simulator POSTs a batch to `/api/ingest` (**D32** — it never opens the store). For each event,
+inside **one transaction**:
+
+1. **Stamp.** `received_at = server now`, `ingest_seq = next()`. Never emitter-assigned (**D12**).
+2. **Validate.** Money non-negative integers, `ts` parseable, variant fields present. Failures are
+   written to `signal_deliveries` with `disposition = 'rejected_invalid'` and counted. **Nothing is
+   silently dropped** — 1,579 rejected deliveries are in the shipped store and every one is readable.
+3. **Clamp.** `ts_effective = MIN(ts, received_at)`, as a generated column. A future-dated `ts` is a
+   clock problem; clamping is honest — the event certainly did not happen after we received it —
+   where rejecting loses data over someone else's clock.
+4. **Dedupe on `event_id`.** Every delivery is written regardless. Unseen → `accepted`. Seen with the
+   same payload hash → `duplicate_identical`, counted, aggregates untouched. Seen with a **different**
+   hash → `duplicate_conflicting`: **first write still wins**, and the conflicting delivery is
+   retained and surfaced, because it is the *only* channel through which a platform correction could
+   ever reach us (**G43**). The store holds 12,582 and 799 of these respectively.
+5. **Never reject on ad status.** A conversion attributed to a click from *before* a pause arrives
+   *after* the pause, and it is exactly the event we care most about. Rejecting events for non-live
+   ads would discard it — a real trap (**G48**, **I11**).
+
+### 2 — Attribution: the click is authoritative
+
+`attributed_click_id` is resolved against `signals.click_id` through the partial unique index.
+
+- **Click found** → `resolved`. The credited ad is **the click's** `ad_id`, not the conversion's; if
+  they disagree, `ad_id_conflict` is set and counted rather than silently reconciled (**I8**). The
+  credited generation is the one whose `[valid_from, valid_to)` contains the **click's** `ts`
+  (**D14**) — so a creative swapped yesterday cannot collect a windfall for a click its predecessor
+  earned.
+- **Click absent** → `orphan_provisional`. Revenue is never silently lost (**D16**). With no click
+  there is no click-minute, so it is credited provisionally at *its own* minute, into the
+  `provisional_*` columns — held apart from settled counts so an orphan can never be mistaken for an
+  attributed conversion. **8 are provisional in the shipped store; 1,381 resolved.**
+- **A click arrives later** → `ix_signals_attr` finds every conversion waiting on it and each is
+  promoted, which is a **two-bucket** move: out of its own minute, into the click's.
+- **Still unresolved past the horizon** → `orphan_expired`, **derived at read, never stored**
+  (**D54**). Counted and displayed as a data-health figure, never deleted: an unresolvable conversion
+  is a true fact about the stream and the cockpit should say so.
+
+### 3 — Which bucket it lands in — the decision that shapes the product
+
+**Event time, never arrival time. And for a conversion, event time means the attributed click's.**
+
+```
+bucket(impression) = floor_minute(ts_effective)
+bucket(click)      = floor_minute(ts_effective)
+bucket(spend)      = floor_minute(ts_effective)
+bucket(conversion) = floor_minute(click.ts_effective)   <-- D27-B, cohort placement
+bucket(orphan)     = floor_minute(own ts_effective)     <-- provisional only, D16
+```
+
+A bucket is therefore **"activity at time T, and everything it eventually earned"**, which is what
+makes CPA(T) and ROAS(T) real cohort ratios rather than two unrelated populations divided by each
+other. It is also the reading under which the brief's own sentence — conversions *"attribute
+backwards to clicks from hours or days earlier and quietly rewrite numbers you thought were final"* —
+describes what this system actually does rather than something it could do.
+
+### 4 — Restatement is generic, and that is the whole trick
+
+```
+applyConversion(ev, prev?):                 -- prev = its previous attribution, if any
+  if prev:  bucket(prev.credited_minute) -= prev contribution      -- decrement the old bucket
+  bucket(new credited_minute)            += new contribution       -- credit the new one
+  for each touched bucket B:
+      B.max_ingest_seq = max(B.max_ingest_seq, ev.ingest_seq)
+      if settled_at(B, ev.received_at):                            -- NOT wall-clock now
+          B.restated_at = ev.received_at;  B.restatement_count += 1
+```
+
+Restatement is **not lateness-specific**: it is *a fact changed, recompute the affected buckets*.
+D27-B forced that, because an orphan promotion moves a conversion between two buckets — so a
+lateness-only mechanism would have been wrong on the very first orphan. All of it happens in the
+**same transaction as the insert** (**D29**), so a reader never sees a signal that its bucket does
+not yet include.
+
+`settled_at(B, at)` is `at − (B.minute_start + 60s) > horizon`, horizon **72 h** (**D13**), displayed
+and adjustable. **Evaluated at the arriving event's `received_at`, never at wall-clock `now`** — a
+correction **D38** forced during Phase 3, and the reason is worth keeping: the question a restatement
+flag answers is *"was this bucket settled **when this event arrived**"*. For a live event the two are
+identical. They diverge exactly once, and expensively — during seeding, `now` is boot time, so the
+wall-clock form would stamp `restated_at` on **every** backfilled event landing in a bucket older
+than 72 h. Tens of thousands of spurious restatements, and the flagship path looking broken on frame
+one.
+
+Three states, and they are the vocabulary the UI speaks in:
+
+| State | Meaning |
+|---|---|
+| **live** | inside the horizon; still accruing; expect it to move |
+| **settled** | past the horizon; we assert it will not move |
+| **restated** | it was settled and it moved anyway — with when, by how much, and by which events |
+
+### 5 — How the screen learns, and what the strategist sees
+
+The dirty set is flushed on a 250–500 ms tick as **absolute bucket rows**, coalesced per
+`(ad_id, minute)`. **A restatement is not a special frame** — it is the same row, for an older
+minute, carrying `restated_at` and a bumped `restatement_count`. *"The number grew"* and *"the number
+changed"* are one mechanism, which is why there is no reconciliation code to get wrong, and why a
+redelivery after a reconnect is idempotent (**D30**).
+
+On screen: the affected point **changes value and is marked restated** — a persistent treatment, not
+a flash, because the reviewer may be looking elsewhere. A timeline entry appears at the *bucket's*
+time rather than at now. Clicking it opens the trace with `as_of` set to just before the arrival, so
+the previous figure, the new figure and the exact `event_id`s accounting for the difference are on
+screen together.
+
+### 6 — It fires on real data, not only on a trigger
+
+**14 buckets in the shipped store carry `restated_at`.** The most extreme is conversion
+**`c4804d05ed499439`** on `a_01`: its click landed at `2026-08-30T01:05:43Z`, the purchase happened
+at `2026-09-05T00:33:05Z`, and it reached us at `2026-09-05T04:29:42Z` — **147.4 hours, six days,
+after the click that earned it.** It was credited to minute `2026-08-30T01:05`, a bucket that had
+been settled for three days.
+
+That is the emergent path — the lag mixture in [the mock data model](#the-mock-data-model) puts
+2–5% of every cohort past the horizon by construction. Two controls exist to make it happen on
+demand rather than on luck: **P16** shortens the horizon (which re-evaluates settlement across the
+range — it is a sweep with a control on it, not a config field), and **P17**'s `late_cascade`
+scenario delivers a burst of genuinely late events. Both are in the demo.
+
+**Beyond the horizon, an event is stored, attributed, counted in a separate past-horizon tally, and
+excluded from headline numbers.** It is never dropped. An honest exclusion is a feature; a silent one
+is the bug the brief warns about.
 
 ---
 
