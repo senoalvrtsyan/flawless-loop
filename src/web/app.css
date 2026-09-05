@@ -18,6 +18,10 @@
   --ink: #16191d;
   --ink-muted: #5b6470;
   --border: #d7dbe0;
+  /* A deliberately heavier rule than `--border`. B64 uses it for the between-section separators,
+   * which have to read as "a different surface starts here" from across a room during a demo —
+   * `--border` is a hairline around a control and reads as one. Nothing else uses this. */
+  --rule: #aeb5be;
   --accent: #1b4fd8;
 
   /* Ad status, from the fold. Four, because `ads.status` has a four-value CHECK. */
@@ -178,8 +182,21 @@ h2 { font-size: .8rem; margin: 0; padding: .75rem 1rem .5rem; color: var(--ink-m
  * and the chart's markers are visibly the same claim; the dash pattern is the non-colour channel
  * D45 requires and B42 is checked on. */
 
-.section { font-size: .8rem; color: var(--ink-muted); text-transform: uppercase;
-           letter-spacing: .04em; padding: 0; margin: 1.25rem 0 .5rem; }
+/* **Section separators — B64.** This is one long page carrying eight surfaces that do genuinely
+ * different jobs: the numbers, the lever, the log, the scenario console, the restatements, the
+ * Workbench, the fatigue flag, the trace and the raw tail. Before this rule they were told apart
+ * only by a small muted heading, and the two most important boundaries on the page are ones a
+ * reviewer must not miss — the one between the ACTION CONSOLE (what the advertiser decided) and the
+ * SCENARIO CONSOLE (what the simulator was told to do), and the one between every performance
+ * number and D34's quarantined transport telemetry at the bottom.
+ *
+ * A rule and generous space above, not a box: boxing each section would put a border around the
+ * telemetry block too, which already has its own treatment for a reason (D45), and two competing
+ * enclosures is how the one that means something stops meaning it. */
+.section { font-size: .8rem; color: var(--ink); text-transform: uppercase;
+           letter-spacing: .04em; font-weight: 600;
+           border-top: 2px solid var(--rule); padding: 1.5rem 0 0;
+           margin: 2.5rem 0 .75rem; }
 
 .timeline { list-style: none; margin: 0 0 1rem; padding: 0; }
 .timeline__item { border-left: 3px dashed var(--state-restated); padding: .35rem 0 .35rem .6rem;
