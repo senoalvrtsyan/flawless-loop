@@ -874,8 +874,10 @@ Two consequences:
 
 **Mostly inherited, and deliberately not re-decided here.** **D20** fixes the gate (≥500 impressions
 for CTR, ≥10 **conversions** for CPA/ROAS), the adaptive ladder (minute → 5 min → 15 min → hour, then
-**stop** and show counts with the reason stated) and the smoothing (**EWMA, 15-minute half-life**,
-raw toggle). **D33** fixes the maturity indicator: the empirical attribution-lag CDF over settled
+**stop** and show counts with the reason stated) and the smoothing (**EWMA, 15-minute half-life**).
+**D74 has since removed the chart's raw/EWMA toggle**; the half-life remains a parameter of the
+fatigue flag below, which is now the only smoother in the codebase. **D33** fixes the maturity
+indicator: the empirical attribution-lag CDF over settled
 cohorts, **global**, always displayed with the sample size it was measured from. §18.3 is this
 document's contribution — evidence that the parameters were chosen so those mechanisms are visible.
 
@@ -996,7 +998,7 @@ READ SIDE                                                             [D20, D33]
   CTR gate                     ≥ 500 impressions / point
   CPA·ROAS gate                ≥ 10 conversions / point
   ladder                       minute → 5 min → 15 min → hour, STOP → show counts
-  smoothing                    EWMA, 15-min half-life, raw toggle
+  smoothing                    EWMA, 15-min half-life — fatigue flag only (chart toggle: D74)
   fatigue flag                 −25% vs peak trailing-6h EWMA CTR, ≥3 gated points per window
 ```
 

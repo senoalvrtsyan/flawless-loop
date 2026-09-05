@@ -526,7 +526,8 @@ Two distinct mechanisms carry that message, and they must stay visibly distinct:
   widened into a single bar is not.
   - CTR: ≥ 500 impressions per plotted point (relative standard error ≈ 30% at p ≈ 2%)
   - CPA, ROAS: ≥ 10 **conversions** per plotted point (RSE of a count of 10 ≈ 32%)
-  - Smoothing: EWMA, 15-minute half-life, with a raw toggle
+  - Smoothing: **none on the chart — D74 removed the toggle D20 ratified.** The half-life survives
+    inside the fatigue flag (§19), which is the only smoother left in the codebase
 - **The maturity indicator (D33)** — *the data is still arriving.* Per bucket, from the empirical
   attribution-lag CDF measured over settled cohorts: collect `received_at − click.ts` for resolved
   conversions, evaluate at the bucket's age. **Global, not segmented** — at 12 ads a per-channel

@@ -207,7 +207,11 @@ and the gated count is always on screen.
 5. **Metric `CTR`, whole portfolio, 24h.** Nine ads drawn at the hour, **43 of 216 points gated**,
    and `a_07` / `a_09` named as counts-only. `a_09` clears nothing at any rung — 214 impressions an
    hour against a bar of 500 — and the surface says why rather than drawing a line through noise.
-6. **Toggle `raw` → `EWMA 15m`** (B40). The series smooths and the caption warns that smoothed
+6. ~~**Toggle `raw` → `EWMA 15m`**~~ — **REMOVED by D74.** The chart draws the raw series only, so
+   there is no longer a step here and nothing to switch back before a walk-back. What the following
+   lines said about smoothed points not reconciling against raw events is now true by construction.
+   *(struck through rather than deleted: this file is the record of a pass that was followed cold.)*
+   ~~(B40). The series smooths and the caption warns that smoothed~~
    points **will not reconcile against raw events** — switch back to raw before walking one back,
    which is what B53's drill-down asserts against. Note the honest limitation while it is on screen:
    at D20's ratified 15-minute half-life the carried weight is 0.5 at the 15-min rung and **0.0625

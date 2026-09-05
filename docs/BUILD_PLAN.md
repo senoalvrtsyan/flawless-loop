@@ -438,10 +438,17 @@ ratified constant.
 | [x] | **B63** | **Expand `CTR` / `CPA` / `ROAS`** — what each stands for and the division underneath it, both visibly on the page and as a hover title on every metric label and selector button | `src/web/metrics.ts`, `Metric.tsx`, `App.tsx`, `app.css` | In the browser: hover any metric label and the selector buttons — expansion, formula, and for the three that lag the cohort caveat on a second line. The visible line under the headline figures reads all three. `METRIC_GLOSSARY` is total over `TraceMetric`, so an added metric is a compile error | **HR5** — a number you cannot name is a number you cannot walk back |
 | [x] | **B64** | **Strong separators between the page's eight sections** — a 2 px `--rule` above each `h2.section`, headings to full ink | `src/web/app.css` | In the browser: eight rules, and the two boundaries that carry meaning are legible — action console vs scenario console, and every performance number vs D34's telemetry | — |
 
+| [x] | **B65** | **Section headings at 1.2 rem with a subtitle** — the NAME scannable, the definition under it, above a 2 px rule | `App.tsx`, `app.css` | Eight headings, 12.8 px uppercase → 19.2 px | — |
+| [x] | **B66** | **D74 — delete the chart's raw/EWMA toggle.** `ewma()`, `HALF_LIFE_MS` and 4 tests go; `HALF_LIFE_MS` moves to `shared/config.ts` for the fatigue flag, which is untouched | `Chart.tsx`, `App.tsx`, `metrics.ts`, `shared/config.ts`, `server/fatigue-flag.ts`, `metrics.test.ts` **deleted** | The Series control is gone; 172 → **168 tests**, which is the four EWMA tests and expected | — |
+| [x] | **B67** | **D75 — nine prose blocks cut to their facts.** The four scoring limits are **collapsed, not deleted** | `Horizon.tsx`, `DecisionLog.tsx`, `Components.tsx`, `Timeline.tsx`, `Scenarios.tsx`, `Tail.tsx`, `Maturity.tsx`, `App.tsx`, `app.css` | Measured in the DOM: prose **5,548 → 2,253 chars (−59%)**. Every caption a decision requires is still there — D33's sample size, D67's rung and dropped ads, D34's transport heading, D65's anchor | — |
+| [x] | **B68** | **The headline figures become an even grid**, and the duplicated 66-char cohort clause becomes `lags by cohort` with the sentence kept in the hover | `app.css`, `metrics.ts`, `App.tsx` | All six figures on one row at 1500 px; ROAS no longer stranded | — |
+| [x] | **B69** | **The decision log renders its 8 most recent rows**, with `show all` | `DecisionLog.tsx` | It was **4,239 px — more than half the page** — and 24 of 25 rows were seeded `create_ad`/`launch` setup | — |
+
 > ### ▶ Demo checkpoint 7a — *"a stranger can name what they are looking at"*
 >
 > A reviewer who has never seen an ad platform can read every headline figure's name, and can tell
-> at a glance that the page is eight surfaces rather than one long scroll.
+> at a glance that the page is eight surfaces rather than one long scroll. **Measured at B65–B69:
+> the page is 7,463 → 5,721 px and its text 21,863 → 14,631 characters, with no mechanism changed.**
 
 ---
 
@@ -486,7 +493,7 @@ than to make cutting feel free.
 | # | Cut | Chunk | What is lost |
 |---|---|---|---|
 | 1 | Generation boundary markers on the chart | B48 | The swap's CTR step still happens and `config_generations` still records it; only the visual annotation goes. HR6 rests on the model, not the marker |
-| 2 | EWMA smoothing and the raw toggle | B40 | Charts get noisier. D20's gate is what carries the honesty story; smoothing is comfort |
+| 2 | ~~EWMA smoothing and the raw toggle~~ — **TAKEN, by D74** rather than for time | B40 | Charts get noisier. D20's gate is what carries the honesty story; smoothing is comfort — and the brief never asked for it |
 | 3 | The fatigue flag heuristic | B45 | HR7 stays with B25–B35 — the fatigue curves are still in the data and visible in the charts. What goes is the read-side *interpretation* and its four stated limits: a real loss to the domain-modelling story, and the cheapest big one to make |
 | 4 | Stream-health telemetry beyond three counters | part of B44 | Keep events/sec, last-event age and dedupe count; drop the rest. `SCOPE.md` cut #2 already removed the *designed* panel — this is the second bite |
 | 5 | `swap_component` in the console | part of B46 | `pause` and `set_budget` both close the loop, and `pause a_12` is the brief's own example. Losing swap costs the on-screen demonstration of D14, which the README's temporal reverse join still shows in SQL |
@@ -796,7 +803,7 @@ Restated from `CLAUDE.md` §5 and §10 because they are the ones that will bite 
   mitigation is the **`anchored at …` label**, not a comment. Delete the label and the screen stops
   being able to say how far it has walked from the read that anchored it. The roll must also snap
   with `shared/time.ts` — a fifth copy of `floorMinute` is what B20a collapsed four copies to avoid.
-- **A smoothed point cannot be reconciled against raw events** (**B40**). EWMA is off by default and
+- ~~**A smoothed point cannot be reconciled against raw events**~~ (**B40**) — **MOOT under D74**: the chart draws raw only, so the trap is closed by construction rather than by a default. Kept as the record. EWMA is off by default and
   the caption warns while it is on, because B53's drill-down asserts against the **raw** series; a
   reviewer who walks back a smoothed point will see a mismatch that is not corruption. Making
   smoothing the default is the silent version of this.

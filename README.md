@@ -1110,7 +1110,10 @@ looking at.
 - **CPA and ROAS:** ≥ 10 **conversions** per plotted point (RSE of a count of 10 ≈ 32%).
 - **Ladder:** minute → 5 min → 15 min → hour, **and stop.** If the hourly point still fails the bar,
   **the ratio is not drawn** and the counts are shown in its place with the reason stated.
-- **Smoothing:** EWMA, 15-minute half-life, with a raw toggle.
+- **Smoothing:** none on the chart. D20 ratified an EWMA toggle and **D74 removed it** — it was off
+  by default, hard to find, and nearly inert on CPA/ROAS at the hour rung. The raw series is now the
+  only series, which also means what the chart draws and what a walk-back re-sums are the same thing
+  by construction. The 15-minute half-life survives where it earns its keep: inside the fatigue flag.
 
 The stop is the part worth defending. A chart that says *"not enough conversions yet — here are the
 counts"* is honest; one that has quietly widened into a single bar covering the whole window is not,
