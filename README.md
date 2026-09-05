@@ -307,3 +307,251 @@ buys #2**, the data-health panel, which is a genuinely more expensive thing than
 | 9 | Multi-currency, campaign/portfolio entity, conversion kinds, retraction/void event | Each buys realism at the cost of a graded criterion elsewhere, and each is named as a deliberate omission rather than left silent. |
 
 <!-- README-VERBATIM-END -->
+
+---
+
+## Stream misbehaviours
+
+**Tolerated** = handled correctly, no visible degradation. **Degrades** = we detect it, say so, and
+carry on with a stated loss. **Breaks** = we cannot represent it; named rather than discovered.
+
+Copied verbatim from [`docs/DESIGN.md`](docs/DESIGN.md) §6.
+
+| Misbehaviour | Disposition | Why, in one line |
+|---|---|---|
+| Duplicate delivery, identical payload | **Tolerated** | `event_id` is the primary key; the delivery is recorded, the aggregate is untouched (D15) |
+| Duplicate delivery, **conflicting** payload | **Tolerated, surfaced** | First write wins for the aggregate; the conflicting delivery is retained, counted and visible in the trace (D15/I7) |
+| Out-of-order arrival | **Tolerated** | Bucketing is on event time; `ingest_seq` supplies the replay order the wire does not (D12) |
+| **Late-attributing conversion** | **Handled end to end** | The flagship path: cohort placement, generic restatement, settlement states, visible on the surface (§5) |
+| Orphaned conversion — click has not arrived | **Handled** | Provisional at its own minute, promoted and moved on resolution (D16, §5.4) |
+| Orphaned conversion — click never arrives | **Degrades** | `orphan_expired` past the horizon: counted and displayed, excluded from headline numbers, never deleted |
+| Conversion whose `ad_id` contradicts its click's | **Handled** | The click is authoritative; the disagreement is flagged and counted, not silently resolved (I8/G30) |
+| Same click delivered under two `event_id`s | **Degrades** | The unique partial index on `click_id` makes it detectable; we count it rather than dedupe on it (E3) |
+| Clock skew — future-dated `ts` | **Tolerated** | Clamped to `received_at`, both values retained, counted (I10) |
+| Clock skew — slow source clock | **Degrades** | Everything looks late; past-horizon arrivals leave the headline numbers and are counted separately (D13) |
+| Burst | **Tolerated** | Batched ingest, coalesced bucket frames, tail frames dropped with a visible counter (§11) |
+| Gap / stall | **Degrades — detected, not repaired** | Liveness display ("last event 12 s ago"); we can say the stream is quiet, not why |
+| **Emitter-side event loss** | **Breaks — silently** | There is no emitter sequence number, so a lost event is indistinguishable from an event that never existed (G21). The one failure we cannot see, and it is named |
+| **Retraction / refund / void** | **Breaks — unrepresentable** | The contract is append-only with no negation; a negative `value_cents` would fix the value and corrupt the count (G43). `conversion_void` is specified in the README and not built (D25) |
+| Signals for a non-live ad | **Tolerated** | Never rejected on status; counted as a self-check, since under our own simulator the count should be zero (I11/G48) |
+| Funnel violation (conversions > clicks in a live window) | **Tolerated** | Shown unclamped with an unsettled marker and the orphan count beside it — clamping would hide the phenomenon the brief wants demonstrated (G46) |
+| Malformed payload | **Tolerated** | Recorded as `rejected_invalid` with the raw body, counted; nothing is dropped without a trace |
+
+**Retractions are arguably more common in the wild than late attribution, and the brief does not
+mention them.** The cost of adding them is demonstrably low here: because D27-B forced the
+restatement path to be generic, `conversion_void` would be one event type and one `apply()` branch.
+It is not built, and it is the one row in the table we would build first.
+
+**The one we cannot see is emitter-side loss.** There is no emitter sequence number in the brief's
+`Signal` contract, so a lost event is indistinguishable from an event that never existed (finding
+**G21**). We could have added one — we added `received_at` and `ingest_seq` for related reasons — but
+an emitter sequence is a claim about a system we are pretending not to control, and inventing it
+would have made the demo look better than the model. It is named instead.
+
+---
+
+## Named limits
+
+Everything below is a limit we know about and chose. The brief asks that misbehaviours be named as
+tolerated or breaking rather than discovered by a reviewer; this section extends that to the whole
+build. Nothing here is a bug report — a bug is something we would fix.
+
+### What the model cannot represent
+
+| Limit | Why it is a limit and not a defect |
+|---|---|
+| **Retractions, refunds, voids** | The contract is append-only with no negation, and a negative `value_cents` would fix the value while corrupting the count (**G43**). Named as **breaking**. One event type and one `apply()` branch away. |
+| **Emitter-side event loss** | No emitter sequence number exists, so a lost event is indistinguishable from one that never existed (**G21**). The only failure in the table we cannot see. |
+| **Gap and stall detection** | We can say the stream is quiet ("last event 12 s ago") and we cannot say why. Detected, not diagnosed. |
+| **Currency** | USD only. No currency field, no FX, no per-geo money (**I16 / G05**) — even though `audiences` carries geo, so the model is visibly one field short of multi-currency. |
+| **Audience overlap** | Audiences are independent by construction. Two ads on overlapping audiences double-count a person, and `retargeting`'s referent is undefined in the brief (**G15**). |
+| **No campaign or portfolio entity** | The portfolio view is a `SUM` over ads, not an entity with its own budget or its own identity (**G29**). |
+| **One conversion kind** | `value_cents` is gross revenue. No purchase/lead/install distinction, no net-of-refund (**I14 / G20**). |
+| **`Ad.status: "archived"`** | Kept in the type, reachable by **no lever** (**F1**). It is the visible shadow of a scope cut, not a claim about the domain, and the fold carries one branch for it written to say so. |
+| **`Component.kind: "image" \| "body_copy"`** | Kept in the type, attachable to **no slot** — `Ad` has two slots and `Component.kind` declares four (**G06 / D23**). |
+
+### What is deliberately not built
+
+| Limit | Why |
+|---|---|
+| **No component editor** | Copy-on-write is a position defended in prose, not a flow. The three versioning fields exist and the seed contains one two-version lineage, so the *read* path is real; the write path is not. See [Component versioning](#component-versioning-copy-on-write). |
+| **No compaction** | Nothing needs compacting inside a seven-day horizon, so the policy is written down rather than shipped as a code path that never runs (**D11**). |
+| **No human-in-the-loop approval** | The brief's Background defines it and the contracts cannot express it; cut, and named rather than silently absent (**G25 / G36**, `SCOPE.md` §4 cut #6). |
+| **No forecasting or ML** | The brief excludes statistical sophistication. Every heuristic here — the D20 gate, the D33 maturity curve, the fatigue flag — is a bar or an empirical CDF, presented with its limits. |
+| **Ad status is not validated at ingest** | A signal is never rejected on ad *status* (**I11 / G48**) — that is deliberate, because a paused ad still legitimately receives conversions from clicks it earned while live. But `ad_id` being *known* is also not checked yet: `ingest.ts` says so in a comment, and adding it would make an unseeded store reject every event. |
+
+### Limits of the numbers on screen
+
+| Limit | Detail |
+|---|---|
+| **The straddled minute** | Rollups are keyed `(ad_id, minute_start)`, so a swap at 14:03:27 assigns all of minute 14:03 to one generation — one minute, one ad, per swap (**D28**). Exact answers are one raw scan away and the drill-down will give you one. |
+| **Funnel violations are shown unclamped** | Conversions can exceed clicks in a live window, because a conversion is backdated to its click's minute while its click may not have arrived. Shown with an unsettled marker and the orphan count beside it; clamping would hide the phenomenon the brief asks to see (**G46**). |
+| **`orphan_expired` is a reading, not a stored state** | The store holds `resolved` and `orphan_provisional`; expiry is computed at read (**D54 / I20**). A click arriving after the horizon still promotes the conversion — expiry changes what we *say*, not what we hold. Storing it would put a clock inside a projection and make `/api/verify` diverge on a correct store. |
+| **The scoring window is a read parameter, and the clock is long** | Decision scoring compares a symmetric window either side of a lever, withheld until both windows are past the lateness horizon (**D70**). The window is `?window_h=` and the horizon `?horizon_h=` — **two knobs that fail independently**, both printed in the caption. The **fastest possible on-camera score is window + horizon**, about **sixteen minutes** at the 15-minute window floor (**D71**). A demo starts that clock early; it cannot score a lever inside one beat. |
+| **The scoring metric rule is a recommendation, not a ratification** | D19 asked *"which metric?"* and that half was never answered. The build uses CPA where both windows carry conversions and CTR otherwise, and the entry on screen says which it used. |
+| **`create_ad` does not contaminate a score** | One action short of D70's "any second lever", on the grounds that a draft ad delivers nothing so it provably moved no counts. Including it flagged 24 of 24 seeded entries as contaminated, which is a flag nobody reads. |
+| **The maturity curve's cold-start fallback never fires** | With seven days of backfill the empirical CDF always has its sample, so the fixed fallback curve (50% @ 1 h, 80% @ 6 h, 95% @ 24 h) is documented and unexercised. |
+| **`resolveAttribution()` uses `ts_effective` where `DESIGN.md` §5.2 writes "the click's `ts`"** | They differ only for the 0.2% clock-skew events the simulator injects on purpose, and every other placement in the build uses `ts_effective`. Reported at the gate it was found, left as built, named here. |
+
+### Operational limits of this prototype
+
+| Limit | Detail |
+|---|---|
+| **Scenario triggers are at-most-once** | The server marks a trigger `consumed_at` at **serve** time, so a dropped poll response loses it silently — press the button again (**D69**). The emitter is idempotent by `scenario_id`, so moving to an emitter ack later is purely additive; the failure mode was chosen with that escape hatch in hand. |
+| **Trace descriptors do not survive a server restart** | The HMAC key is per-process (`TRACE_KEY` overrides). Every descriptor is re-issued on the next `/api/snapshot`, which a refresh runs — but **a page left open across a restart reads `invalid_signature` on its next click until you refresh it.** The error message says exactly that. |
+| **The drill-down's evidence list is capped** | 400 contributing events, 200 slices. **The re-sum is over everything** — only the *list* truncates, and `evidence_omitted` / `slices_omitted` are on the wire so the panel states the count rather than inferring it. Measured on a 6 h single-ad window: 400 shown of 9,560, 200 slices of 360. Conversions fill the sample first, because in log order the first 400 of 10,481 contributors were all impressions and a ROAS sat above a list containing nothing that earned revenue. |
+| **`POST /api/trace` costs ~0.6–1.3 s on the seven-day store** | Measured 0.61–0.68 s for a 6 h single-ad drill-down. `replay()` must read every click and every conversion in the log prefix regardless of window, because a conversion's own `ts` can sit far outside the window it belongs to. **Fine for a click; it must never become a per-tick path.** |
+| **A live click loses its in-flight conversion across an emitter restart** | The handover query is restricted to `source = 'backfill'` — a live click's schedule is known to the process that emitted it, and nothing persists it. Bounded, and the backfilled population (most of what a demo sees convert) is unaffected. |
+| **`payload_json` is a re-serialisation, not the received bytes** | `JSON.parse` has already collapsed duplicate keys and rewritten `1e2` as `100` and `\u0041` as `A` by the time we store it. The DDL comment and `DESIGN.md` §2.2 both promised *"exactly as received"* and were corrected — what we can honestly promise is *the parsed element, re-serialised*. Duplicate detection uses a hash of that, so two deliveries differing only in key order are `duplicate_identical`, which is the behaviour we want and not the behaviour the comment claimed. |
+| **`npm run agree` does not read three of the four projections** | It re-derives attribution from raw and compares only `rollup_minute`'s counts, so a corrupted `credited_generation_id` or `credited_ad_id` **sweeps clean**. `/api/verify` catches both. The sweep prints its own limits on every run, and must keep doing so — *"every stored bucket agrees with the raw event log"* is a narrower guarantee than it sounds. |
+| **The agreement sweep cannot see an invented all-zero bucket** | A promotion decrements a provisional bucket to all zeros and the row stays, so the store legitimately holds rows a from-zero recomputation never creates. `agree` compares an absent recomputed bucket against zero; `/api/verify` catches the case, and it is accepted rather than papered over. |
+| **`INJECT_FAULTS_INTO_BACKFILL` is a reading, not a ratified decision** | `DESIGN.md` §13's misbehaviour rates were written about a live transport; in a constructed arrival order a transport fault becomes an adjustment to `received_at`, never to emission. Named as a constant in `seed-history.ts` so it can be flipped. Without it the seeded week is clean and the live week dirty, the orphan rows never fire, and no bucket carries `restated_at` from frame one. |
+| **The pacing taper's slide has never been shown live** | Delivery going to zero and back has been demonstrated; the *gradual* taper has not. `DESIGN.md` §9's band is 15% of budget wide and one 62¢ click clears it on a fresh store. Accumulated spend or the `budget_squeeze` scenario is where it becomes showable, and this README does not claim it until one of them does. |
+| **One server per store** | The server and the simulator are separate OS processes, and only the server opens the store (**D32**) — the simulator reaches it over HTTP. WAL will happily let a *second* server process open the same file on a different port, and nothing stops you: the projections stay correct (both write through the same `apply()`), but each process signs trace descriptors with its own key, so a descriptor issued by one reads `invalid_signature` at the other. Run one server per store. |
+
+---
+
+## Extensions to the brief's contracts
+
+The brief invites extension and requires it be called out. This register is **assembled from**
+[`docs/BRIEF_GAPS.md`](docs/BRIEF_GAPS.md) § Extensions, which is the source of record and carries
+the full reasoning per row. Three dispositions, and only the first is an extension:
+
+- **Extended** — a field, type or variant the brief does not have. Fifteen.
+- **Narrowed** — something the brief declares that we removed or restricted. **We do none.**
+- **Interpreted** — a meaning the brief left open, fixed without changing its shape. Twenty, listed
+  separately because an interpretation can be wrong in a way a reviewer should be able to check.
+
+### Extended — `Signal`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E1 | `received_at` | `string` — ISO 8601 UTC, **server-assigned at the ingest boundary, never emitter-assigned** | G16 | D12 |
+| E2 | `ingest_seq` | `number` — monotonic, server-assigned; total replay order, SSE reconnect cursor, timestamp tie-break | G16, G21, G22 | D12 |
+| E3 | `click_id` on the `click` variant | `string`, distinct from `event_id` | G17 | T1 / P2 |
+| E15 | `source` | `'backfill' \| 'live'` — **server-assigned from the path the batch arrived on** | D33 conflict | D38 |
+
+**E1 and E2 are the highest-priority extensions in the project**, and the asymmetry is what makes
+them urgent: adding them costs two columns; omitting them costs the data *permanently*, because an
+event already ingested can never be given an arrival time afterwards. Everything the brief says it
+cares most about in `Signal` — lateness, restatement, as-of views, the mandatory mid-demo refresh
+surviving intact — is a statement about arrival time, and the given contract has no way to express
+arrival.
+
+**E3 separates the transport dedupe key from the domain foreign key.** The brief describes
+`event_id` as a dedupe key for at-least-once delivery, and `attributed_click_id` points at a
+`click_id` that exists nowhere in the contract. Under the alternative reading — that
+`attributed_click_id` means the click's `event_id` — the same click redelivered under a *different*
+`event_id` produces a double-counted click that nothing can detect. E3 makes that failure
+representable, and the partial unique index on `click_id` makes it visible.
+
+**E15 exists because two ratified decisions could not both hold.** D33 measures the maturity CDF as
+`received_at − click.ts`, the *observational* lag; D12 makes `received_at` server-assigned. Seeding
+seven days of history in one burst would give every backfilled conversion `received_at ≈ boot`, so
+the CDF would be a picture of the seed loop rather than of conversion lag. The seeder therefore
+stamps modelled historical arrival times — it is a fixture writer, not an emitter — and `source`
+keeps the two populations separable.
+
+### Extended — `Decision`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E4 | `create_ad` action variant | carries the initial config; the fold's origin | G33, G50 | D5 |
+| E5 | `launch` action variant | `draft → live`; the only writer of `launched_at` | G02, G33, G50 | D5 |
+| E6 | `decision_seq` | `number` — server-assigned fold order, mirroring E2 | G22, G45 | D21 |
+
+**E4 and E5 exist because the brief's central claim is false as written.** *"Current config is
+derivable: the initial state folded over the decision log"* names no event that produces the initial
+state, so the fold has no origin and nothing is recomputable. E4 supplies the origin; E5 supplies
+the transition that *"a live ad's config changes only through levers"* otherwise makes unreachable.
+The rule we ended up with is **sharper** than the brief's: config is free while `draft`, and once
+`live` only levers touch it.
+
+**Not extended:** `Decision.status`, `approved_by`, a `Recommendation` entity. The human-in-the-loop
+flow is cut, so the brief's Background definition of it is unrepresented — named, not silently
+absent.
+
+### Extended — `Ad`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E7 | `created_at` | `string` ISO 8601 UTC — `Component` has one, `Ad` does not | G03 | Phase-2 defaults |
+| E8 | `name` | `string` — stable human label | G03 | Phase-2 defaults |
+| E9 | `current_generation_id` | `string` → `ConfigGeneration` | G01 | D2 |
+
+**E8's justification is specific, not cosmetic:** `ad_id` is the only label the contract offers, and
+the alternative — synthesising a display name from the headline component's payload — produces a
+name that *changes when the headline is swapped*, which is exactly the moment a strategist most
+needs a stable referent.
+
+### Extended — `Component`
+
+| # | Extension | Shape | Justified by | Ratified by |
+|---|---|---|---|---|
+| E10 | `lineage_id` | `string` — groups every version of one creative | G10 | D3 |
+| E11 | `version` | `number` — 1-based within the lineage | G10 | D3 |
+| E12 | `parent_id` | `string \| null` — the version this was copied from | G10 | D3 |
+
+Ratified with a qualification worth repeating: **no component editor ships**, so nothing *writes*
+these at runtime. The columns exist and the seed data includes one lineage with two versions, so the
+reverse join's "per version or per lineage?" question has a concrete answer on screen rather than a
+paragraph in prose.
+
+### Extended — new entities
+
+| # | Entity | Why it must exist | Justified by | Ratified by |
+|---|---|---|---|---|
+| E13 | `ConfigGeneration` | Nothing in the given model names *"the config of `a_12` as of Sunday"*, so a conversion landing Thursday cannot be credited to the creative that earned it | G01, G18 | D2, D14 |
+| E14 | `TraceDescriptor` | Hard requirement #5 asks that any number be walked back to its events *and shown to agree*; nothing in the contract lets a number name the query that produced it | brief L143 | D31 |
+
+**E14 is an extension to the *product*, not to the data contract** — it carries no persisted state
+and describes a query, not a fact. It is listed here anyway, because a reviewer reading the wire
+format will see a field the brief never mentions and the honest place to explain it is the same list
+as everything else.
+
+### Interpreted — the brief's shape kept, its meaning fixed
+
+| # | Left open by the brief | Fixed as | Finding | Ratified by |
+|---|---|---|---|---|
+| I1 | `spend`: delta or cumulative, at what cadence | **Delta**, one tick per live ad per fixed interval | G19 | T1 / P2 |
+| I2 | Which day `daily_budget_cents` means | Account-level timezone, **`America/New_York`**; buckets stored UTC | G04 | D22 |
+| I3 | What the budget *does* | A **pacing parameter** on the emission rate, not a hard cap; mild overspend is normal and is a stated simulator parameter | G47 | D26 / P11 |
+| I4 | When a period is closed | Fixed **72 h** lateness horizon, displayed and adjustable | G42 | D13 |
+| I5 | Which generation a late conversion credits | The one live at the **attributed click's `ts`** | G01 | D14 |
+| I6 | Which time bucket a conversion lands in | The **attributed click's minute** (cohort placement) | — | D27 |
+| I7 | Resolution of two deliveries sharing an `event_id` | **First write wins** for the aggregate; every delivery persisted; conflicts surfaced | G40 | D15 |
+| I8 | A conversion whose `ad_id` contradicts its click's | The **click** is authoritative; provisional against the conversion's own `ad_id` until resolved | G30, G41 | D16 |
+| I9 | `ts` precision and tie-break | Milliseconds; tie-break on `ingest_seq`, then `event_id` lexically | G22 | D12 |
+| I10 | Future-dated `ts` (clock skew) | **Clamped** to `received_at`, counted, never rejected | G44 | Phase-2 defaults |
+| I11 | Signals arriving for a non-live ad | Never rejected on ad status; counted as a self-check | G48 | Phase-2 defaults |
+| I12 | `Decision.ts` | Request time; effects immediate; backdating rejected | G23 | U7 |
+| I13 | `from_cents` / `from_id` | A **precondition** (compare-and-swap), not an audit annotation — and with one actor a *staleness* guard, not a concurrency feature | G24, G45 | U2, U5 |
+| I14 | `value_cents` | Gross revenue, one conversion kind | G20 | U4 |
+| I15 | Money sign | Non-negative integers, enforced at ingest | G49 | U6 |
+| I16 | Currency | USD only; no currency field, no FX | G05 | U1 |
+| I17 | *"Everything on screen is derived from the stream"* | Restated: every **performance** number derives from the signal stream, every **config** value from the decision log folded over its origin, nothing is hard-coded | G39 | — |
+| I18 | *"May land hours or days after its click"* — which lag? | **Two distinct lags.** *Purchase* lag `click.ts → conversion.ts` and *reporting* lag `conversion.ts → received_at`. `received_at − ts` is the **reporting** lag only; purchase lag is what drives restatement | G16 | D36 |
+| I19 | A delivery arriving with **no** `event_id` | Still retained — nothing is silently dropped — keyed `(no event_id):<payload_hash>`, always `rejected_invalid`, never reaching `signals`. The hash suffix keeps unrelated malformed bodies in separate keys | brief L73 | B05 |
+| I20 | When a conversion stops *"waiting for its click"* | **`orphan_expired` is a reading, not a stored state.** Computed at read as `at − (credited_minute + 60 s) > 72 h`; the row is never deleted, never re-bucketed, and a late click still promotes it | G42 | D54 |
+
+**I18 matters because collapsing the two lags would corrupt our own telemetry.** If you collapse
+them, `received_at − ts` becomes the purchase lag — which would make our own transport look like it
+is hours behind. That field has to describe us, not the buyer.
+
+**I17 is a correction to the brief, not an interpretation of it.** Taken literally the sentence is
+false in the brief's own terms: budget, status, channel, audience and component payloads come from
+configs and the decision log, not from the signal stream. The restatement preserves the intent — no
+pre-baked arrays behind charts — while surviving contact with the brief's own three-way split.
+
+### Contradictions we found in our *own* documents
+
+The register has a fourth section (§H) that is not about the brief at all. By phase 5 the document
+most likely to contradict itself was no longer the brief but our simulator spec, which states some
+sixty parameters and derives numbers from them. Four entries: a recovery half-life written as a
+half-life in prose and a time constant in the formula (**corrected**); `spend` specified as "CPM
+accrual plus fees" with no fee parameter anywhere (**named as a limit** — there is no fee term, so
+`spend` is CPM accrual only); a novelty model given no slot composition where fatigue has one
+(**resolved by the document's own arithmetic**); and a metric union naming `spend_cents` where the
+code signs `spend` (**corrected in the code's favour**). All four were found by printing what the
+code computes and diffing it against the table it was transcribed from, which is the only reason
+they were found at all — each would have run without erroring and been wrong by a constant factor.
