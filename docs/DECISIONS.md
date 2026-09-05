@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D73 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D74 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -138,6 +138,7 @@ level — and not a severity.
 | D71 | `w` is fixed at 6 h, so a lever pulled on camera cannot be scored for six hours | **ACCEPTED — B** (`?window_h=` beside `?horizon_h=`; D70's 6 h stays the default and the documented figure; the caption names the window each score was answered at) | 2026-09-05 |
 | D72 | `DEMO_SCRIPT.md` against the tested `DEMO.md` | **ACCEPTED — B** (15-minute subset alongside the full tested file; the ten reviewer questions live in the subset) | 2026-09-05 |
 | D73 | How much of phase 6's material goes *in* the README | **ACCEPTED — B** (front door + three appendices, each generated from the shipped artifact rather than retyped) | 2026-09-05 |
+| D74 | EWMA smoothing: keep it, trim it, or remove it | **ACCEPTED — B** (the chart's raw/EWMA toggle is deleted; the fatigue flag's internal EWMA stays — amends D20's "with a raw toggle" clause) | 2026-09-05 |
 
 ---
 
@@ -4543,3 +4544,85 @@ The brief asks for design notes, not a manual, and a 1,900-line README is a manu
 door carries the argument and the appendices carry the evidence, with each appendix generated from
 the shipped artifact rather than retyped from the design docs, which turns the duplication risk into
 a checkable diff.
+
+---
+
+## DECISION #74 — EWMA smoothing: keep it, trim it, or remove it
+
+**Status:** ACCEPTED — option B · **Date:** 2026-09-05 · **Relates to:** D20, B40, B45, B63/B64
+
+### Question
+
+Seno asked whether EWMA is required by the brief and, if not, whether to remove it completely. The
+premise checks out: **`docs/BRIEF.md` contains neither "EWMA" nor "smoothing".** It asks only *"how
+you separate signal from noise"* (L155) and warns that *"a well-chosen heuristic, honestly presented
+with its limits, beats an opaque model"* (L147). EWMA is ours, ratified in **D20**.
+
+It lives in two loosely-coupled places:
+
+| Where | What | Default |
+|---|---|---|
+| `metrics.ts` `ewma()` + `Chart.tsx` | the chart's `raw ⇄ EWMA 15m` toggle — ~24 lines, 4 tests | **off** |
+| `fatigue-flag.ts` `trailingEwma()` | the fatigue flag is *defined* on it — ~26 lines, server-side | always on |
+
+### Options as presented
+
+**A) Keep both.** Zero work; a control that is off by default and demos nothing.
+Forecloses: nothing. Reversal cost: n/a.
+
+**B) Delete the chart toggle, keep the flag's internal EWMA.** *(CHOSEN)* ~60 lines out; the fatigue
+flag untouched. Amends only D20's *"with a raw toggle"* clause and one README line.
+Forecloses: showing a reviewer the lag-versus-variance tradeoff §12's AR(1) noise was built to
+create. Reversal cost: low.
+
+**C) Remove EWMA entirely.** Also requires redefining the fatigue flag on a plain trailing mean, and
+amends D20, `DESIGN.md` §4.5, `SIMULATOR.md` §19 and §21, `README.md` §9, and the flag's own stated
+limit *"it lags by roughly the EWMA half-life"*.
+Forecloses: nothing technically — but the flag is the app's only answer to the brief's
+*"separate signal from noise"*, and a plain mean over a 6 h window is a worse answer for the same
+complexity. Reversal cost: moderate, five documents.
+
+**My recommendation was B**, on the grounds that the toggle costs ~60 lines to show almost nothing —
+off by default, hard to find, and nearly inert on CPA/ROAS at the hour rung — while the flag's EWMA
+is load-bearing and its README limits are written against the half-life.
+
+### Rationale — Seno's words
+
+> "Does EWMA is in req list ? if not maybe remove completely?"
+
+and, on the recommendation:
+
+> "also for your suggestions take all your recommendations."
+
+### Consequences
+
+1. **`Chart.tsx` loses its `smooth` prop and the `Series raw / EWMA 15m` control leaves the page.**
+   One fewer control on the busiest surface, which is the point Seno was actually making.
+2. **`ewma()`, `HALF_LIFE_MS` and `metrics.test.ts`'s four tests go with it.** The test count drops
+   and that is expected, not a regression.
+3. **`fatigue-flag.ts`'s `trailingEwma()` stays exactly as it is.** The flag's definition, its 6 h
+   window, its 15-minute-half-life smoothing and its stated limits are untouched.
+4. **D20 is amended in one clause**, not overturned: the gate, the ladder and the maturity indicator
+   are unchanged; only *"with a raw toggle"* becomes *"raw only"*, because with no smoother there is
+   nothing to toggle against.
+5. **`README.md` §9 and `SIMULATOR.md` §21's READ SIDE block lose the smoothing line** for the
+   chart and keep it for the flag, which is where the half-life still does work.
+6. **The comment coupling the two implementations survives and now points one way only** —
+   `fatigue-flag.ts` no longer shares a half-life with a chart smoother that exists, so its note
+   stops claiming it does.
+
+### What it forecloses
+
+**Showing a reviewer the lag-versus-variance tradeoff on the chart.** `SIMULATOR.md` §12 built two
+autocorrelated demand processes partly so that *"EWMA smoothing has a real lag-versus-variance
+tradeoff instead of a free lunch"*, and after this there is no on-screen control that demonstrates
+it. The tradeoff is still real, still argued in the README, and still the reason the fatigue flag
+lags — it is simply no longer clickable. Reinstating the toggle is re-adding one pure function and
+one prop.
+
+### How I'd defend this in review
+
+The brief does not ask for smoothing and grades honest presentation over sophistication, so a
+smoother that is off by default, invisible unless found, and nearly inert on the two metrics a
+strategist most wants smoothed was costing surface area for no demonstrated value — while the one
+place smoothing genuinely earns its keep, the fatigue heuristic, keeps it and keeps its stated lag.
