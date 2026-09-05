@@ -13,7 +13,13 @@ Written for someone with no memory of the conversation. That someone is you. Rea
 
 All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are closed, and all fourteen
 `PHASE_PROMPTS.md` § P6 README sections plus `docs/DEMO_SCRIPT.md` are written. `tsc` clean,
-`npx vite build` clean, **172 tests**, **0 broken links** across every markdown file, tree clean.
+`npx vite build` clean, **168 tests**, **0 broken links** across every markdown file, tree clean.
+
+**Phase 6 is closed, but five UI chunks landed after it** (`BUILD_PLAN.md` §10a, B63–B69) on two
+decisions taken at the same time — **D74** deleted the chart's EWMA toggle, **D75** cut the
+on-screen prose to its facts. Measured: the page is **7,463 → 5,721 px** and its text
+**21,863 → 14,631 characters**, with no mechanism, endpoint or projection touched. The test count is
+**168, not 172** — the four EWMA tests went with the toggle and that is expected.
 
 1. **`npm start`** — migrate, seed if empty, run everything, print the URL. First run ~5m20s.
 2. **`README.md`** is the front door, ~1,600 lines, written for a reviewer. It opens with **`Run it`
@@ -222,6 +228,7 @@ exports for sessions 9, 10 and 11 are now curated captures (**B62**).
 | `docs/SCHEMA.md` | **Phase 6.** The as-built schema, read from `data/loop.sqlite` with `sqlite_master`: four-category answer with measured row counts, ten indexes with the query each serves, the DDL verbatim, the pragmas, and a parsed diff against `DESIGN.md` §2. |
 | `docs/MOCK_DATA.md` | **Phase 6.** The mock data model **measured** — diurnal, fatigue, novelty, overdispersion, pacing and the lag CDF, designed curve against shipped world, every query shown. The three findings above live here in full. |
 | `docs/DECISION_DIGEST.md` | **Phase 6.** All 77 rows (D1–D73, T1, F1–F4, D35p) reduced to **what each forecloses** — the column `DECISIONS.md`'s index table does not carry. |
+| `src/web/app.css` | One stylesheet (D45). Carries `--rule` for B64's section separators and `.disclosure` for D75's collapsed caveats. |
 | `docs/ai-sessions/06-phase-6-packaging.md` | **Phase 6.** The process capture for this phase, in the `00`–`04` convention — prompts, the two decisions, four findings, and what the session deliberately did not do. |
 | `docs/DEMO_SCRIPT.md` | **Phase 6.** The 15-minute subset of `DEMO.md` (**D72**) plus the ten hardest reviewer questions, each answered in 1–2 sentences with its decision id. |
 | `docs/OPEN_QUESTIONS.md` | §A 7 questions for the brief's author · §B decisions in `CLAUDE.md` §3 format, waves 1–**9** · §C assumptions **U1–U9**. Resolved and deferred ones carry a banner pointing at `DECISIONS.md`. |
