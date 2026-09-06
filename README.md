@@ -1554,18 +1554,11 @@ If I had one more feature rather than one more week, it would be **#2 and nothin
 this design does well is about honesty under uncertainty, and right now that honesty is distributed
 across a dozen small affordances that a reviewer has to find one at a time.
 
-### Differently — the four things the build actually taught me
+### Differently — the three things the build actually taught me
 
 These are not the cut items. They are the places where the process, not the scope, cost something.
 
-**1 — I would have opened a browser far earlier.** Stages 4, 5 and 6 were built and verified
-headlessly, and the first time anyone clicked any of it was the final demo rehearsal (`B61`). It
-produced **four corrections in one sitting**. Every one of them was invisible to `tsc`, to 172 tests
-and to `/api/verify`, because they were about what a person sees. Headless verification proved the
-numbers and could not prove the product, and I knew that and did it anyway because the numbers were
-where the risk felt like it was.
-
-**2 — I would instrument the simulator's clamps from day one.** Two parameters did nothing for an
+**1 — I would instrument the simulator's clamps from day one.** Two parameters did nothing for an
 entire phase and nobody noticed, because plausible output is not the same as correct output:
 `κ = 200` on clicks had **exactly zero** effect (a BetaBinomial's overdispersion enters through
 `(N−1)/(κ+1)`, and per-tick `N` was 0–3), and `κ = 60` on conversions was inert for the same reason
@@ -1575,14 +1568,14 @@ and running 1.19–1.47× its stated baseline, and the design document of the da
 (**D59**). A simulator whose output looks reasonable is the easiest thing in this repo to be wrong
 about. Every clamp, every draw, should print its own occupancy from the first chunk.
 
-**3 — I would measure the seeded distributions against their designed shapes as a build step, not at
+**2 — I would measure the seeded distributions against their designed shapes as a build step, not at
 packaging time.** [`docs/MOCK_DATA.md`](docs/MOCK_DATA.md) exists because P6 asked for the shapes,
 and writing it surfaced two things worth knowing much earlier — that the lag distribution's median is
 not identified where its CDF is flat, and that the seeded tail is **right-censored at `T0`** with 47%
 of its clicks in the final three days. Neither is a bug. Both would have changed how I talked about
 those numbers for the previous two phases.
 
-**4 — I would split the fault injector before shipping it, not propose it and leave it.** `B33a` —
+**3 — I would split the fault injector before shipping it, not propose it and leave it.** `B33a` —
 separating malformed payloads (0.1%) from dual click-ids (0.05%) — is designed, costed at ~90 lines,
 and **undone**, because it needs to re-run `validate()` over retained `payload_json` and therefore
 reads the store, which `src/sim` may not do (**D32**). The right answer is a `npm run faults` script

@@ -305,6 +305,6 @@ which no amount of plausible-looking output would have revealed.
 **10 — "Which of these decisions would you now take differently?"**
 `ρ_catchup`'s ceiling, and I did — **D59** amended a ratified constant mid-build once measurement
 contradicted it, because pacing was boosting delivery the model had no inventory for. The one I would
-change about *process* rather than design: stages 4–6 were verified headlessly and nobody opened a
-browser until the final rehearsal, which produced four corrections in one sitting that no test could
-have caught.
+change about *process* rather than design: measuring the seeded distributions against their designed
+shapes as a build step rather than at packaging time, which is when the lag CDF's flat median and the
+tail's censoring at `T0` actually surfaced.

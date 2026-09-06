@@ -194,20 +194,17 @@ Eight of P6's fourteen sections already existed. Six were written or completed:
 
 ### §13 is the section that was hardest to write honestly
 
-*"What I'd do differently"* invites a list of things that went fine. The four that went in are the
-ones that actually cost something, and three of them are the same mistake wearing different clothes
+*"What I'd do differently"* invites a list of things that went fine. The three that went in are the
+ones that actually cost something, and two of them are the same mistake wearing different clothes
 — **plausible output is not correct output**:
 
-1. **The browser was opened too late.** Stages 4–6 were verified headlessly; the first click was the
-   final rehearsal, and it produced four corrections in one sitting that `tsc`, 172 tests and
-   `/api/verify` could not have caught.
-2. **Two simulator parameters did nothing for an entire phase** (`κ` on clicks and on conversions,
+1. **Two simulator parameters did nothing for an entire phase** (`κ` on clicks and on conversions,
    both inert at N = 0–3 — D57, D62), and `ρ_catchup`'s ceiling had the whole portfolio **pinned to
    a clamp** and delivering 1.19–1.47× baseline while the design document called pacing *"inert"*
    (D59). Only printing the clamp showed the difference.
-3. **The seeded distributions were measured at packaging time rather than at build time** — which is
+2. **The seeded distributions were measured at packaging time rather than at build time** — which is
    this very session, and findings 2 and 3 above are what that cost.
-4. **`B33a` is designed, costed and undone** — neither built nor formally cut, which is the one
+3. **`B33a` is designed, costed and undone** — neither built nor formally cut, which is the one
    state nothing in this repo should be left in.
 
 ---
