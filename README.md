@@ -1626,13 +1626,16 @@ never been shown live, only delivery going to zero and back, and this file does 
 
 ## AI process artifact
 
-`docs/ai-sessions/` is the process record the brief asks for: one capture per phase (`00`–`04`) and
+`docs/ai-sessions/` is the process record the brief asks for: one capture per phase (`00`–`07`) and
 one per implementation session, holding the prompts, the decision points and the turning points
 rather than a keystroke transcript. `docs/ai-sessions/PHASE_PROMPTS.md` holds the phase prompts
-themselves.
+themselves. The one to read if you only read one is
+[**`07-phase-7-post-completion.md`**](docs/ai-sessions/07-phase-7-post-completion.md): phase 7 is the
+phase no plan produced — it came from using the finished app — and it is the only capture in which
+**four of five reported defects were argued down as correct behaviour** rather than fixed.
 
 The working method is in [`CLAUDE.md`](CLAUDE.md), and it has two rules that did most of the work.
-**The model does not make design decisions; it surfaces them** — 71 of them, each with its
+**The model does not make design decisions; it surfaces them** — 76 of them, each with its
 alternatives and its reversal cost, answered by a human whose exact words are recorded. And **no
 code before design**: phases 0 through 4 produced documents and nothing on disk outside `docs/`,
 which is why `DESIGN.md` could be wrong on paper — where it was cheap — rather than in a schema.
