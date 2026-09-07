@@ -423,7 +423,9 @@ t0 = 2026-09-07T03:48:41Z · seed = 'flawless-loop' · backfill_days = 7
 
 **It is not the store phase 6 measured.** It was reseeded, three days after phase 6's `T0`. Same seed,
 same seven days, **different population** — because the rate model is driven by wall-clock hour and
-the window is hard-censored at `T0`:
+the window is hard-censored at `T0`. Backfill is frozen once written, so the row below is stable;
+the *live* half of the store is not, and every whole-store count in `STATUS.md`'s phase 7 table is a
+point-in-time read of a store with the emitter running.
 
 | | Phase 6's store | This store |
 |---|---|---|

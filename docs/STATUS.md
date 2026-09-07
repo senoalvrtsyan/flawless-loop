@@ -169,7 +169,11 @@ constant. `apply()` is still the only writer of a projection (**D7**).
 ### What phase 7 measured
 
 Everything below is a command run in this repo. **The store is `data/loop.sqlite`** unless another is
-named; the browser figures are the running app on that store.
+named; the browser figures are the running app on that store. **The emitter was running throughout**,
+so the event and bucket counts below are a point-in-time read of a live store and will be *higher*
+when you re-run them — 40 minutes later the same two commands read 1,579,612 events and 74,686
+buckets. What is stable is the **verdict** (`OK`, `hash_matched`) and the **duration**; the totals are
+a timestamp, not a constant.
 
 | Claim | Measured |
 |---|---|
