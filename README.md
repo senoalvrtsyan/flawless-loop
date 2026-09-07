@@ -876,7 +876,7 @@ as everything else.
 | # | Left open by the brief | Fixed as | Finding | Ratified by |
 |---|---|---|---|---|
 | I1 | `spend`: delta or cumulative, at what cadence | **Delta**, one tick per live ad per fixed interval | G19 | T1 / P2 |
-| I2 | Which day `daily_budget_cents` means | Account-level timezone, **`America/New_York`**; buckets stored UTC | G04 | D22 |
+| I2 | Which day `daily_budget_cents` means | Account-level timezone, **`America/New_York`**; buckets stored UTC, **and every clock on screen reads UTC** (**D76**) | G04 | D22 |
 | I3 | What the budget *does* | A **pacing parameter** on the emission rate, not a hard cap; mild overspend is normal and is a stated simulator parameter | G47 | D26 / P11 |
 | I4 | When a period is closed | Fixed **72 h** lateness horizon, displayed and adjustable | G42 | D13 |
 | I5 | Which generation a late conversion credits | The one live at the **attributed click's `ts`** | G01 | D14 |

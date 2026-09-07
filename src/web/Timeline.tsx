@@ -22,16 +22,23 @@ function lateness(ms: number): string {
   return `${Math.floor(hours / 24)} d ${hours % 24} h`;
 }
 
-/** `2026-08-29T18:33:00.000Z` → `18:33 Sat 29 Aug` — the bucket's own time, in the reader's zone. */
+/**
+ * `2026-08-29T18:33:00.000Z` → `18:33 Sat 29 Aug UTC` — the bucket's own time, **in UTC** (**D76**).
+ *
+ * This read `toLocaleString` with no `timeZone` until a UTC+4 browser exposed it: the same event
+ * appeared here as `22:33` and in the decision log two sections up as `18:33Z`. The example in this
+ * comment was itself only correct on a UTC+0 machine, which is how long it went unnoticed.
+ */
 function bucketLabel(minute: string): string {
   const at = new Date(minute);
-  return at.toLocaleString('en-GB', {
+  return `${at.toLocaleString('en-GB', {
+    timeZone: 'UTC',
     hour: '2-digit',
     minute: '2-digit',
     weekday: 'short',
     day: 'numeric',
     month: 'short',
-  });
+  })} UTC`;
 }
 
 export function Timeline({ entries }: { entries: readonly RestatementEntry[] }) {

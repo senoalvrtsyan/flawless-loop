@@ -341,7 +341,24 @@ store — which is why `sim_scenarios` is a table rather than a message.
 
 ---
 
-## 7 — Where to look in the code
+## 7 — Three clocks, and which one the screen shows
+
+Worth stating plainly, because two of them are easy to confuse and the third is invisible until you
+demo from another timezone.
+
+| Clock | Where it applies | Why |
+|---|---|---|
+| **UTC** | Everything stored, everything on the wire, and **every clock rendered on screen** | `minute_start` is UTC (**D28**), every window bound and `as_of` is an ISO `Z` string, and those are the strings a reviewer pastes into a trace. One zone is the only way *"does this number match that event?"* is answerable |
+| **`America/New_York`** | Exactly two things: the day boundary at which `daily_budget_cents` resets, and the turn of the simulator's diurnal curve | **D22** — with US audiences a UTC day would roll the budget mid-afternoon-peak and the discontinuity would be an artifact of our clock rather than a property of the domain |
+| **The browser's** | **Nothing** | It rendered the chart axis and the restatement timeline until a UTC+4 machine showed that put a four-hour gap between the axis and the generation marker drawn on it (**D76**) |
+
+The consequence of the middle row is visible and named: on a UTC axis, midnight New York shows up at
+**04:00** (EDT). That is the budget reset, four hours into the chart's day, and it is a stated limit
+rather than a bug.
+
+---
+
+## 8 — Where to look in the code
 
 | I want to understand… | Read |
 |---|---|

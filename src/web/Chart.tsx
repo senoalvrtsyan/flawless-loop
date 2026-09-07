@@ -137,11 +137,25 @@ function options(
   return {
     width,
     height: HEIGHT,
-    // Local time on the axis, UTC in every value we store and send. The axis is the one place a
-    // reviewer reads a clock, and they read it in their own.
+    /**
+     * **UTC on the axis — D76, and it was browser-local until a UTC+4 machine found it.**
+     *
+     * Every value this system stores, sends or can be asked about is UTC: `minute_start` (D28),
+     * every window bound, every `as_of`, every `ts` in the raw tail, and the generation marker
+     * drawn on this very chart. An axis in the reader's own zone therefore put a four-hour
+     * discrepancy inside the one chain the app is graded on being able to walk — invisibly on a
+     * UTC+0 machine, and in beat 6's face on any other.
+     *
+     * `tzDate` rather than an `axes[0].values` override, because uPlot's tick granularity is
+     * adaptive — day, hour, minute by zoom — and replacing the formatter wholesale would throw
+     * that away to fix a timezone.
+     */
+    tzDate: (ts: number) => uPlot.tzDate(new Date(ts * 1_000), 'Etc/UTC'),
     scales: { x: { time: true } },
     axes: [
-      { stroke: '#5b6470' },
+      // The `UTC` label is not decoration: an unlabelled clock that is not the reader's is worse
+      // than a labelled one that is not.
+      { stroke: '#5b6470', label: 'UTC' },
       // The y axis speaks the metric's unit: percent for CTR, dollars for spend and CPA, a
       // multiple for ROAS. A CPA axis reading "412" instead of "$4.12" is the kind of wrong that
       // looks right.

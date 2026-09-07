@@ -446,6 +446,8 @@ ratified constant.
 
 | [x] | **B70** | **Two duplications on the Signal surface.** (a) At a selection of **one ad** the per-ad table is one row identical to the headline — same six numbers, each with its own drill-down — so it is suppressed; above one ad it is a comparison and stays. (b) `latestBucket()` scanned the whole store while its caption said *"newest bucket **in view**"*, so selecting `a_01` could report `a_12`'s bucket | `App.tsx`, `store.ts` | In the browser: all 12 → table, 12 rows · **1 selected → no table** · 2 selected → table, 2 rows. With `a_01` alone selected the caption now names `a_01`, frozen at the minute it was paused | — |
 
+| [x] | **B72** | **D76 — every clock on screen reads UTC.** The chart axis (uPlot `tzDate` → `Etc/UTC`, chosen over an `axes[0].values` override so adaptive tick granularity survives) and the restatement timeline (`timeZone: 'UTC'`), both labelled `UTC` | `Chart.tsx`, `Timeline.tsx` | **Verified on a genuine UTC+4 browser** (`getTimezoneOffset() = -240`): axis reads `5:00am…5:55am` with a `UTC` label at UTC 05:58, and a timeline entry reads `Thu 3 Sept, 04:09 UTC` beside its own `learned at …Z`. Before: axis would read `9:00am`, entry `08:09` | — |
+
 > ### ▶ Demo checkpoint 7a — *"a stranger can name what they are looking at"*
 >
 > A reviewer who has never seen an ad platform can read every headline figure's name, and can tell
