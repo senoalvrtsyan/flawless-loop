@@ -115,12 +115,20 @@ sequenceDiagram
 
 Eighteen endpoints over a ~40-line router on `node:http` (**D42**). No framework.
 
+**Two figures, because one was unreadable.** The write side and the read side share only the store,
+so they are drawn separately — see the note at the end of this section for the measurement that
+forced the split.
+
+### 3a — The write side, and the single writer
+
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"nodeSpacing": 24, "rankSpacing": 46, "diagramPadding": 4}}}%%
+flowchart TB
   subgraph W["WRITE — the only two ways anything enters"]
     direction TB
-    I["POST /api/ingest<br/>ingest.ts"]
-    D["POST /api/decisions<br/>decisions.ts"]
+    I["ingest.ts<br/><b>POST /api/ingest</b>"]
+    D["decisions.ts<br/><b>POST /api/decisions</b>"]
+    I ~~~ D
   end
 
   subgraph F["FOLD + APPLY — the single writer"]
@@ -130,41 +138,21 @@ flowchart LR
     AT["attribute.ts<br/>resolveAttribution · generationAt"]
   end
 
-  DB[("SQLite<br/>12 tables")]
-
-  subgraph RD["READ — derived at read time, nothing cached"]
-    direction TB
-    SN["GET /api/snapshot · snapshot.ts"]
-    ST["GET /api/stream · stream.ts · SSE"]
-    SC["GET /api/scores · scoring.ts"]
-    MA["maturity.ts · restatements.ts<br/>fatigue-flag.ts · components.ts"]
-    SW["GET /api/settlement/sweep<br/>sweep.ts · settlement.ts"]
-    SI["GET /api/sim/world · sim-world.ts<br/>/api/sim/scenario · sim-scenario.ts"]
-  end
-
-  subgraph TR["TRACE — the traceability path"]
-    direction TB
-    DE["descriptor.ts<br/>HMAC, per-process key"]
-    T["POST /api/trace · trace.ts"]
-    RP["replay.ts<br/>re-derives from RAW"]
-  end
+  DB[("SQLite — 12 tables")]
 
   subgraph CK["CHECKS — two, and they fail differently"]
     direction TB
-    VE["GET /api/verify<br/>verify.ts · TEMP shadows"]
-    AG["npm run agree<br/>scripts/agree.ts"]
+    VE["verify.ts &nbsp; <b>GET /api/verify</b>"]
+    AG["agree.ts &nbsp; <b>npm run agree</b>"]
+    VE ~~~ AG
   end
 
   I --> A
   D --> FO --> A
   A --> AT
   A --> DB
-  DB --> RD
-  DB --> TR
-  T --> DE
-  T --> RP
-  VE -- "rebuilds THROUGH apply" --> A
-  AG -- "re-derives WITHOUT apply" --> RP
+  VE -- "rebuilds THROUGH apply()" --> A
+  AG -- "recomputes from raw, no apply()" --> DB
 
   classDef writer fill:#fee,stroke:#c66,stroke-width:2px
   classDef store fill:#eef,stroke:#66c
@@ -177,6 +165,71 @@ flowchart LR
 it into `TEMP` tables shadowing the real names (**D55**), which is why it catches a **drifted store**;
 `npm run agree` re-derives the rollups *without* it, which is why it catches **wrong code**. Two
 checks, two failure modes, and hand-editing one `rollup_minute` row trips both.
+
+**The two check arrows are drawn differently on purpose.** `verify.ts` imports `apply.ts`
+(`verify.ts:29`) — a real call, so its arrow lands on the red box. `scripts/agree.ts` **imports
+nothing at all**: it is 200 lines that read raw `signals` and recompute, which is why its arrow goes
+to the store and not to any module. Its own header says why, in bold — *"ONE ORDERED WHOLE-LOG PASS.
+NOT `replay()` PER BUCKET … the logic is shared with `replay()` in kind, not by call."* An earlier
+version of this diagram drew `agree.ts → replay.ts`, which asserted precisely the call the code
+refuses to make, and undercut the one property that makes a second check worth having.
+
+### 3b — The read side, and the trace path
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 55, "diagramPadding": 4, "wrappingWidth": 400}}}%%
+flowchart LR
+  DB[("SQLite<br/>12 tables")]
+
+  subgraph RD["READ — derived at read time, nothing cached"]
+    SN["<b>GET /api/snapshot</b><br/>snapshot.ts"]
+    ST["<b>GET /api/stream</b> · SSE<br/>stream.ts"]
+    SC["<b>GET /api/scores</b><br/>scoring.ts"]
+    MA["<b>/api/restatements</b> · <b>/api/fatigue</b> · <b>/api/components</b><br/>maturity.ts · restatements.ts · fatigue-flag.ts · components.ts"]
+    SW["<b>GET /api/settlement/sweep</b><br/>sweep.ts · settlement.ts"]
+    SI["<b>/api/sim/world</b> · <b>/api/sim/scenario</b><br/>sim-world.ts · sim-scenario.ts"]
+    SN ~~~ ST ~~~ SC ~~~ MA ~~~ SW ~~~ SI
+  end
+
+  subgraph TR["TRACE — the traceability path"]
+    T["<b>POST /api/trace</b><br/>trace.ts"]
+    DE["descriptor.ts — HMAC, per-process key"]
+    RP["replay.ts — re-derives from RAW"]
+    DE ~~~ RP
+  end
+
+  DB --> RD
+  DB --> TR
+  T --> DE
+  T --> RP
+
+  classDef store fill:#eef,stroke:#66c
+  class DB store
+```
+
+**Every box in `READ` reads the store and nothing else** — no cache, no materialised view, no
+shared in-memory state between requests. That is what makes `/api/verify` and `npm run agree`
+meaningful: there is no third copy of a number for them to miss. `trace.ts` is the only read path
+that also *writes* nothing but proves something — it verifies the descriptor's HMAC, then re-derives
+the answer from raw through `replay.ts` (the only module that imports it).
+
+### Why this is two figures and not one
+
+**Measured, not judged.** GitHub caps a rendered Mermaid diagram at the width of the markdown body
+(~860 px), so a diagram wider than that is scaled down and its labels shrink with it. Rendered
+against mermaid 11 in headless Chrome at an 860 px container:
+
+| Version | Natural width | Scale | Effective label size |
+|---|---|---|---|
+| The single `flowchart LR` this replaced | **3,582 px** | 0.24 | **3.8 px** |
+| 3a — the write side | **763 px** | **1.00** | **16 px** |
+| 3b — the read side | **641 px** | **1.00** | **16 px** |
+
+Seventeen nodes in five role groups cannot be laid out under 860 px in one figure: the best
+single-figure arrangement measured 1,061 px and 13 px. Split, both halves render at their natural
+size and nothing is scaled at all. Nothing was dropped to get there — all seventeen modules and both
+labelled check edges survive, and the endpoint paths are on the nodes rather than only in the table
+below.
 
 ### The endpoints, in full
 
