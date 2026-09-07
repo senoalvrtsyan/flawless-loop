@@ -1,4 +1,4 @@
-# DECISION_DIGEST.md — D1–D73, and what each one forecloses
+# DECISION_DIGEST.md — D1–D76, and what each one forecloses
 
 **One row per ratified decision, carrying the thing `DECISIONS.md`'s index table does not: what it
 forecloses.** The brief asks for choices to be explainable, and the half of a choice that is easy to
@@ -10,15 +10,15 @@ Seno's words, the consequences and a one-line defence.
 is the decision's *foreclosure* line, compressed. Where the compression would change the meaning,
 the original wording is kept.
 
-**"Forecloses: nothing" is not filler.** Forty-eight of the seventy-seven rows below open with it,
+**"Forecloses: nothing" is not filler.** Forty-nine of the eighty rows below open with it,
 and that is the load-bearing observation in this file: the design keeps its expensive choices few
 and everything else reversible, and the only way to *show* that rather than assert it is to be able
-to point at which rows are which. The twenty-two that **do** foreclose something are marked **▲**
+to point at which rows are which. The twenty-four that **do** foreclose something are marked **▲**
 and gathered in [§4](#4--the-twenty-two-that-actually-cost-something).
 
 | | |
 |---|---|
-| Rows | **77** — D1–D73, plus T1 (a triage pass), F1–F4 (four follow-ups) and D35p (a parameter ratification) |
+| Rows | **80** — D1–D76, plus T1 (a triage pass), F1–F4 (four follow-ups) and D35p (a parameter ratification). **D74–D76 are phase 7's**, added after this file was first written |
 | Forecloses *nothing* | **48** |
 | Forecloses *something* | **22**, marked **▲** |
 | Ratified as a block, foreclosure in the block's note | **10**, marked **§** — see the note after §3 |
@@ -122,6 +122,9 @@ and gathered in [§4](#4--the-twenty-two-that-actually-cost-something).
 | **F4** | D44/D45 are deferred, not open | Decided | **Nothing** — that is the point of deferring rather than deciding. |
 | **D72** | `DEMO_SCRIPT.md` against the tested `DEMO.md` | B — a 15-minute subset alongside it | Nothing. Two files that can drift is the cost, and D72 names which one wins when they do. |
 | **D73** | How much of phase 6 goes *in* the README | B — front door + three appendices | Nothing structurally. Each appendix is generated from the shipped artifact, so the duplication is a checkable diff rather than a second opinion. |
+| **D74** | EWMA smoothing: keep it, trim it, or remove it | B — the chart's toggle goes, the flag's EWMA stays | **▲ Showing a reviewer the lag-versus-variance tradeoff on the chart.** `SIMULATOR.md` §12 built two autocorrelated demand processes partly so that smoothing would have a real tradeoff rather than a free lunch; after this there is no on-screen control that demonstrates it. Still real, still argued in the README, still why the fatigue flag lags — just no longer clickable. Reinstating is one pure function and one prop. |
+| **D75** | On-screen prose: what the surface states vs what the README explains | Accepted — the surface states the fact, the README explains the choice | **▲ Reading the design off the screen without the README.** Spent deliberately: the app was rendering its own decision records inline, which made every surface denser than the thing it explained. Nothing is lost — it is all in `README.md` and `DECISIONS.md` — but a reviewer who *only* clicks around now learns less about *why* and more about *what*. Reversal is cheap and per-caption. |
+| **D76** | Display timezone: the browser's, or the store's | A — everything UTC, and the axis says so | **Nothing.** What it *spends* is the presenter's convenience: nobody reading the chart sees their own wall clock. The right way round, because the reviewer's question is never *"what time is it here?"* but *"does this number match that event?"*, and that comparison is only possible in one zone. Two lines to reverse. |
 
 **§ — ratified as a block.** D3, D4, D15, D16, D18, D19, D21, D22, D23 and D25 were answered
 together in the Phase-2 ratification pass (*"Part 2 as written… Part 3 all fine… Part 4 as a
@@ -133,10 +136,12 @@ Full option analysis for all of them is in [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.
 
 <a id="4--the-twenty-two-that-actually-cost-something"></a>
 
-## 4 — The twenty-two that actually cost something
+## 4 — The twenty-four that actually cost something
 
 Every row above marked **▲**, grouped where several decisions foreclose the same thing, because this
-is the answer to *"what did you give up?"*
+is the answer to *"what did you give up?"* **The heading's anchor still reads `twenty-two`** — it is
+cited from `README.md` and `STATUS.md`, and repointing those to renumber a heading is how a working
+link becomes a broken one.
 
 | # | What is now unavailable | Reversal |
 |---|---|---|
@@ -148,6 +153,8 @@ is the answer to *"what did you give up?"*
 | **D22** | A tested DST transition | Untestable inside a September window; named rather than claimed |
 | **D30** | Client-side aggregation of displayed numbers | Deliberate: it is what makes the traceability check mean anything |
 | **D54** | Per-row expiry provenance — a *"declared dead at T"* stamp | Additive; a stored state can be introduced without unpicking a derived one |
+| **D74** | The lag-versus-variance tradeoff, shown on the chart — `SIMULATOR.md` §12 built two autocorrelated demand processes partly to create it | **Cheap** — one pure function and one prop. The tradeoff is still real and still why the fatigue flag lags; it is no longer clickable |
+| **D75** | Reading the design off the screen without the README | **Cheap and per-caption.** Nothing is lost: it is all in `README.md` and `DECISIONS.md`. A reviewer who only clicks around learns less about *why*, more about *what* |
 | **D56 / D59** | Fatigue costing an ad its *reach*; an ad *accelerating* to hit budget | Both need a supply-side model λ does not have |
 | **D58 / D62** | Sub-second ordering claims; correlated conversions within a tick | Both traded for the handover contract that makes a restart re-derivable |
 | **D63** | *"After the pause, nothing with `a_12` on it appears"* | One line, but the demo narration built on it changes too |
