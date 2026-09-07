@@ -15,7 +15,7 @@ Two separate alphabets. **Ids** name a thing; **codes** classify a gap. They col
 
 | Prefix | Means | Lives in | Range |
 |---|---|---|---|
-| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D75 (all ratified) |
+| `D`*n* | **Decision** — a `CLAUDE.md` §3 design decision put to Seno | here once ratified; `OPEN_QUESTIONS.md` §B until then | D1–D76 (all ratified) |
 | `T`*n* | **Triage** — a disposition pass over a set of findings, not one design choice | here | T1 |
 | `F`*n* | **Follow-up** — an instruction from a ratification pass carrying its own lasting disposition | here | F1–F4 |
 | `G`*nn* | **Gap** — an audit finding against the brief's contracts | `BRIEF_GAPS.md` | G01–G52 |
@@ -140,6 +140,7 @@ level — and not a severity.
 | D73 | How much of phase 6's material goes *in* the README | **ACCEPTED — B** (front door + three appendices, each generated from the shipped artifact rather than retyped) | 2026-09-05 |
 | D74 | EWMA smoothing: keep it, trim it, or remove it | **ACCEPTED — B** (the chart's raw/EWMA toggle is deleted; the fatigue flag's internal EWMA stays — amends D20's "with a raw toggle" clause) | 2026-09-05 |
 | D75 | On-screen prose: what the surface states vs what the README explains | **ACCEPTED** (cut ~2,860 chars — 52% of the page's prose — keeping every fact a ratified decision requires on screen) | 2026-09-05 |
+| D76 | Display timezone: the browser's, or the store's | **ACCEPTED — A** (everything UTC; the chart axis and the restatement timeline stop translating, and the axis says so) | 2026-09-05 |
 
 ---
 
@@ -4722,3 +4723,95 @@ The brief grades whether the built part *"feels like a product"* and warns again
 a product that renders its own architecture-decision records at 0.72 rem is neither a product nor a
 readable decision record. Every fact a ratified decision requires on screen is still on screen; what
 left is the argument for it, which now lives in the one place written to carry an argument.
+
+---
+
+## DECISION #76 — Display timezone: the browser's, or the store's
+
+**Status:** ACCEPTED — option A (everything UTC) · **Date:** 2026-09-05 · **Relates to:** D22, D28,
+D31, B37, B43 · **Amends:** the inline choice made at `Chart.tsx:142` and `Timeline.tsx:28`
+
+### Question
+
+Seno's, on finding the demo machine is UTC+4:
+
+> "the browser that i'm going to demo is in utc+4. but event are stored with utc+0. do we need to
+> render browser with utc 0 as well independat from where it opened ?"
+
+**The app was inconsistent, and the inconsistency is invisible at UTC+0.** Audited in the source:
+
+| Surface | Clock |
+|---|---|
+| Chart x-axis | **browser-local** — `scales: { x: { time: true } }`, and uPlot's default is local |
+| Restatement timeline | **browser-local** — `toLocaleString('en-GB', …)` with no `timeZone` |
+| Decision log · raw tail · drill-down query · `trace` · totals line · generation markers · maturity · settlement captions | **UTC**, printed as raw ISO with `Z` |
+
+Both local-time sites carry comments saying it was deliberate — *"the axis is the one place a
+reviewer reads a clock, and they read it in their own"* — but the choice was made **inline in two
+files and never ratified**, and it had only ever been exercised in a UTC+0 browser.
+
+**Three places a 4-hour offset lands on camera:** the chart axis (`8:05pm`) against the generation
+boundary marker drawn on that same chart (`2026-09-05T16:00:21.152Z`) · beat 6's drill-down, where
+clicking `8:05pm` opens a query reading `16:05:00.000Z` and the beat's whole claim is *"these two
+agree"* · a restatement entry at `22:33 Sat 29 Aug` against the same event's `18:33Z` in the
+decision log two sections up.
+
+### Options as presented
+
+**A) Render everything UTC.** *(CHOSEN)* Two files. The axis carries a `UTC` label so nobody wonders.
+Pros: one clock on screen; it is the clock every stored value, window bound and pasteable string
+already speaks. Cons: the reviewer reads a clock that is not their own.
+Forecloses: nothing. Reversal cost: two lines.
+
+**B) Render everything browser-local.** Convert the eight raw-ISO surfaces instead.
+Pros: reads naturally for whoever is presenting. Cons: ~10 files, and it **breaks copy-paste** — the
+drill-down's `from`/`to` and `trace <event_id>`'s inputs must be the stored UTC strings to be
+re-runnable, so a local-time string on screen is one a reviewer cannot use.
+Forecloses: pasteable provenance. Reversal cost: high.
+
+**C) Set `TZ=UTC` on the demo machine.** Zero code.
+Pros: no risk. Cons: fixes *this* demo, not the app — anyone opening it from another zone meets the
+same mismatch. Forecloses: nothing, and fixes nothing either.
+
+**My recommendation was A**, on the ground that UTC is not the nicer clock, it is the clock the data
+speaks: two surfaces were translating and eight were not, and the two that were are the two a
+reviewer cross-checks against a raw `event_id`.
+
+### Rationale — Seno's words
+
+Answered by selecting option A as presented. The option text, verbatim:
+
+> "Everything UTC. Chart axis and timeline switch to UTC, with the axis labelled so nobody wonders.
+> Two files. UTC is what every stored value, window bound and pasteable string already speaks."
+
+### Consequences
+
+1. **`Chart.tsx` gains `tzDate`** — `uPlot.tzDate(new Date(ts * 1000), 'Etc/UTC')`, which is in
+   uPlot 1.6.32's own API (`opts.tzDate`, `LocalDateFromUnix`). Chosen over overriding
+   `axes[0].values` because uPlot's tick granularity is adaptive — day, hour, minute by zoom — and a
+   wholesale formatter override would throw that away to fix a timezone.
+2. **`Timeline.tsx` passes `timeZone: 'UTC'`** and says `UTC` in the label. Its doc comment was
+   already wrong off UTC+0 (`… → 18:33 Sat 29 Aug` renders `22:33` at UTC+4) and is corrected.
+3. **The chart axis is labelled `UTC`.** Consequence 1 is worthless without it: an unlabelled clock
+   that is not the reader's is worse than a labelled one that is not.
+4. **Nothing on the wire, in the store, or in any descriptor changes.** `minute_start` was already
+   UTC (**D28**), and every window bound and `as_of` was already an ISO `Z` string. This decision is
+   about rendering only, so `/api/verify`, `npm run agree` and the whole test suite are untouched by
+   construction.
+5. **D22 is unaffected and stays a third clock.** `America/New_York` governs the budget day boundary
+   and the diurnal curve, not display. Under A, midnight-New-York appears at 04:00 (EDT) on a UTC
+   axis — which is already a named limit and is now visibly so rather than accidentally hidden.
+
+### What it forecloses
+
+**Nothing.** What it *spends* is the presenter's convenience: nobody reading the chart sees their own
+wall clock any more. That is the trade Seno took knowingly, and it is the right way round, because
+the reviewer's question is never *"what time is it here?"* — it is *"does this number match that
+event?"*, and that comparison is only possible in one zone.
+
+### How I'd defend this in review
+
+Every identifier, window bound and timestamp this system can be asked about is UTC, so a surface
+that quietly translated two of ten displays was not being friendly, it was introducing a four-hour
+discrepancy into the one chain the app is graded on being able to walk — and it did so invisibly on
+the machine it was built on.
