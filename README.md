@@ -102,6 +102,8 @@ Grouped by what the brief asks for. **If you read four things:**
   ([what's real](#2-whats-real) · [what's sketched](#3-whats-sketched-and-in-what-form) · [what's cut](#4-whats-cut))
 
 **Design notes** — [all of them](#design-notes)
+- **[The architecture, drawn](docs/ARCHITECTURE.md)** — three processes, eighteen endpoints, twelve
+  tables and one write path, as six diagrams. Start here if you want the shape before the argument
 - [The three-way split — configs, signals and levers](#the-three-way-split--configs-signals-and-levers)
 - [The storage model, and the schema](#the-storage-model-and-the-schema) → full DDL in [`docs/SCHEMA.md`](docs/SCHEMA.md)
 - [The persistence boundary](#the-persistence-boundary)
@@ -200,6 +202,9 @@ push-back, and it is deliberately not buried.
 ---
 
 ## The three surfaces
+
+**For the system's shape rather than its surfaces, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**
+— the processes, the endpoints, the write path and the simulator, drawn.
 
 The brief names three. We built two deep and sketched the third, deliberately — see
 [the scope block](#scope-what-is-real-what-is-sketched-what-is-cut) below.
@@ -1604,6 +1609,7 @@ never been shown live, only delivery going to zero and back, and this file does 
 | `docs/DECISIONS.md` | D1–D73, each with its options, what was chosen, the rationale in the human's words, its consequences, and **what it forecloses**. The index table at the top is the one-line-each view. |
 | `docs/SCOPE.md` | What is real, what is sketched, what is cut, ordered cheapest-to-reinstate-first. §2–§4 is the block copied into this file. |
 | `docs/DESIGN.md` | The data model, the DDL, the persistence boundary, late conversions end to end, the fold, the reverse join, traceability. |
+| `docs/ARCHITECTURE.md` | **The system drawn rather than described** — six Mermaid diagrams: the three processes and what crosses each boundary, the write path from event to pixel, the server by role, the store's four categories, the read path and the three layers that stop the client inventing a number, and the simulator's loop. |
 | `docs/SCHEMA.md` | The **as-built** schema, read out of the running store with `sqlite_master` — every table, every index with the query it serves, and a diff against what `DESIGN.md` designed. One table apart. |
 | `docs/SIMULATOR.md` | The mock data as a design artifact: the rate equation, diurnal and day-of-week shape, fatigue and novelty, pacing, the lag mixture, noise, injected misbehaviours, determinism, and a measured parameter appendix. |
 | `docs/MOCK_DATA.md` | The same model **measured**: the designed curves plotted against what came out of the seven-day store — diurnal, fatigue, novelty, overdispersion, pacing, the lag CDF — with every query shown. |
