@@ -165,6 +165,7 @@ constant. `apply()` is still the only writer of a projection (**D7**).
 | Five things reported as bugs from walking the demo | **Four were correct behaviour that reads as a fault on camera.** They became presenter's notes, not fixes. The fifth was the drill-down's cost, which now carries measured figures instead of a guess | `d21c032` |
 | The README's *"browser opened too late"* process finding | **Not accurate.** It was inferred from one line of a session-12 prompt; Seno was there for the build and the characterisation is his to settle. README §13 is now three findings, renumbered | `377d6e2` |
 | `DESIGN.md` argues the design and README explains the choices — both prose, no picture | A gap. Six Mermaid diagrams, all derived from source (endpoints parsed out of `index.ts`, tables from `sqlite_master`, topology from `vite.config.ts`) | **`docs/ARCHITECTURE.md`** `4a8d70d` |
+| *"the components and writings under 3 — The server, by role … is small and hard to read"* | **Real, and measurable.** That diagram's natural width is 3,582 px against GitHub's ~860 px cap, so it rendered at **scale 0.24 — 3.8 effective px**, the worst of the six by a wide margin. Seventeen nodes in five role groups do not fit one figure under the cap; **split into 3a (write) and 3b (read), both now 16 px at scale 1.00.** The pass also found the diagram drew `agree.ts → replay.ts`, a call `scripts/agree.ts` deliberately never makes — it imports nothing | `22ba219` |
 
 ### What phase 7 measured
 
@@ -186,6 +187,7 @@ a timestamp, not a constant.
 | The drill-down's cost (B71) | **7,004 ms** for 12 ads over one hour, **1,504 ms** for one — linear in **ads**, not window width |
 | The decision log's height before B69 | **4,239 px — more than half the page**, and 24 of its 25 rows were the seeded world's own `create_ad`/`launch` setup |
 | **D76 re-verified this session on a genuine UTC+4 browser** | Headless Chrome at `TZ=Asia/Dubai`, `getTimezoneOffset() = -240`, wall clock **12:37 +04 / 08:37Z**: the chart axis reads **`3:00am … 8:30am`** under a **`UTC`** label with the date `9/7/26`. Untranslated it would have read `7:00am … 12:30pm` |
+| **`ARCHITECTURE.md`'s six diagrams, rendered against mermaid 11 at an 860 px container** | Effective label size: §1 **8.9 px** · §2 **6.4 px** · §3 **3.8 px** → **16 px** after the split · §4 **10.5 px** · §5 **6.8 px** · §6 **9.2 px**. Only §3 was fixed; **§2 and §5 are the next two worth splitting** and were left alone |
 
 #### The one finding that changes how the documents should be read
 
