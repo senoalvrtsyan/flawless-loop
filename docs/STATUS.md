@@ -1324,7 +1324,7 @@ version gap is the first thing to check.
 ## Next action
 
 **THERE IS NO NEXT CHUNK. `G17` = B57+B58+B59+B60+B61+B62 closed stage 7 and phase 5.** The plan is
-69 chunks and **all 69 are ticked**. `tsc` clean, `npx vite build` clean, **172 tests**, tree clean.
+69 chunks and **all 69 are ticked**. `tsc` clean, `npx vite build` clean, **168 tests**, tree clean.
 
 **What a reviewer does:** `npm i && npm start`, then `README.md`, then `docs/DEMO.md`.
 

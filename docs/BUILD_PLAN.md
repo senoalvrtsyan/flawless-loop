@@ -428,24 +428,23 @@ remaining work is phase 6 and it is tabulated in `docs/STATUS.md` § "Phase 6 �
 
 ## 10a — Post-plan chunks
 
-**Added after the plan closed**, at Seno's request during the phase 6 wrap-up. They are numbered
-past B62 and kept in their own section so §10's *"69 of 69"* stays true of the plan as approved:
-these were never in it. Both are UI-only, and neither touches a projection, the wire, or a
-ratified constant.
+**Added after the plan closed**, at Seno's request from walking the finished product. They are
+numbered past B62 and kept in their own section so §10's *"69 of 69"* stays true of the plan as
+approved: none of these were in it. **All ten are read-side only** — not one touches a projection,
+an endpoint, a descriptor, the wire, or a ratified constant. B63–B72 are the whole of phase 7's
+code; everything else phase 7 did was documents.
 
 | ✔ | # | Chunk | Files | Verification | Owes |
 |---|---|---|---|---|---|
 | [x] | **B63** | **Expand `CTR` / `CPA` / `ROAS`** — what each stands for and the division underneath it, both visibly on the page and as a hover title on every metric label and selector button | `src/web/metrics.ts`, `Metric.tsx`, `App.tsx`, `app.css` | In the browser: hover any metric label and the selector buttons — expansion, formula, and for the three that lag the cohort caveat on a second line. The visible line under the headline figures reads all three. `METRIC_GLOSSARY` is total over `TraceMetric`, so an added metric is a compile error | **HR5** — a number you cannot name is a number you cannot walk back |
 | [x] | **B64** | **Strong separators between the page's eight sections** — a 2 px `--rule` above each `h2.section`, headings to full ink | `src/web/app.css` | In the browser: eight rules, and the two boundaries that carry meaning are legible — action console vs scenario console, and every performance number vs D34's telemetry | — |
-
 | [x] | **B65** | **Section headings at 1.2 rem with a subtitle** — the NAME scannable, the definition under it, above a 2 px rule | `App.tsx`, `app.css` | Eight headings, 12.8 px uppercase → 19.2 px | — |
 | [x] | **B66** | **D74 — delete the chart's raw/EWMA toggle.** `ewma()`, `HALF_LIFE_MS` and 4 tests go; `HALF_LIFE_MS` moves to `shared/config.ts` for the fatigue flag, which is untouched | `Chart.tsx`, `App.tsx`, `metrics.ts`, `shared/config.ts`, `server/fatigue-flag.ts`, `metrics.test.ts` **deleted** | The Series control is gone; 172 → **168 tests**, which is the four EWMA tests and expected | — |
 | [x] | **B67** | **D75 — nine prose blocks cut to their facts.** The four scoring limits are **collapsed, not deleted** | `Horizon.tsx`, `DecisionLog.tsx`, `Components.tsx`, `Timeline.tsx`, `Scenarios.tsx`, `Tail.tsx`, `Maturity.tsx`, `App.tsx`, `app.css` | Measured in the DOM: prose **5,548 → 2,253 chars (−59%)**. Every caption a decision requires is still there — D33's sample size, D67's rung and dropped ads, D34's transport heading, D65's anchor | — |
 | [x] | **B68** | **The headline figures become an even grid**, and the duplicated 66-char cohort clause becomes `lags by cohort` with the sentence kept in the hover | `app.css`, `metrics.ts`, `App.tsx` | All six figures on one row at 1500 px; ROAS no longer stranded | — |
 | [x] | **B69** | **The decision log renders its 8 most recent rows**, with `show all` | `DecisionLog.tsx` | It was **4,239 px — more than half the page** — and 24 of 25 rows were seeded `create_ad`/`launch` setup | — |
-
 | [x] | **B70** | **Two duplications on the Signal surface.** (a) At a selection of **one ad** the per-ad table is one row identical to the headline — same six numbers, each with its own drill-down — so it is suppressed; above one ad it is a comparison and stays. (b) `latestBucket()` scanned the whole store while its caption said *"newest bucket **in view**"*, so selecting `a_01` could report `a_12`'s bucket | `App.tsx`, `store.ts` | In the browser: all 12 → table, 12 rows · **1 selected → no table** · 2 selected → table, 2 rows. With `a_01` alone selected the caption now names `a_01`, frozen at the minute it was paused | — |
-
+| [x] | **B71** | **The drill-down showed the previous metric's answer while re-deriving.** Switching metric left the old verdict, counts, evidence and slices on screen under the new metric's title — the `replaying the log…` branch existed but could never fire, because the descriptor-change effect reset the rewind box and never cleared the result | `Drilldown.tsx` | **Measured on the seven-day store**: a 12-ad one-hour drill-down takes **7,004 ms**, a single-ad one **1,504 ms** — `replayIn()` is linear in **ads** over the whole log prefix, not in window width. In the browser: click impressions, then clicks — the panel clears and says what it is doing. A **rewind** dims and says `answering…` instead of blanking, because it re-asks the *same* question at another `as_of` | — |
 | [x] | **B72** | **D76 — every clock on screen reads UTC.** The chart axis (uPlot `tzDate` → `Etc/UTC`, chosen over an `axes[0].values` override so adaptive tick granularity survives) and the restatement timeline (`timeZone: 'UTC'`), both labelled `UTC` | `Chart.tsx`, `Timeline.tsx` | **Verified on a genuine UTC+4 browser** (`getTimezoneOffset() = -240`): axis reads `5:00am…5:55am` with a `UTC` label at UTC 05:58, and a timeline entry reads `Thu 3 Sept, 04:09 UTC` beside its own `learned at …Z`. Before: axis would read `9:00am`, entry `08:09` | — |
 
 > ### ▶ Demo checkpoint 7a — *"a stranger can name what they are looking at"*

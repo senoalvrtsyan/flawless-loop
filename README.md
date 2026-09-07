@@ -74,7 +74,7 @@ client on **:5173** — and prints the URL when the port is actually listening.
 |---|---|
 | `npm start` | Migrate, seed if empty, run everything, print the URL |
 | `npm run dev` | The same three processes, without the migrate/seed preflight |
-| `npm test` | `node --test` — 172 tests |
+| `npm test` | `node --test` — 168 tests |
 | `npm run agree` | Re-derive every rollup bucket from the raw log and diff it (P14) |
 | `npm run typecheck` | `tsc --noEmit`, strict |
 | `npx vite build` | Bundle the client — the check that no server module leaked into it |
