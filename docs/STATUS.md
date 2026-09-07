@@ -3,23 +3,34 @@
 Written for someone with no memory of the conversation. That someone is you. Read this plus
 `CLAUDE.md`, then the one design doc you need — do not re-read everything.
 
-**Last updated:** 2026-09-05 · **PHASE 5 CLOSED, 69 / 69 chunks · PHASE 6 (P6, packaging) IS CLOSED**
+**Last updated:** 2026-09-07 · **PHASE 5 CLOSED, 69 / 69 chunks · PHASE 6 (packaging) CLOSED ·
+PHASE 7 (post-completion hardening) CLOSED**
 
 ---
 
 ## If you are reading this cold
 
-**EVERY PHASE IS CLOSED. PHASE 6 (PACKAGING) WAS THE LAST GATE AND IT IS DONE.**
+**EVERY PHASE IS CLOSED, INCLUDING PHASE 7.** Phase 6 (packaging) was the last *planned* gate.
+**Phase 7 — post-completion hardening — came after it and is also closed**; it is the one phase no
+plan produced, because Seno walked the finished app and it is what he found. Read
+[**Phase 7**](#phase-7) below before anything else: it accounts for every commit after the phase 6
+close, and it names the one finding that changes how `MOCK_DATA.md` should be read.
 
 All 69 chunks in `docs/BUILD_PLAN.md` are ticked, all seven build stages are closed, and all fourteen
-`PHASE_PROMPTS.md` § P6 README sections plus `docs/DEMO_SCRIPT.md` are written. `tsc` clean,
-`npx vite build` clean, **168 tests**, **0 broken links** across every markdown file, tree clean.
+`PHASE_PROMPTS.md` § P6 README sections plus `docs/DEMO_SCRIPT.md` are written. **Ten further chunks,
+B63–B72, are in `BUILD_PLAN.md` §10a** — phase 7's, outside the plan's *"69 of 69"* and all
+read-side only. **D1–D76 are ratified**; nothing is open.
 
-**Phase 6 is closed, but five UI chunks landed after it** (`BUILD_PLAN.md` §10a, B63–B69) on two
-decisions taken at the same time — **D74** deleted the chart's EWMA toggle, **D75** cut the
-on-screen prose to its facts. Measured: the page is **7,463 → 5,721 px** and its text
-**21,863 → 14,631 characters**, with no mechanism, endpoint or projection touched. The test count is
-**168, not 172** — the four EWMA tests went with the toggle and that is expected.
+**Measured 2026-09-07, on `data/loop.sqlite`:** `tsc` clean · `npx vite build` clean · **168 tests,
+0 fail** · `npm run agree` **OK in 3.5 s** over 1,577,275 events → 74,509 buckets · `/api/verify`
+**200 in 11.0 s**, four projections hash-matched · tree clean. **The test count is 168, not 172** —
+D74's four EWMA tests went with the toggle they covered, and that is expected.
+
+**Phase 7 in one line:** three decisions (**D74** cut the chart's EWMA toggle, **D75** cut the
+on-screen prose to its facts, **D76** put every clock on screen in UTC), ten chunks, one new document
+(`docs/ARCHITECTURE.md`), and **four of the five things reported as bugs argued down as correct
+behaviour**. The page is **7,463 → 5,721 px** and its text **21,863 → 14,631 characters**, with no
+mechanism, endpoint or projection touched.
 
 1. **`npm start`** — migrate, seed if empty, run everything, print the URL. First run ~5m20s.
 2. **`README.md`** is the front door, ~1,600 lines, written for a reviewer. It opens with **`Run it`
@@ -35,7 +46,7 @@ on-screen prose to its facts. Measured: the page is **7,463 → 5,721 px** and i
 4. **`docs/DEMO.md`** is the tested walkthrough — eight beats, followed cold in a browser at B61,
    20–25 minutes. **`docs/DEMO_SCRIPT.md`** is the 15-minute subset plus the ten reviewer questions
    (**D72** — where the two disagree, `DEMO.md` was the one that was tested and it wins).
-5. **`docs/DECISIONS.md`**'s index table is the one-line-each view of D1–**D73**.
+5. **`docs/DECISIONS.md`**'s index table is the one-line-each view of D1–**D76**.
 
 **What to be careful about, in one list:** `data/loop.sqlite` is the seven-day store and reseeding
 it costs **5m20s and 749 MB**, so read it and use a scratch `DB_PATH` for anything that writes ·
@@ -123,6 +134,102 @@ three (`README.md`, `DECISIONS.md`, this one).
 `docs/ai-sessions/05-phase-5-Impl-13.md` landed during this session as a **5,476-line raw terminal
 export** — the state sessions 9–11 were in before B62 curated them. It should get the same treatment
 in its own pass; it was deliberately not absorbed into phase 6.
+
+---
+
+<a id="phase-7"></a>
+
+## Phase 7 — post-completion hardening — CLOSED
+
+**No plan produced this phase.** Phases 0–6 each opened with a document that said what the phase
+would do. This one opened with Seno **using the finished app** and saying what was wrong with it.
+Every item below traces to a sentence from that, not to a `BUILD_PLAN` row — which is why the chunks
+live in `BUILD_PLAN.md` **§10a**, outside the plan's *"69 of 69"*, rather than being appended to
+stage 7.
+
+**Ratified state: D1–D76, all of them.** **`BUILD_PLAN.md` §10a holds B63–B72** — ten chunks, all
+read-side only: not one touches a projection, an endpoint, a descriptor, the wire, or a ratified
+constant. `apply()` is still the only writer of a projection (**D7**).
+
+### What triggered each item, and what closed it
+
+| What Seno found by using it | What it turned out to be | Closed by |
+|---|---|---|
+| *"Does EWMA is in req list ? if not maybe remove completely?"* | A fair premise — `BRIEF.md` contains neither *"EWMA"* nor *"smoothing"*. The chart's toggle was off by default and demoed nothing; the fatigue flag's EWMA is load-bearing | **D74** `fd7aa47` → **B66** |
+| *"a lot of information … everything else is a noise"*, with the horizon caption as his example | Correct, and measurable: **25% of everything on screen was a paragraph explaining the design** | **D75** `dc6268f` → **B65–B69** `f42ece1` |
+| Acronyms on the headline figures were never expanded | **HR5** — a number you cannot name is a number you cannot walk back | **B63** `dbcc4c3` |
+| Eight surfaces told apart only by a small muted heading | Two of those boundaries are load-bearing: action vs scenario console, and performance numbers vs D34's transport telemetry | **B64** `1fa9516` |
+| At one selected ad the per-ad table repeated the headline; the *"newest bucket in view"* caption could name a different ad | **Real, both of them.** (b) was a true statement about the store and a false one about the view, on the line whose job is to say what the screen shows | **B70** `afcfc7e` |
+| The drill-down showed the previous metric's numbers under the new metric's title | **Real, and the one thing that surface exists to make impossible.** The `replaying the log…` branch existed but could never fire | **B71** `00e077d` |
+| *"the browser that i'm going to demo is in utc+4. but event are stored with utc+0"* | **Real, and invisible on the machine it was built on.** 2 of 10 surfaces rendered browser-local; 8 printed raw UTC ISO | **D76** `7ac3dd4` → **B72** `561e0be` |
+| Five things reported as bugs from walking the demo | **Four were correct behaviour that reads as a fault on camera.** They became presenter's notes, not fixes. The fifth was the drill-down's cost, which now carries measured figures instead of a guess | `d21c032` |
+| The README's *"browser opened too late"* process finding | **Not accurate.** It was inferred from one line of a session-12 prompt; Seno was there for the build and the characterisation is his to settle. README §13 is now three findings, renumbered | `377d6e2` |
+| `DESIGN.md` argues the design and README explains the choices — both prose, no picture | A gap. Six Mermaid diagrams, all derived from source (endpoints parsed out of `index.ts`, tables from `sqlite_master`, topology from `vite.config.ts`) | **`docs/ARCHITECTURE.md`** `4a8d70d` |
+
+### What phase 7 measured
+
+Everything below is a command run in this repo. **The store is `data/loop.sqlite`** unless another is
+named; the browser figures are the running app on that store.
+
+| Claim | Measured |
+|---|---|
+| `npm test` | **168 tests, 168 pass, 0 fail** in 1.0 s. The four missing against phase 5's 172 are D74's EWMA tests |
+| `npm run typecheck` · `npx vite build` | both clean; bundle 328.42 kB / 108.99 kB gzip |
+| `npm run agree` | **OK in 3,482 ms** — 1,577,275 events → 74,509 recomputed buckets, 74,509 stored, counts identical |
+| `GET /api/verify` | **200 in 11,046 ms** — `ads` 12, `config_generations` 28, `conversion_attribution` 1,333, `rollup_minute` 74,523, **all four hash-matched** |
+| D75's premise, in the DOM before deciding | **5,548 chars of explanatory prose across 20 blocks, out of 21,863 on the page** — the 25% that made it a decision rather than a preference |
+| B65–B69's effect, in the browser at 1500 px | prose **5,548 → 2,253** (−59%) · page text **21,863 → 14,631** (−33%) · height **7,463 → 5,721 px** (−23%) |
+| The drill-down's cost (B71) | **7,004 ms** for 12 ads over one hour, **1,504 ms** for one — linear in **ads**, not window width |
+| The decision log's height before B69 | **4,239 px — more than half the page**, and 24 of its 25 rows were the seeded world's own `create_ad`/`launch` setup |
+| **D76 re-verified this session on a genuine UTC+4 browser** | Headless Chrome at `TZ=Asia/Dubai`, `getTimezoneOffset() = -240`, wall clock **12:37 +04 / 08:37Z**: the chart axis reads **`3:00am … 8:30am`** under a **`UTC`** label with the date `9/7/26`. Untranslated it would have read `7:00am … 12:30pm` |
+
+#### The one finding that changes how the documents should be read
+
+**`data/loop.sqlite` is not the store phase 6 measured.** It was reseeded — `sim_run` reads
+`t0 = 2026-09-07T03:48:41Z`, `seed = 'flawless-loop'`, `backfill_days = 7` — where phase 6's store
+had a `T0` three days earlier. Same seed, same seven days, **different population**, because the
+rate model is driven by wall-clock hour and the window is censored at `T0`:
+
+| | Phase 6's store | This store |
+|---|---|---|
+| `source='backfill'` events | 1,582,985 | **1,543,095** |
+| `a_01` CTR across the week | 4.467% → 0.464% (**9.6×**) | **3.424% → 0.514%** (**6.7×**) |
+
+**The shapes hold and the counts do not.** That is the honest reading of `MOCK_DATA.md`, and it is
+stronger than the one that file currently gives: it says its measurements are *"reproducible"*
+because they are over the frozen backfill population, which is true of **that** file and not of a
+reseeding. Since `.gitignore` excludes `*.sqlite`, **a reviewer never receives this store** — they
+seed their own, at their own `T0`, and will reproduce every *shape* in `MOCK_DATA.md` and **not one
+of its row counts**. Two consequences, neither acted on in phase 7:
+
+1. `MOCK_DATA.md`'s population line and `STATUS.md` §*"What phase 6 measured"* should say
+   *"measured on the seeding of 2026-09-04"* rather than implying any seven-day store gives these
+   numbers. **This is a document change awaiting Seno's word, not a defect in the model.**
+2. The `How to run what exists` block below described this file as *"copied in at the G11 gate from
+   `/tmp/b34.sqlite`"*. That provenance is no longer true of it and has been corrected in place.
+
+Every historical figure elsewhere in this file stays as written: each is attributed to the gate that
+measured it, and a measurement is not wrong because the world moved on.
+
+### What phase 7 deliberately did NOT do
+
+- **It did not touch the simulator, the store, the wire or any projection.** The whole of its code
+  is `src/web/` plus `HALF_LIFE_MS` moving into `src/shared/config.ts` and the comment in
+  `src/server/fatigue-flag.ts` that stopped being true when the chart's smoother went. Nothing under
+  `src/sim/` changed at all, so `/api/verify` and `npm run agree` are green **by construction**, not
+  by luck.
+- **It did not reseed anything.** Every measurement above is a read. The reseed it *found* was not
+  its own.
+- **It did not act on README §13's three "differently" items.** #1 (instrument the simulator's
+  clamps) and #2 (measure the seeded distributions at build time) both need simulator work, and #3
+  (`B33a`, splitting the fault injector) is still designed, costed and unbuilt — there is no
+  `npm run faults` and no `scripts/faults.ts`. They remain regrets, correctly.
+- **It did not amend a design document to agree with a measurement.** `SIMULATOR.md` §11.2 still
+  stands as ratified, and the reseed finding above is written up rather than patched away.
+- **It did not curate `docs/ai-sessions/05-phase-5-Impl-13.md`**, still a 5,475-line raw export. It
+  was outstanding at the phase 6 close and it is outstanding now.
+- **It took no decision on its own.** D74, D75 and D76 were each ratified in their own commit, with
+  Seno's words verbatim, **before** the chunk that depended on them was built.
 
 ---
 
@@ -297,9 +404,13 @@ exports for sessions 9, 10 and 11 are now curated captures (**B62**).
 ```
 npm i                 # Node 24+ required; node -v
 npm run db:migrate    # creates data/loop.sqlite, applies both migrations
-#                     ** data/loop.sqlite ALREADY HOLDS THE SEVEN-DAY STORE ** (copied in at the
-#                     G11 gate from /tmp/b34.sqlite, Seno's call, verified: agree OK 4.0s,
-#                     /api/verify 200 12.2s). Do NOT reseed to look around — read it.
+#                     ** data/loop.sqlite ALREADY HOLDS A SEVEN-DAY STORE ** — do NOT reseed to
+#                     look around, read it. It was RESEEDED on 2026-09-07: sim_run reads
+#                     t0=2026-09-07T03:48:41Z, seed='flawless-loop', backfill_days=7. It is NOT the
+#                     store copied in at the G11 gate from /tmp/b34.sqlite, and NOT the one phase 6
+#                     measured MOCK_DATA.md against — same seed, later T0, different population
+#                     (1,543,095 backfill events here against phase 6's 1,582,985). Verified
+#                     2026-09-07: agree OK 3.5s, /api/verify 200 11.0s. See the Phase 7 section.
 npm run seed          # B15 + B34: the 12-ad world as 24 backdated decisions, THEN seven days of
                       # history — ~1.6M events. ONCE, on an empty store. **~5m20s** and ~750 MB:
                       #   249s generate · 0.3s sort · 70s write, peak RSS ~703 MB
@@ -1323,16 +1434,28 @@ version gap is the first thing to check.
 
 ## Next action
 
-**THERE IS NO NEXT CHUNK. `G17` = B57+B58+B59+B60+B61+B62 closed stage 7 and phase 5.** The plan is
-69 chunks and **all 69 are ticked**. `tsc` clean, `npx vite build` clean, **168 tests**, tree clean.
+**THERE IS NO NEXT CHUNK AND NO NEXT PHASE. `G17` = B57+B58+B59+B60+B61+B62 closed stage 7 and
+phase 5; phase 6 closed packaging; phase 7 closed post-completion hardening.** The plan is 69 chunks
+and **all 69 are ticked**, plus §10a's B63–B72. `tsc` clean, `npx vite build` clean, **168 tests**,
+tree clean.
 
 **What a reviewer does:** `npm i && npm start`, then `README.md`, then `docs/DEMO.md`.
 
-**What the NEXT SESSION does: phase 6.** Not more chunks — `BUILD_PLAN.md` is finished. The work is
-`PHASE_PROMPTS.md` § P6, and the gap against what exists is tabulated in
-[Phase 6 — the gap, precisely](#phase-6-the-gap) at the top of this file. **Two decisions come
-first** (the `DEMO_SCRIPT.md`/`DEMO.md` relationship, and how much of the new material goes inside a
-README that is already 957 lines); both are in that section, and neither is the model's to take.
+**What the next session does: nothing is owed.** The three things a session could pick up, none of
+them blocking, in the order they are worth doing:
+
+1. **`MOCK_DATA.md`'s population line**, per the [Phase 7](#phase-7) finding — the store was
+   reseeded, so its counts describe the 2026-09-04 seeding and its shapes describe the model.
+   Seno's call.
+2. **`docs/ai-sessions/05-phase-5-Impl-13.md`**, still a 5,475-line raw export. Outstanding since
+   phase 6.
+3. **`B33a`**, the fault-injector split — designed, costed at ~90 lines, unbuilt, and the only piece
+   of designed work in this repo that is neither built nor formally cut. A plan edit, so Seno's call.
+
+*(What follows is what this section said at the phase 5 close. Kept, because the phase 6 gap it
+points at is the record of what was owed and paid: two decisions came first — the
+`DEMO_SCRIPT.md`/`DEMO.md` relationship and how much material goes inside the README — and both are
+in [Phase 6](#phase-6-the-gap).)*
 
 **What stage 7 measured, all against the real seven-day store with the emitter running:**
 
