@@ -128,7 +128,6 @@ flowchart TB
     direction TB
     I["ingest.ts<br/><b>POST /api/ingest</b>"]
     D["decisions.ts<br/><b>POST /api/decisions</b>"]
-    I ~~~ D
   end
 
   subgraph F["FOLD + APPLY — the single writer"]
@@ -177,25 +176,25 @@ refuses to make, and undercut the one property that makes a second check worth h
 ### 3b — The read side, and the trace path
 
 ```mermaid
-%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 55, "diagramPadding": 4, "wrappingWidth": 400}}}%%
+%%{init: {"flowchart": {"nodeSpacing": 14, "rankSpacing": 22, "diagramPadding": 4, "wrappingWidth": 380}}}%%
 flowchart LR
   DB[("SQLite<br/>12 tables")]
 
   subgraph RD["READ — derived at read time, nothing cached"]
-    SN["<b>GET /api/snapshot</b><br/>snapshot.ts"]
-    ST["<b>GET /api/stream</b> · SSE<br/>stream.ts"]
-    SC["<b>GET /api/scores</b><br/>scoring.ts"]
-    MA["<b>/api/restatements</b> · <b>/api/fatigue</b> · <b>/api/components</b><br/>maturity.ts · restatements.ts · fatigue-flag.ts · components.ts"]
-    SW["<b>GET /api/settlement/sweep</b><br/>sweep.ts · settlement.ts"]
-    SI["<b>/api/sim/world</b> · <b>/api/sim/scenario</b><br/>sim-world.ts · sim-scenario.ts"]
-    SN ~~~ ST ~~~ SC ~~~ MA ~~~ SW ~~~ SI
+    SN["<b>/api/snapshot</b><br/>snapshot.ts"]
+    ST["<b>/api/stream</b> · SSE<br/>stream.ts"]
+    SC["<b>/api/scores</b><br/>scoring.ts"]
+    MA["<b>/api/restatements · /api/fatigue · /api/components</b><br/>maturity · restatements · fatigue-flag · components"]
+    SW["<b>/api/settlement/sweep</b><br/>sweep · settlement"]
+    SI["<b>/api/sim/world</b> · <b>/api/sim/scenario</b><br/>sim-world · sim-scenario"]
+    SN ~~~ ST ~~~ SC
+    MA ~~~ SW ~~~ SI
   end
 
   subgraph TR["TRACE — the traceability path"]
     T["<b>POST /api/trace</b><br/>trace.ts"]
-    DE["descriptor.ts — HMAC, per-process key"]
-    RP["replay.ts — re-derives from RAW"]
-    DE ~~~ RP
+    DE["descriptor.ts<br/>HMAC"]
+    RP["replay.ts<br/>from RAW"]
   end
 
   DB --> RD
@@ -219,17 +218,23 @@ the answer from raw through `replay.ts` (the only module that imports it).
 (~860 px), so a diagram wider than that is scaled down and its labels shrink with it. Rendered
 against mermaid 11 in headless Chrome at an 860 px container:
 
-| Version | Natural width | Scale | Effective label size |
+| Version | Natural size | Scale | Effective label size |
 |---|---|---|---|
-| The single `flowchart LR` this replaced | **3,582 px** | 0.24 | **3.8 px** |
-| 3a — the write side | **763 px** | **1.00** | **16 px** |
-| 3b — the read side | **641 px** | **1.00** | **16 px** |
+| The single `flowchart LR` this replaced | **3,582 × 840 px** | 0.24 | **3.8 px** |
+| 3a — the write side | **888 × 669 px** | 0.97 | **15.5 px** |
+| 3b — the read side | **770 × 647 px** | **1.00** | **16 px** |
 
 Seventeen nodes in five role groups cannot be laid out under 860 px in one figure: the best
-single-figure arrangement measured 1,061 px and 13 px. Split, both halves render at their natural
-size and nothing is scaled at all. Nothing was dropped to get there — all seventeen modules and both
-labelled check edges survive, and the endpoint paths are on the nodes rather than only in the table
-below.
+single-figure arrangement measured 1,061 px wide and 13 px. Split, both halves are **readable and
+one screen tall** — which is the second constraint, and it is not the same as the first. Width is
+what GitHub scales; **height is what makes you scroll**, and a first pass at this section fixed the
+width and left 3b 1,424 px tall, so it read at full size across two screens. Both figures are now
+under 700 px tall.
+
+Nothing was dropped to get there — all seventeen modules and both labelled check edges survive, and
+the endpoint paths are on the nodes rather than only in the table below. What changed is density:
+`READ`'s six surfaces are a 2 × 3 grid rather than a column, `WRITE`'s two entry points sit side by
+side, and the module lists lost their `.ts` where the path above already names the file.
 
 ### The endpoints, in full
 
